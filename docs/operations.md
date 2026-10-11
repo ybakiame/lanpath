@@ -22,6 +22,7 @@ Windows Build（`.github/workflows/windows-build.yaml`）支持手动测试与�
 未签名测试构建不启用该 overlay。Portable 与安装版从同一份二进制组装。
 发布任务只接受相同 commit 已成功的 Client CI；发布前以代码中的公钥实际验证两种架构的更新签名。
 Android 独立工作流经 Nix 从 Go 源码构建 AAR；CI 生成 debug APK，发版使用专用 release keystore 签名并经 apksigner 验证。
+Client CI 的 Android job 调用 Android Build 验证完整调试 APK，覆盖 Go AAR、Rust、Kotlin 和资源的集成；AAR 是 APK 的必要依赖且不入库，因此构建属于 Android Build 的职责。CI 不读取发布密钥、不创建 Release；Client Release 调用同一构建工作流生成签名正式包，通过验证后由 publish job 发布。
 release Secrets：TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD、ANDROID_KEY_BASE64、ANDROID_KEY_PASSWORD、ANDROID_KEY_ALIAS。
 keystore.properties 与 CI 临时 keystore 均不提交，任务结束清理；本地仍可构建未签名 release，再显式签名。
 测试版仅输出 `prerelease.json`，稳定版输出 `latest.json`；beta/rc 应用与 Portable 的检查更新打开发布列表，避免混入稳定自动更新通道。
