@@ -29,7 +29,7 @@ interface RuleModeSwitchProps {
  *   （对齐 desktop `ruleModeMutation` 模式）+ toast；
  * - 提示：运行中且 Clash API 开启 →「即时生效」，否则「将在下次启动生效」。
  */
-export function RuleModeSwitch({ value, running, clashApiEnabled, onError, onSuccess }: RuleModeSwitchProps) {
+export function RuleModeSwitch({ value, onError, onSuccess }: RuleModeSwitchProps) {
   const queryClient = useQueryClient();
   // 记录选中即置忙，防止快速连点交错（busy 期间禁用全部选项）。
   const [busy, setBusy] = useState(false);
