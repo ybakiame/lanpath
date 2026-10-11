@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronRightIcon } from "@heroicons/react/24/outline";
+import { ChevronRight } from "lucide-react";
 
 export interface EntryLinkItem {
   icon: ReactNode;
@@ -24,7 +24,7 @@ export function EntryLinkList({ entries }: { entries: EntryLinkItem[] }) {
               <span className="block text-sm font-medium text-foreground">{title}</span>
               <span className="block text-xs text-muted">{description}</span>
             </span>
-            <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-muted" />
+            <ChevronRight aria-hidden className="size-4 shrink-0 text-muted" />
           </button>
         </li>
       ))}

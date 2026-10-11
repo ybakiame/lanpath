@@ -1,5 +1,5 @@
 import { Chip, Card } from "@lanpath/ui";
-import { ArrowPathIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import type { CustomRuleSetView } from "@lanpath/client-core";
 
 interface CustomRuleSetCardProps {
@@ -105,7 +105,7 @@ export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdat
             aria-label={`更新规则集 ${name.trim() || tag}`}
             className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-3 text-sm text-zinc-900 dark:text-zinc-100 active:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <ArrowPathIcon className={`size-4 ${updating ? "animate-spin" : ""}`} aria-hidden="true" />
+            <RefreshCw className={`size-4 ${updating ? "animate-spin" : ""}`} aria-hidden="true" />
             {updating ? "更新中…" : "更新"}
           </button>
         )}
@@ -114,7 +114,7 @@ export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdat
           onClick={onEdit}
           className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-3 text-sm text-zinc-900 dark:text-zinc-100 active:opacity-70"
         >
-          <PencilSquareIcon className="size-4" aria-hidden="true" />
+          <SquarePen className="size-4" aria-hidden="true" />
           编辑
         </button>
         <button
@@ -122,7 +122,7 @@ export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdat
           onClick={onDelete}
           className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-3 text-sm text-red-500 active:opacity-70"
         >
-          <TrashIcon className="size-4" aria-hidden="true" />
+          <Trash2 className="size-4" aria-hidden="true" />
           删除
         </button>
       </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TrashIcon } from "@heroicons/react/24/outline";
+import { Trash2 } from "lucide-react";
 import { outboundTag } from "@lanpath/client-core";
 import type { CustomOutbound } from "@lanpath/client-core";
 import { SelectField } from "@lanpath/ui";
@@ -198,7 +198,7 @@ export function OutboundFormSheet({
         {/* 编辑模式删除入口（内置分组不可删除） */}
         {editing && !editing.builtin && (
           <Button variant="danger" className="min-h-12 w-full" onPress={() => onDeleteRequest(editing)}>
-            <TrashIcon className="size-4" aria-hidden="true" />
+            <Trash2 className="size-4" aria-hidden="true" />
             删除出站
           </Button>
         )}

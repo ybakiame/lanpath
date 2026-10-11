@@ -1,4 +1,4 @@
-import { PlayIcon, StopIcon } from "@heroicons/react/24/solid";
+import { Play, Square } from "lucide-react";
 import { Button } from "@lanpath/ui";
 import { Spinner } from "@lanpath/ui";
 
@@ -35,9 +35,9 @@ export function StartStopButton({ running, starting, stopping, canStart, onStart
       {pending ? (
         <Spinner size="sm" color="current" aria-hidden="true" />
       ) : running ? (
-        <StopIcon className="size-6" aria-hidden="true" />
+        <Square className="size-6" aria-hidden="true" />
       ) : (
-        <PlayIcon className="size-6" aria-hidden="true" />
+        <Play className="size-6" aria-hidden="true" />
       )}
       {pending ? (running ? "正在停止…" : "正在连接…") : running ? "停止代理" : "启动代理"}
     </Button>

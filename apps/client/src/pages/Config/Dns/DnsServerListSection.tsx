@@ -1,4 +1,4 @@
-import { ChevronRightIcon, PlusIcon, SignalIcon } from "@heroicons/react/24/outline";
+import { ChevronRight, Plus, Signal } from "lucide-react";
 import type { DnsServer } from "@lanpath/client-core";
 import { delayColor } from "../../../components/proxyFormat";
 import { Button, Card, Chip, Switch } from "@lanpath/ui";
@@ -64,11 +64,11 @@ export function DnsServerListSection({
             isPending={probing}
             onPress={onProbe}
           >
-            <SignalIcon className="size-4" aria-hidden="true" />
+            <Signal className="size-4" aria-hidden="true" />
             探测
           </Button>
           <Button variant="primary" className="h-11 px-4" onPress={onAdd}>
-            <PlusIcon className="size-4" aria-hidden="true" />
+            <Plus className="size-4" aria-hidden="true" />
             添加
           </Button>
         </div>
@@ -121,7 +121,7 @@ export function DnsServerListSection({
                   </button>
                   <ProbeChip server={server} probe={probe} />
                   {role ? (
-                    <ChevronRightIcon className="size-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
+                    <ChevronRight className="size-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
                   ) : (
                     <Switch
                       aria-label={`${server.enabled ? "弃用" : "启用"}服务器 ${server.tag}`}

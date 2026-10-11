@@ -1,10 +1,10 @@
-import { AdjustmentsHorizontalIcon, Cog6ToothIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
+import { SlidersHorizontal, Settings, LayoutGrid } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 export const TABS = [
-  { to: "/", label: "首页", icon: Squares2X2Icon, end: true },
-  { to: "/config", label: "配置", icon: AdjustmentsHorizontalIcon, end: false },
-  { to: "/settings", label: "设置", icon: Cog6ToothIcon, end: false },
+  { to: "/", label: "首页", icon: LayoutGrid, end: true },
+  { to: "/config", label: "配置", icon: SlidersHorizontal, end: false },
+  { to: "/settings", label: "设置", icon: Settings, end: false },
 ] as const;
 
 export function TabBar() {

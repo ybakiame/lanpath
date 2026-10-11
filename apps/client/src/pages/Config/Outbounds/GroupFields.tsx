@@ -1,4 +1,4 @@
-import { CheckIcon } from "@heroicons/react/24/outline";
+import { Check } from "lucide-react";
 import type { OutboundFormFields } from "@lanpath/client-core";
 import { SectionTitle, SelectField, SwitchRow, TextField } from "./OutboundField";
 import { DEFAULT_URLTEST_URL, type GroupFormErrors, type GroupMemberCandidate } from "@lanpath/client-core";
@@ -95,7 +95,7 @@ export function GroupFields({
                         {candidate.value}
                       </span>
                     </span>
-                    {selected && <CheckIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />}
+                    {selected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
                   </button>
                 );
               })}

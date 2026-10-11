@@ -1,4 +1,4 @@
-import { ArrowPathIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, SquarePen, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Chip, Spinner } from "@lanpath/ui";
 import type { SubscriptionView } from "@lanpath/client-core";
@@ -101,14 +101,14 @@ export function SubscriptionRow({
           {refreshing ? (
             <Spinner size="sm" color="accent" aria-hidden="true" />
           ) : (
-            <ArrowPathIcon className="size-5" aria-hidden="true" />
+            <RefreshCw className="size-5" aria-hidden="true" />
           )}
         </IconButton>
         <IconButton label={`编辑 ${sub.name}`} disabled={controlsDisabled} onPress={onEdit}>
-          <PencilSquareIcon className="size-5" aria-hidden="true" />
+          <SquarePen className="size-5" aria-hidden="true" />
         </IconButton>
         <IconButton label={`删除 ${sub.name}`} danger disabled={controlsDisabled} onPress={onDelete}>
-          <TrashIcon className="size-5" aria-hidden="true" />
+          <Trash2 className="size-5" aria-hidden="true" />
         </IconButton>
       </div>
     </div>

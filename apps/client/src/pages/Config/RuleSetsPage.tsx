@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowPathIcon, PlusIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, Plus, Sparkles } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button, Card, Chip, ConfirmDialog, Spinner } from "@lanpath/ui";
 import {
@@ -311,7 +311,7 @@ export default function RuleSetsPage() {
           {/* 顶部统一操作：添加（单一入口）+ 立即更新 */}
           <div className="flex items-center gap-2">
             <Button variant="primary" className="h-11 min-w-0 flex-1 px-4" onPress={openAdd}>
-              <PlusIcon className="size-4" aria-hidden="true" />
+              <Plus className="size-4" aria-hidden="true" />
             </Button>
             <Button
               variant="secondary"
@@ -320,14 +320,14 @@ export default function RuleSetsPage() {
               isPending={updating}
               onPress={() => void handleUpdateNow()}
             >
-              <ArrowPathIcon className="size-4" aria-hidden="true" />
+              <RefreshCw className="size-4" aria-hidden="true" />
             </Button>
             <Button
               variant="secondary"
               className="h-11 shrink-0 px-3"
               onPress={() => navigate("/config/route/rulesets/market")}
             >
-              <SparklesIcon className="size-4 pr-1" aria-hidden="true" />
+              <Sparkles className="size-4 pr-1" aria-hidden="true" />
               市场
             </Button>
             <Button

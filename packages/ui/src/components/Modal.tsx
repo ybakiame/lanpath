@@ -12,7 +12,7 @@
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import { Drawer as BaseDrawer } from "@base-ui/react/drawer";
 import type { ComponentType, ReactNode } from "react";
-import { XMarkIcon } from "../icons.tsx";
+import { X } from "../icons.tsx";
 import { IS_MOBILE } from "../platform.ts";
 import { useSheetViewport } from "./useSheetViewport";
 import { cx } from "../utils.ts";
@@ -174,7 +174,7 @@ function CloseTrigger({ className }: { className?: string }) {
         className,
       )}
     >
-      <XMarkIcon className="size-5" />
+      <X className="size-5" aria-hidden="true" />
     </ClosePart>
   );
 }

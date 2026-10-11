@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CodeBracketIcon, DocumentTextIcon, SignalIcon } from "@heroicons/react/24/outline";
+import { Code, FileText, Signal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useClientConfig } from "@lanpath/client-core";
 import { ConfigPreviewModal } from "../../components/mobile/ConfigPreviewModal";
@@ -25,19 +25,19 @@ export function DeveloperToolsCard() {
       <EntryLinkList
         entries={[
           {
-            icon: <DocumentTextIcon className="size-5" aria-hidden="true" />,
+            icon: <FileText className="size-5" aria-hidden="true" />,
             title: "日志",
             description: "查看运行与内核日志，支持导出与清空",
             onPress: () => navigate("/logs"),
           },
           {
-            icon: <SignalIcon className="size-5" aria-hidden="true" />,
+            icon: <Signal className="size-5" aria-hidden="true" />,
             title: "连通性诊断",
             description: "对目标域名分步检查 DNS / 直连 / 核心链路 / 代理出站",
             onPress: () => navigate("/settings/dev-tools/diagnose"),
           },
           {
-            icon: <CodeBracketIcon className="size-5" aria-hidden="true" />,
+            icon: <Code className="size-5" aria-hidden="true" />,
             title: "当前配置",
             description: "预览当前生效订阅合成的核心配置",
             onPress: () => setPreviewOpen(true),

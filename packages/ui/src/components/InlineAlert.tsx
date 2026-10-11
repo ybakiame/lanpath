@@ -1,10 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  CheckCircleIcon,
-  ExclamationTriangleIcon as ExclamationCircleIcon,
-  ExclamationTriangleIcon,
-  InformationCircleIcon,
-} from "../icons";
+import { CircleCheck, CircleAlert, TriangleAlert, Info } from "lucide-react";
 
 export type InlineAlertKind = "success" | "warning" | "danger" | "info";
 
@@ -16,22 +11,22 @@ interface InlineAlertProps {
   className?: string;
 }
 
-const KIND_STYLES: Record<InlineAlertKind, { wrap: string; icon: typeof InformationCircleIcon }> = {
+const KIND_STYLES: Record<InlineAlertKind, { wrap: string; icon: typeof Info }> = {
   success: {
     wrap: "bg-green-500/10 text-green-700 dark:text-green-400",
-    icon: CheckCircleIcon,
+    icon: CircleCheck,
   },
   warning: {
     wrap: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    icon: ExclamationTriangleIcon,
+    icon: TriangleAlert,
   },
   danger: {
     wrap: "bg-red-500/10 text-red-700 dark:text-red-400",
-    icon: ExclamationCircleIcon,
+    icon: CircleAlert,
   },
   info: {
     wrap: "bg-primary/10 text-primary",
-    icon: InformationCircleIcon,
+    icon: Info,
   },
 };
 

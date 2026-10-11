@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ListBulletIcon, SwatchIcon } from "@heroicons/react/24/outline";
+import { List, Palette } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button, Card, Spinner } from "@lanpath/ui";
 import {
@@ -188,13 +188,13 @@ export default function RoutePage() {
           <EntryLinkList
             entries={[
               {
-                icon: <ListBulletIcon className="size-5" aria-hidden="true" />,
+                icon: <List className="size-5" aria-hidden="true" />,
                 title: "规则管理",
                 description: "添加与管理路由规则",
                 onPress: () => navigate("/config/route/rules"),
               },
               {
-                icon: <SwatchIcon className="size-5" aria-hidden="true" />,
+                icon: <Palette className="size-5" aria-hidden="true" />,
                 title: "规则集管理",
                 description: "社区与自定义规则集管理",
                 onPress: () => navigate("/config/route/rulesets"),

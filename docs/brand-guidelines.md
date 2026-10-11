@@ -21,3 +21,10 @@
 主题与形态继续使用现有存储键；强调色单独保存为 `lanpath-ui-accent`。
 首帧脚本与 React Provider 使用相同值域及平台默认值，非法值回落默认；存储不可用时支持会话内切换。
 颜色在 `packages/ui/src/appearance.css` 中集中定义，组件使用语义令牌，外观偏好不写入核心配置。
+
+## 图标
+
+界面图标统一使用 `lucide-react` 具名导入，保留默认线性描边和语义尺寸。
+共享 UI 控件也使用同一图标库；装饰图标标记 `aria-hidden`，独立图标按钮提供可访问名称。
+品牌图标继续使用正式品牌资产，不用通用图标替代。
+参照 [Lucide React 官方指南](https://lucide.dev/guide/react/)，不再引入 Heroicons 或复制其 SVG 路径。

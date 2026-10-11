@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowPathIcon, ArrowUpTrayIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, Upload, Trash2 } from "lucide-react";
 import { InlineAlert, IS_MOBILE, SelectField } from "@lanpath/ui";
 import RuntimeLogs from "./RuntimeLogs";
 import { Button, Card, ConfirmDialog, Spinner } from "@lanpath/ui";
@@ -140,7 +140,7 @@ export default function Logs() {
           className="size-11"
           onPress={() => void handleRefresh()}
         >
-          {!refreshing && <ArrowPathIcon className="size-5" aria-hidden="true" />}
+          {!refreshing && <RefreshCw className="size-5" aria-hidden="true" />}
         </Button>
       }
     >
@@ -207,11 +207,11 @@ export default function Logs() {
               isPending={exporting}
               onPress={() => void handleExport()}
             >
-              {!exporting && <ArrowUpTrayIcon className="size-4" aria-hidden="true" />}
+              {!exporting && <Upload className="size-4" aria-hidden="true" />}
               导出日志
             </Button>
             <Button variant="tertiary" className="min-h-11 flex-1" onPress={() => setPendingClear(true)}>
-              <TrashIcon className="size-4" aria-hidden="true" />
+              <Trash2 className="size-4" aria-hidden="true" />
               清空
             </Button>
           </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TrashIcon } from "@heroicons/react/24/outline";
+import { Trash2 } from "lucide-react";
 import type { DnsServer, DnsServerType } from "@lanpath/client-core";
 import { SelectField } from "@lanpath/ui";
 import { BottomSheet, Button, inputClassName } from "@lanpath/ui";
@@ -304,7 +304,7 @@ export function DnsServerFormSheet({
         {/* 编辑模式删除入口 */}
         {editing && (
           <Button variant="danger" className="min-h-12 w-full" onPress={() => onDeleteRequest(editing)}>
-            <TrashIcon className="size-4" aria-hidden="true" />
+            <Trash2 className="size-4" aria-hidden="true" />
             删除服务器
           </Button>
         )}

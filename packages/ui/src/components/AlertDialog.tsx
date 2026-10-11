@@ -12,7 +12,7 @@
  */
 import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog";
 import type { ReactNode } from "react";
-import { CheckCircleIcon, ExclamationTriangleIcon, InformationCircleIcon } from "../icons.tsx";
+import { CircleCheck, TriangleAlert, Info } from "../icons.tsx";
 import { cx } from "../utils.ts";
 import { Button } from "./Button.tsx";
 
@@ -46,9 +46,9 @@ const ICON_COLORS: Record<AlertDialogStatus, string> = {
 };
 
 function statusIcon(status: AlertDialogStatus) {
-  if (status === "warning" || status === "danger") return <ExclamationTriangleIcon className="size-5" />;
-  if (status === "success") return <CheckCircleIcon className="size-5" />;
-  return <InformationCircleIcon className="size-5" />;
+  if (status === "warning" || status === "danger") return <TriangleAlert className="size-5" aria-hidden="true" />;
+  if (status === "success") return <CircleCheck className="size-5" aria-hidden="true" />;
+  return <Info className="size-5" aria-hidden="true" />;
 }
 
 function Backdrop({ isOpen, onOpenChange, children }: AlertDialogBackdropProps) {

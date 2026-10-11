@@ -31,15 +31,8 @@ export {
 export { BottomSheet, Modal, type BottomSheetProps, type ModalBackdropProps } from "./components/Modal.tsx";
 export { ListBox, Select, type ListBoxItemProps, type SelectRootProps } from "./components/Select.tsx";
 
-// 共享图标（Heroicons outline 内联）
-export {
-  CheckCircleIcon,
-  CheckIcon,
-  ChevronUpDownIcon,
-  ExclamationTriangleIcon,
-  InformationCircleIcon,
-  XMarkIcon,
-} from "./icons.tsx";
+// 共享图标（Lucide）
+export { CircleCheck, Check, ChevronsUpDown, TriangleAlert, Info, X } from "./icons.tsx";
 
 export { Checkbox } from "./components/Checkbox";
 export { Radio, RadioGroup } from "./components/Radio";

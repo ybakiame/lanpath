@@ -1,11 +1,5 @@
 import { useState } from "react";
-import {
-  CheckCircleIcon,
-  ExclamationCircleIcon,
-  InformationCircleIcon,
-  MinusCircleIcon,
-  PlayIcon,
-} from "@heroicons/react/24/outline";
+import { CircleCheck, CircleAlert, Info, CircleMinus, Play } from "lucide-react";
 import { diagnoseConnectivityRun, toErrorMessage, toastError } from "@lanpath/client-core";
 import type { DiagReport, DiagStatus } from "@lanpath/client-core";
 import { SubPageShell } from "../../components/PageShell";
@@ -25,13 +19,13 @@ function StatusIcon({ status }: { status: DiagStatus }) {
   const className = "size-5 shrink-0";
   switch (status) {
     case "ok":
-      return <CheckCircleIcon className={`${className} text-green-500`} aria-hidden="true" />;
+      return <CircleCheck className={`${className} text-green-500`} aria-hidden="true" />;
     case "fail":
-      return <ExclamationCircleIcon className={`${className} text-red-500`} aria-hidden="true" />;
+      return <CircleAlert className={`${className} text-red-500`} aria-hidden="true" />;
     case "info":
-      return <InformationCircleIcon className={`${className} text-primary`} aria-hidden="true" />;
+      return <Info className={`${className} text-primary`} aria-hidden="true" />;
     default:
-      return <MinusCircleIcon className={`${className} text-zinc-400`} aria-hidden="true" />;
+      return <CircleMinus className={`${className} text-zinc-400`} aria-hidden="true" />;
   }
 }
 
@@ -93,7 +87,7 @@ export default function DiagnosePage() {
             isPending={running}
             onPress={() => void handleRun()}
           >
-            <PlayIcon className="size-4" aria-hidden="true" />
+            <Play className="size-4" aria-hidden="true" />
             {running ? "诊断中…" : "开始诊断"}
           </Button>
         </Card.Content>

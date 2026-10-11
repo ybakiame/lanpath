@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckIcon, ChevronDownIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { Check, ChevronDown, Trash2 } from "lucide-react";
 import type { LocalRuleInput, LocalRuleView } from "@lanpath/client-core";
 import {
   RULE_ACTIONS,
@@ -275,7 +275,7 @@ export function RuleEditSheet({
                             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{opt.hint}</span>
                           )}
                         </span>
-                        {selected && <CheckIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />}
+                        {selected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
                       </button>
                     );
                   })}
@@ -380,7 +380,7 @@ export function RuleEditSheet({
               className="flex min-h-11 w-full items-center justify-between gap-2 text-left"
             >
               <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">高级选项</span>
-              <ChevronDownIcon
+              <ChevronDown
                 aria-hidden="true"
                 className={`size-5 text-zinc-500 dark:text-zinc-400 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
               />
@@ -436,7 +436,7 @@ export function RuleEditSheet({
             isDisabled={saving}
             onPress={() => onDeleteRequest(editing)}
           >
-            <TrashIcon className="size-4" aria-hidden="true" />
+            <Trash2 className="size-4" aria-hidden="true" />
             删除规则
           </Button>
         )}

@@ -1,4 +1,4 @@
-import { BellAlertIcon, CodeBracketIcon, GlobeAltIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import { BellRing, Code, Globe, Info } from "lucide-react";
 import { IS_MOBILE } from "@lanpath/ui";
 import DesktopSettingsSections from "./desktop/DesktopSettingsSections";
 import { useNavigate } from "react-router-dom";
@@ -34,25 +34,25 @@ export default function Settings() {
         <EntryLinkList
           entries={[
             {
-              icon: <BellAlertIcon className="size-5" aria-hidden="true" />,
+              icon: <BellRing className="size-5" aria-hidden="true" />,
               title: "VPN 通知",
               description: "通知栏显示流量与节点选择",
               onPress: () => navigate("/settings/vpn-notify"),
             },
             {
-              icon: <GlobeAltIcon className="size-5" aria-hidden="true" />,
+              icon: <Globe className="size-5" aria-hidden="true" />,
               title: "GitHub 访问",
               description: "代理前缀加速",
               onPress: () => navigate("/settings/github"),
             },
             {
-              icon: <CodeBracketIcon className="size-5" aria-hidden="true" />,
+              icon: <Code className="size-5" aria-hidden="true" />,
               title: "开发者工具",
               description: "日志与当前配置",
               onPress: () => navigate("/settings/dev-tools"),
             },
             {
-              icon: <InformationCircleIcon className="size-5" aria-hidden="true" />,
+              icon: <Info className="size-5" aria-hidden="true" />,
               title: "关于",
               description: "应用与核心信息",
               onPress: () => navigate("/settings/about"),

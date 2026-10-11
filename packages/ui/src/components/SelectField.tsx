@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckIcon, ChevronUpDownIcon as ChevronDownIcon } from "../icons";
+import { Check, ChevronDown } from "lucide-react";
 import { IS_MOBILE } from "../platform";
 import { Select, ListBox } from "./Select";
 import { BottomSheet } from "./Modal";
@@ -31,7 +31,7 @@ interface SelectFieldProps {
  *
  * - 触发器：对齐输入框行高（`min-h-12`），显示当前选中 label + chevron-down；
  * - 点击打开 `BottomSheet` 底部弹层（`max-h-[62vh]` 滚动），列表行 `min-h-12`，
- *   选中态高亮 + CheckIcon，点击行选中并关闭；
+ *   选中态高亮 + Check，点击行选中并关闭；
  * - 无选项或 `disabled` 时触发器禁用；空选项弹层内展示空态；
  * - 可访问性：触发器 `aria-haspopup="dialog"`/`aria-expanded`，列表行按钮
  *   `aria-pressed` 标记选中态。
@@ -62,7 +62,7 @@ function SheetPicker({ label, options, value, onChange, placeholder = "请选择
         >
           {selected ? selected.label : placeholder}
         </span>
-        <ChevronDownIcon className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
+        <ChevronDown className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
       </button>
 
       <BottomSheet opened={open} onClose={() => setOpen(false)} title={label}>
@@ -92,7 +92,7 @@ function SheetPicker({ label, options, value, onChange, placeholder = "请选择
                       <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{opt.description}</span>
                     )}
                   </span>
-                  {isSelected && <CheckIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />}
+                  {isSelected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
                 </button>
               );
             })

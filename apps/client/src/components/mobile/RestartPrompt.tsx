@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { RefreshCw } from "lucide-react";
 import {
   PROXY_STATUS_KEY,
   proxyStatus,
@@ -123,7 +123,7 @@ export function RestartPrompt() {
           className="fixed right-4 z-20 flex h-11 items-center gap-1.5 rounded-full bg-amber-500 px-4 text-sm font-medium text-black shadow-lg shadow-black/25 active:opacity-80"
           style={{ bottom: "calc(10.5rem + env(safe-area-inset-bottom))" }}
         >
-          <ArrowPathIcon className="size-5" aria-hidden="true" />
+          <RefreshCw className="size-5" aria-hidden="true" />
           配置待重启
         </button>
       )}

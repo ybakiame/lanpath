@@ -1,4 +1,4 @@
-import { MagnifyingGlassIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { Search, Sparkles } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button, Card, Spinner, inputClassName } from "@lanpath/ui";
 import { META_CUBE_SOURCE, useRuleSetMarket } from "@lanpath/client-core";
@@ -76,7 +76,7 @@ export default function RuleSetMarket() {
           <Card>
             <Card.Content className="flex flex-col gap-2 p-4">
               <div className="flex items-center gap-2">
-                <SparklesIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                <Sparkles className="size-5 shrink-0 text-primary" aria-hidden="true" />
                 <span className="min-w-0 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
                   {META_CUBE_SOURCE.name}
                 </span>
@@ -90,7 +90,7 @@ export default function RuleSetMarket() {
 
           {/* 检索框 */}
           <div className="relative">
-            <MagnifyingGlassIcon
+            <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 dark:text-zinc-400"
               aria-hidden="true"
             />

@@ -1,4 +1,4 @@
-import { GlobeAltIcon, HomeModernIcon, Square2StackIcon } from "@heroicons/react/24/outline";
+import { Globe, House, Copy } from "lucide-react";
 import { DNS_SERVER_PRESETS } from "@lanpath/client-core";
 import type { DnsServer, DnsServerPreset } from "@lanpath/client-core";
 import { BottomSheet, Chip } from "@lanpath/ui";
@@ -10,10 +10,10 @@ import {
   dnsServerTypeLabel,
 } from "@lanpath/client-core";
 
-const GROUP_META: Record<DnsServerPreset["group"], { label: string; icon: typeof HomeModernIcon }> = {
-  builtin: { label: "内置默认", icon: Square2StackIcon },
-  cn: { label: "境内常用", icon: HomeModernIcon },
-  global: { label: "境外常用", icon: GlobeAltIcon },
+const GROUP_META: Record<DnsServerPreset["group"], { label: string; icon: typeof House }> = {
+  builtin: { label: "内置默认", icon: Copy },
+  cn: { label: "境内常用", icon: House },
+  global: { label: "境外常用", icon: Globe },
 };
 
 interface DnsRolePickerSheetProps {

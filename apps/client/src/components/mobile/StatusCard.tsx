@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SignalIcon } from "@heroicons/react/24/outline";
+import { Signal } from "lucide-react";
 import { RULE_MODE_LABELS } from "../ruleModes";
 
 interface StatusCardProps {
@@ -16,7 +16,7 @@ export function StatusCard({ running, ruleMode, missingRuleSets = [], action }: 
       <div className="flex items-center justify-between gap-3">
         <span className="lanpath-hero-muted text-sm">连接状态</span>
         <span className="lanpath-hero-muted flex items-center gap-2 text-xs">
-          <SignalIcon className="size-4" aria-hidden="true" />
+          <Signal className="size-4" aria-hidden="true" />
           {RULE_MODE_LABELS[ruleMode] ?? ruleMode}
         </span>
       </div>

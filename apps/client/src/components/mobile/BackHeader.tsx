@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navbar, Button } from "@lanpath/ui";
-import { ChevronLeftIcon } from "@heroicons/react/24/outline";
+import { ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 interface BackHeaderProps {
@@ -18,7 +18,7 @@ interface BackHeaderProps {
   backTo?: string;
 }
 
-/** 二级页返回栏，@lanpath/ui Navbar 负责安全区与 iOS/Material 呈现。 */
+/** 二级页返回栏，@lanpath/ui Navbar 负责安全区与移动端呈现。 */
 export function BackHeader({ title, action, backTo }: BackHeaderProps) {
   const navigate = useNavigate();
   return (
@@ -31,7 +31,7 @@ export function BackHeader({ title, action, backTo }: BackHeaderProps) {
           aria-label="返回"
           onPress={() => (backTo ? navigate(backTo, { replace: true }) : navigate(-1))}
         >
-          <ChevronLeftIcon className="size-6" />
+          <ChevronLeft className="size-6" />
         </Button>
       }
       right={action}

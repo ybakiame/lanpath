@@ -1,13 +1,6 @@
 import { PageShell } from "../../components/PageShell";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowsRightLeftIcon,
-  BeakerIcon,
-  ChevronRightIcon,
-  GlobeAltIcon,
-  MapIcon,
-  WifiIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowRightLeft, FlaskConical, ChevronRight, Globe, Map, Wifi } from "lucide-react";
 import { IS_MOBILE } from "@lanpath/ui";
 import type { ComponentType, SVGProps } from "react";
 
@@ -34,31 +27,31 @@ interface ConfigEntry {
 const CONFIG_ENTRIES: ConfigEntry[] = [
   {
     to: "/config/dns",
-    icon: GlobeAltIcon,
+    icon: Globe,
     title: "DNS 管理",
     description: "DNS 服务器、分流规则与 FakeIP",
   },
   {
     to: "/config/outbounds",
-    icon: ArrowsRightLeftIcon,
+    icon: ArrowRightLeft,
     title: "出站管理",
     description: "自定义代理节点与分组（内置 proxy / auto 可编辑）",
   },
   {
     to: "/config/route",
-    icon: MapIcon,
+    icon: Map,
     title: "路由管理",
     description: "默认出站与默认域名解析器",
   },
   {
     to: "/config/inbounds",
-    icon: WifiIcon,
+    icon: Wifi,
     title: "入站管理",
     description: "Inbounds 中的混合端口与 TUN 参数",
   },
   {
     to: "/config/experimental",
-    icon: BeakerIcon,
+    icon: FlaskConical,
     title: "Experimental",
     description: "实验性配置（Clash API 与缓存）",
   },
@@ -101,7 +94,7 @@ export default function Config() {
                 <span className="text-sm font-medium text-foreground">{entry.title}</span>
                 <span className="text-xs text-muted">{entry.description}</span>
               </span>
-              <ChevronRightIcon
+              <ChevronRight
                 className={IS_MOBILE ? "size-4 self-end text-muted" : "size-4 shrink-0 text-muted"}
                 aria-hidden="true"
               />

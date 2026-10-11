@@ -1,11 +1,5 @@
 import { Card } from "@lanpath/ui";
-import {
-  AdjustmentsHorizontalIcon,
-  ArrowPathIcon,
-  DocumentTextIcon,
-  ShieldCheckIcon,
-  WrenchScrewdriverIcon,
-} from "@heroicons/react/24/outline";
+import { SlidersHorizontal, RefreshCw, FileText, ShieldCheck, Wrench } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useCapabilities } from "@lanpath/client-core";
 
@@ -59,7 +53,7 @@ export default function Tools() {
           <ToolCard
             title="连接"
             description="查看当前活跃连接与已关闭连接记录"
-            icon={ArrowPathIcon}
+            icon={RefreshCw}
             onPress={() => navigate("/connections")}
           />
         )}
@@ -67,7 +61,7 @@ export default function Tools() {
           <ToolCard
             title="规则"
             description="本地规则卡片与规则集管理（路由管理下）"
-            icon={ShieldCheckIcon}
+            icon={ShieldCheck}
             onPress={() => navigate("/config/route/rules")}
           />
         )}
@@ -75,7 +69,7 @@ export default function Tools() {
           <ToolCard
             title="脚本"
             description="远程脚本 / 配置片段订阅、定时任务调度与三方配置导入"
-            icon={WrenchScrewdriverIcon}
+            icon={Wrench}
             onPress={() => navigate("/scripts")}
           />
         )}
@@ -83,7 +77,7 @@ export default function Tools() {
           <ToolCard
             title="覆写"
             description="按核心类型维护覆写模板，在订阅页关联后随订阅生效"
-            icon={AdjustmentsHorizontalIcon}
+            icon={SlidersHorizontal}
             onPress={() => navigate("/override")}
           />
         )}
@@ -91,7 +85,7 @@ export default function Tools() {
           <ToolCard
             title="日志"
             description="后端与前端错误日志（内存环形缓冲，最新在前）"
-            icon={DocumentTextIcon}
+            icon={FileText}
             onPress={() => navigate("/logs")}
           />
         )}

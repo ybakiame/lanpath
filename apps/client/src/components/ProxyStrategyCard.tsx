@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Card, Chip } from "@lanpath/ui";
-import { ChevronRightIcon } from "@heroicons/react/24/outline";
+import { ChevronRight } from "lucide-react";
 import { PROXIES_KEY, proxiesList, useClientConfig, useProxyStatus } from "@lanpath/client-core";
 import type { ProxyList } from "@lanpath/client-core";
 import { buildNodeMap, delayColor, delayText, mainProxyGroup } from "./proxyFormat";
@@ -86,7 +86,7 @@ export function ProxyStrategyCard({ running, subscriptionName }: ProxyStrategyCa
             <Chip color={delayColor(node?.delay_ms)} className="shrink-0">
               {delayText(node?.delay_ms)}
             </Chip>
-            <ChevronRightIcon className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
+            <ChevronRight className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
           </>
         ) : (
           <>
@@ -102,7 +102,7 @@ export function ProxyStrategyCard({ running, subscriptionName }: ProxyStrategyCa
                       : "暂无节点数据"}
               </span>
             </span>
-            <ChevronRightIcon className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
+            <ChevronRight className="size-5 shrink-0 text-zinc-400" aria-hidden="true" />
           </>
         )}
       </button>

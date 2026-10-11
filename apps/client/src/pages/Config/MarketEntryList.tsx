@@ -1,4 +1,4 @@
-import { CheckIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { Check, Plus } from "lucide-react";
 import { Button, Card, Chip } from "@lanpath/ui";
 import type { MetaCubeEntry } from "@lanpath/client-core";
 
@@ -31,7 +31,7 @@ export function MarketEntryList({ entries, addedUrls, addingKey, onAdd }: Market
               </div>
               {added ? (
                 <Button variant="tertiary" isDisabled className="min-h-11 shrink-0 px-3">
-                  <CheckIcon className="size-4" aria-hidden="true" />
+                  <Check className="size-4" aria-hidden="true" />
                   已添加
                 </Button>
               ) : (
@@ -42,7 +42,7 @@ export function MarketEntryList({ entries, addedUrls, addingKey, onAdd }: Market
                   isPending={pending}
                   onPress={() => onAdd(entry)}
                 >
-                  {!pending && <PlusIcon className="size-4" aria-hidden="true" />}
+                  {!pending && <Plus className="size-4" aria-hidden="true" />}
                   添加
                 </Button>
               )}

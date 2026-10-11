@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Segmented, SegmentedButton, IS_MOBILE, InlineAlert } from "@lanpath/ui";
-import { BarsArrowDownIcon, BarsArrowUpIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Trash2 } from "lucide-react";
 import { Button, Card, ConfirmDialog, Spinner, inputClassName } from "@lanpath/ui";
 import {
   STATS_TODAY_KEY,
@@ -177,7 +177,7 @@ export default function Stats() {
           className="size-11"
           onPress={() => setPendingClear(true)}
         >
-          {!clearing && <TrashIcon className="size-5" aria-hidden="true" />}
+          {!clearing && <Trash2 className="size-5" aria-hidden="true" />}
         </Button>
       }
     >
@@ -254,9 +254,9 @@ export default function Stats() {
             onPress={() => setDesc((prev) => !prev)}
           >
             {desc ? (
-              <BarsArrowDownIcon className="size-5" aria-hidden="true" />
+              <ArrowDownWideNarrow className="size-5" aria-hidden="true" />
             ) : (
-              <BarsArrowUpIcon className="size-5" aria-hidden="true" />
+              <ArrowUpNarrowWide className="size-5" aria-hidden="true" />
             )}
             {desc ? "降序" : "升序"}
           </Button>

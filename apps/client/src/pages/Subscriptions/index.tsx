@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, Plus } from "lucide-react";
 import { Button, Card, Spinner, IS_MOBILE } from "@lanpath/ui";
 import {
   CONFIG_KEY,
@@ -213,7 +213,7 @@ export default function Subscriptions() {
       title="订阅管理"
       action={
         <Button variant="tertiary" className="h-11 shrink-0 px-2 font-semibold" onPress={openAdd}>
-          <PlusIcon className="size-5" aria-hidden="true" />
+          <Plus className="size-5" aria-hidden="true" />
           添加
         </Button>
       }
@@ -261,7 +261,7 @@ export default function Subscriptions() {
               onClick={() => void handleRefreshAll()}
               className="flex size-11 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-opacity active:opacity-70 disabled:cursor-default disabled:opacity-40 dark:text-zinc-400"
             >
-              <ArrowPathIcon className={`size-5 ${refreshingAll ? "animate-spin" : ""}`} aria-hidden="true" />
+              <RefreshCw className={`size-5 ${refreshingAll ? "animate-spin" : ""}`} aria-hidden="true" />
             </button>
           </div>
           {IS_MOBILE ? (

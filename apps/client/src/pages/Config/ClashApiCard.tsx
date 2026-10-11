@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowPathIcon, Square2StackIcon } from "@heroicons/react/24/outline";
+import { RefreshCw, Copy } from "lucide-react";
 import { Button, Card } from "@lanpath/ui";
 import { toastError, toastSuccess, toErrorMessage } from "@lanpath/client-core";
 import { SettingsInput, settingsInputClass, settingsLabelClass } from "../Settings/fields";
@@ -81,7 +81,7 @@ export function ClashApiCard({ settings }: ClashApiCardProps) {
               aria-label="复制密钥"
               onPress={() => void handleCopySecret()}
             >
-              <Square2StackIcon className={copied ? "size-5 text-green-500" : "size-5"} aria-hidden="true" />
+              <Copy className={copied ? "size-5 text-green-500" : "size-5"} aria-hidden="true" />
             </Button>
             <Button
               variant="secondary"
@@ -89,7 +89,7 @@ export function ClashApiCard({ settings }: ClashApiCardProps) {
               isDisabled={!settings.ready}
               onPress={settings.onGenerateClashApiSecret}
             >
-              <ArrowPathIcon className="size-4" aria-hidden="true" />
+              <RefreshCw className="size-4" aria-hidden="true" />
             </Button>
           </div>
           {settings.clashApiSecretError ?? (

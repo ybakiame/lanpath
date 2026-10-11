@@ -1,4 +1,4 @@
-import { ComputerDesktopIcon, MoonIcon, SunIcon } from "@heroicons/react/24/outline";
+import { Monitor, Moon, Sun } from "lucide-react";
 import { Segmented, SegmentedButton, IS_MOBILE } from "@lanpath/ui";
 import { Card } from "@lanpath/ui";
 import { useThemePreference } from "../../theme";
@@ -6,10 +6,10 @@ import type { ThemePreference, UiStylePreference } from "../../theme";
 import { ACCENT_OPTIONS } from "../../appearance";
 
 /** 主题选项（顺序即展示顺序；跟随系统为无记录时的默认值）。 */
-const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof SunIcon }[] = [
-  { value: "system", label: "跟随系统", icon: ComputerDesktopIcon },
-  { value: "light", label: "浅色", icon: SunIcon },
-  { value: "dark", label: "深色", icon: MoonIcon },
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
+  { value: "system", label: "跟随系统", icon: Monitor },
+  { value: "light", label: "浅色", icon: Sun },
+  { value: "dark", label: "深色", icon: Moon },
 ];
 
 /** UI 风格选项（@lanpath/ui 双主题；iOS 为无记录时的默认值）。 */

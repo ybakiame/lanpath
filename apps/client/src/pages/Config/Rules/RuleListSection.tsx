@@ -1,4 +1,4 @@
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowDown, ArrowUp, Plus } from "lucide-react";
 import { Button, DataList, Switch, type DataListColumn } from "@lanpath/ui";
 import { actionLabel, ruleSummary, type LocalRuleView } from "@lanpath/client-core";
 import { RuleCard } from "./RuleCard";
@@ -54,7 +54,7 @@ export function RuleListSection({ rules, onToggle, onMove, onEdit, onAdd }: Prop
             isDisabled={index === 0}
             onPress={() => onMove(index, -1)}
           >
-            <ArrowUpIcon className="size-4" />
+            <ArrowUp className="size-4" />
           </Button>
           <Button
             variant="ghost"
@@ -64,7 +64,7 @@ export function RuleListSection({ rules, onToggle, onMove, onEdit, onAdd }: Prop
             isDisabled={index === rules.length - 1}
             onPress={() => onMove(index, 1)}
           >
-            <ArrowDownIcon className="size-4" />
+            <ArrowDown className="size-4" />
           </Button>
         </div>
       ),
@@ -75,7 +75,7 @@ export function RuleListSection({ rules, onToggle, onMove, onEdit, onAdd }: Prop
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">启用的规则会注入启动配置；自上而下顺序匹配</p>
         <Button onPress={onAdd} size="sm">
-          <PlusIcon className="size-4" />
+          <Plus className="size-4" />
           添加规则
         </Button>
       </div>

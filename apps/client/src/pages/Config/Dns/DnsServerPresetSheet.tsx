@@ -1,4 +1,4 @@
-import { GlobeAltIcon, HomeModernIcon, PencilSquareIcon, Square2StackIcon } from "@heroicons/react/24/outline";
+import { Globe, House, SquarePen, Copy } from "lucide-react";
 import type { DnsServerPreset } from "@lanpath/client-core";
 import { DNS_SERVER_PRESETS } from "@lanpath/client-core";
 import { BottomSheet, Button } from "@lanpath/ui";
@@ -23,10 +23,10 @@ interface DnsServerPresetSheetProps {
  * 「已添加」仍可重复点选（自动得 `-2` 序号 tag）。
  */
 export function DnsServerPresetSheet({ isOpen, existingTags, onClose, onPick, onCustom }: DnsServerPresetSheetProps) {
-  const groups: { key: DnsServerPreset["group"]; label: string; icon: typeof HomeModernIcon }[] = [
-    { key: "builtin", label: "内置默认", icon: Square2StackIcon },
-    { key: "cn", label: "境内常用", icon: HomeModernIcon },
-    { key: "global", label: "境外常用", icon: GlobeAltIcon },
+  const groups: { key: DnsServerPreset["group"]; label: string; icon: typeof House }[] = [
+    { key: "builtin", label: "内置默认", icon: Copy },
+    { key: "cn", label: "境内常用", icon: House },
+    { key: "global", label: "境外常用", icon: Globe },
   ];
 
   return (
@@ -70,7 +70,7 @@ export function DnsServerPresetSheet({ isOpen, existingTags, onClose, onPick, on
         ))}
 
         <Button variant="secondary" className="min-h-12 w-full gap-1.5" onPress={onCustom}>
-          <PencilSquareIcon className="size-4" aria-hidden="true" />
+          <SquarePen className="size-4" aria-hidden="true" />
           自定义添加
         </Button>
       </div>

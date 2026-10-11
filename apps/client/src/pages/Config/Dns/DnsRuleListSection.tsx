@@ -1,4 +1,4 @@
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { Plus } from "lucide-react";
 import { Button, Card, Switch } from "@lanpath/ui";
 import type { DnsRule } from "@lanpath/client-core";
 import { dnsRuleSummary } from "@lanpath/client-core";
@@ -25,7 +25,7 @@ export function DnsRuleListSection({ rules, onToggle, onEdit, onAdd }: DnsRuleLi
           <span className="text-xs text-zinc-500 dark:text-zinc-400">自上而下匹配，命中后使用指定服务器解析</span>
         </div>
         <Button variant="primary" className="h-11 shrink-0 px-4" onPress={onAdd}>
-          <PlusIcon className="size-4" aria-hidden="true" />
+          <Plus className="size-4" aria-hidden="true" />
           添加规则
         </Button>
       </div>

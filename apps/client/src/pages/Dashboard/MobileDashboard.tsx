@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ChevronDownIcon } from "@heroicons/react/24/outline";
+import { ChevronDown } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button } from "@lanpath/ui";
 import {
@@ -157,7 +157,7 @@ export default function Dashboard() {
             <span className="truncate">
               {activeSub ? `${activeSub.name} · ${activeSub.node_count} 节点` : "请选择订阅"}
             </span>
-            <ChevronDownIcon className="size-4 shrink-0 text-zinc-400" aria-hidden="true" />
+            <ChevronDown className="size-4 shrink-0 text-zinc-400" aria-hidden="true" />
           </span>
         </Button>
         {!running && !canStart && <p className="text-xs text-muted">请先选择要使用的订阅</p>}

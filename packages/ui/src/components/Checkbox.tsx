@@ -1,6 +1,6 @@
 import { Checkbox as BaseCheckbox } from "@base-ui/react/checkbox";
 import { createContext, useContext, type ReactNode } from "react";
-import { CheckIcon } from "../icons";
+import { Check } from "../icons";
 import { cx } from "../utils";
 
 interface CheckboxProps {
@@ -47,7 +47,7 @@ function Control({ children, className }: { children?: ReactNode; className?: st
 function Indicator() {
   return (
     <BaseCheckbox.Indicator>
-      <CheckIcon className="size-4" />
+      <Check className="size-4" aria-hidden="true" />
     </BaseCheckbox.Indicator>
   );
 }

@@ -1,7 +1,7 @@
 /** 桌面复合下拉接口；跨平台表单使用 SelectField（dropdown / Drawer picker）。 */
 import { Select as BaseSelect } from "@base-ui/react/select";
 import { Children, isValidElement, createContext, useContext, type ReactNode } from "react";
-import { CheckIcon, ChevronUpDownIcon } from "../icons.tsx";
+import { Check, ChevronsUpDown } from "../icons.tsx";
 import { cx } from "../utils.ts";
 
 interface SelectContextValue {
@@ -90,7 +90,7 @@ function Value({ className }: { className?: string }) {
 function Indicator({ className }: { className?: string }) {
   return (
     <BaseSelect.Icon className={cx("flex shrink-0 text-muted", className)}>
-      <ChevronUpDownIcon className="size-4" />
+      <ChevronsUpDown className="size-4" aria-hidden="true" />
     </BaseSelect.Icon>
   );
 }
@@ -146,7 +146,7 @@ function ListBoxItem({ id, textValue, isDisabled = false, className, children }:
     >
       <BaseSelect.ItemText className="truncate">{children}</BaseSelect.ItemText>
       <BaseSelect.ItemIndicator className="flex shrink-0 text-accent">
-        <CheckIcon className="size-4" />
+        <Check className="size-4" aria-hidden="true" />
       </BaseSelect.ItemIndicator>
     </BaseSelect.Item>
   );

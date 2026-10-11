@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button, IS_MOBILE, Navbar } from "@lanpath/ui";
 
@@ -35,7 +35,7 @@ export function SubPageShell({
       aria-label="返回"
       onPress={() => (backTo ? navigate(backTo, { replace: true }) : navigate(-1))}
     >
-      <ArrowLeftIcon className="size-5" />
+      <ArrowLeft className="size-5" />
     </Button>
   );
   return (

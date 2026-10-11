@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon } from "@heroicons/react/24/outline";
+import { ChevronRight } from "lucide-react";
 import { STATS_TODAY_KEY, statsToday } from "@lanpath/client-core";
 import type { TodaySummary } from "@lanpath/client-core";
 import { Card, IS_MOBILE } from "@lanpath/ui";
@@ -68,7 +68,7 @@ export function TodayStatsCard({ running }: TodayStatsCardProps) {
           </div>
           <span className="flex items-center gap-0.5 self-end text-xs text-primary">
             查看详情
-            <ChevronRightIcon className="size-3.5" aria-hidden="true" />
+            <ChevronRight className="size-3.5" aria-hidden="true" />
           </span>
         </Card.Content>
       </Card>

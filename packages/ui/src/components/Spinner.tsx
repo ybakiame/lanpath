@@ -3,6 +3,7 @@
  * `color`: `accent` = 主题主色（默认）；`current` / `white` = 跟随/固定文字色
  * （实心按钮内嵌 spinner 用 `white`）。
  */
+import { LoaderCircle } from "lucide-react";
 import { cx } from "../utils.ts";
 
 interface SpinnerProps {
@@ -17,15 +18,11 @@ const COLORS = { accent: "text-accent", current: "text-current", white: "text-wh
 
 export function Spinner({ size = "md", color = "accent", className, ...rest }: SpinnerProps) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
+    <LoaderCircle
       role="status"
+      aria-label={rest["aria-hidden"] ? undefined : "加载中"}
       className={cx("animate-spin", SIZES[size], COLORS[color], className)}
       {...rest}
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
+    />
   );
 }

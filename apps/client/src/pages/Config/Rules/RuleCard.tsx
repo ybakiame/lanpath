@@ -1,4 +1,4 @@
-import { ArrowDownIcon, ArrowUpIcon } from "@heroicons/react/24/outline";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Card, Chip, Switch } from "@lanpath/ui";
 import type { LocalRuleView } from "@lanpath/client-core";
 import {
@@ -37,7 +37,7 @@ function OrderButton({
   direction: "up" | "down";
   onPress: () => void;
 }) {
-  const Icon = direction === "up" ? ArrowUpIcon : ArrowDownIcon;
+  const Icon = direction === "up" ? ArrowUp : ArrowDown;
   return (
     <button
       type="button"

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { Check, Trash2 } from "lucide-react";
 import type { DnsMatchType, DnsRule, DnsRuleAction } from "@lanpath/client-core";
 import { parseRuleSetTags } from "@lanpath/client-core";
 import { SelectField } from "@lanpath/ui";
@@ -238,7 +238,7 @@ export function DnsRuleFormSheet({
                             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{option.hint}</span>
                           )}
                         </span>
-                        {selected && <CheckIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />}
+                        {selected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
                       </button>
                     );
                   })}
@@ -334,7 +334,7 @@ export function DnsRuleFormSheet({
         {/* 编辑模式删除入口 */}
         {editing && (
           <Button variant="danger" className="min-h-12 w-full" onPress={() => onDeleteRequest(editing)}>
-            <TrashIcon className="size-4" aria-hidden="true" />
+            <Trash2 className="size-4" aria-hidden="true" />
             删除规则
           </Button>
         )}

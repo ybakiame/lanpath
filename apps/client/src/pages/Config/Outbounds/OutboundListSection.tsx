@@ -1,4 +1,4 @@
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { Plus } from "lucide-react";
 import { isGroupOutbound, outboundTag } from "@lanpath/client-core";
 import type { CustomOutbound } from "@lanpath/client-core";
 import { Button, Card, Chip, Switch } from "@lanpath/ui";
@@ -104,7 +104,7 @@ function OutboundSection({
           <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{subtitle}</span>
         </div>
         <Button variant="primary" className="h-11 shrink-0 px-4" onPress={onAdd}>
-          <PlusIcon className="size-4" aria-hidden="true" />
+          <Plus className="size-4" aria-hidden="true" />
           {addLabel}
         </Button>
       </div>

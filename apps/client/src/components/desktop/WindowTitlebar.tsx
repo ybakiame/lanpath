@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MinusIcon, Square2StackIcon, StopIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { Minus, Copy, Square, X } from "lucide-react";
 import { clientWindow, toastError, toErrorMessage, useCapabilities } from "@lanpath/client-core";
 
 /** Windows 独占标题栏；系统窗口的 resize/close 语义保留。 */
@@ -42,7 +42,7 @@ export function WindowTitlebar() {
         className="flex h-full w-12 items-center justify-center hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-focus"
         onClick={() => run(() => clientWindow().minimize())}
       >
-        <MinusIcon className="size-4" aria-hidden="true" />
+        <Minus className="size-4" aria-hidden="true" />
       </button>
       <button
         type="button"
@@ -50,11 +50,7 @@ export function WindowTitlebar() {
         className="flex h-full w-12 items-center justify-center hover:bg-surface-secondary focus-visible:outline-2 focus-visible:outline-focus"
         onClick={() => run(() => clientWindow().toggleMaximize())}
       >
-        {maximized ? (
-          <Square2StackIcon className="size-4" aria-hidden="true" />
-        ) : (
-          <StopIcon className="size-4" aria-hidden="true" />
-        )}
+        {maximized ? <Copy className="size-4" aria-hidden="true" /> : <Square className="size-4" aria-hidden="true" />}
       </button>
       <button
         type="button"
@@ -62,7 +58,7 @@ export function WindowTitlebar() {
         className="flex h-full w-12 items-center justify-center hover:bg-danger hover:text-danger-foreground focus-visible:outline-2 focus-visible:outline-focus"
         onClick={() => run(() => clientWindow().close())}
       >
-        <XMarkIcon className="size-4" aria-hidden="true" />
+        <X className="size-4" aria-hidden="true" />
       </button>
     </header>
   );
