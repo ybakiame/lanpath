@@ -8,21 +8,25 @@
 
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import { isPortable, openReleaseUrl } from "@lanpath/client-core";
+import { getAppVersion, isPortable, openReleaseUrl } from "@lanpath/client-core";
 
 export interface UpdateCheckResult {
   /** 有可用更新时为版本号（如 `0.2.0`）；已是最新为 null。 */
   version: string | null;
   /** 有可用更新时：下载安装并重启；失败抛错由调用方 toast。 */
   install: (() => Promise<void>) | null;
-  manual?: boolean;
+  manual?: "portable" | "prerelease";
 }
 
 /** 检查更新；网络 / 端点错误直接抛给调用方。 */
 export async function checkForUpdate(): Promise<UpdateCheckResult> {
   if (await isPortable()) {
     await openReleaseUrl();
-    return { version: null, install: null, manual: true };
+    return { version: null, install: null, manual: "portable" };
+  }
+  if ((await getAppVersion()).includes("-")) {
+    await openReleaseUrl();
+    return { version: null, install: null, manual: "prerelease" };
   }
   const update = await check();
   if (!update) {

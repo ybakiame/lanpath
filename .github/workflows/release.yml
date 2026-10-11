@@ -3,23 +3,38 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Version tag matching the client version (v0.1.1)
+        description: Version tag matching the client version (v0.1.1-beta.1)
         required: true
         type: string
 permissions:
   contents: write
+  actions: read
+concurrency:
+  group: client-release
+  cancel-in-progress: false
 jobs:
   version:
     runs-on: ubuntu-24.04
+    outputs:
+      notes: ${{ steps.version.outputs.notes }}
     steps:
       - uses: actions/checkout@v5
       - name: Check release tag
+        id: version
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           VERSION=$(jq -r .version apps/client/package.json)
           test "$RELEASE_TAG" = "v$VERSION"
           test "$(jq -r .version apps/client/src-tauri/tauri.conf.json)" = "$VERSION"
+          test -f "docs/releases/$VERSION.md"
+          echo "notes=docs/releases/$VERSION.md" >> "$GITHUB_OUTPUT"
+      - name: Require successful CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api 'repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}' \
+            --jq 'any(.workflow_runs[]; .conclusion == "success")' | grep -qx true
   build:
     needs: version
     uses: ./.github/workflows/desktop-test.yml
@@ -27,8 +42,14 @@ jobs:
       arch: both
       sign: true
     secrets: inherit
+  android:
+    needs: version
+    uses: ./.github/workflows/android-build.yml
+    with:
+      release: true
+    secrets: inherit
   publish:
-    needs: build
+    needs: [version, build, android]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -37,6 +58,10 @@ jobs:
           pattern: lanpath-windows-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v5
+        with:
+          name: lanpath-android-release
+          path: dist
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
@@ -45,7 +70,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_REPOSITORY: ${{ github.repository }}
-        run: nix develop --command bun scripts/release-manifest.ts dist
+        run: |
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun scripts/verify-release-signatures.ts dist
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun scripts/release-manifest.ts dist
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag }}
@@ -53,3 +80,5 @@ jobs:
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(inputs.tag, '-') }}
+          make_latest: ${{ !contains(inputs.tag, '-') }}
+          body_path: ${{ needs.version.outputs.notes }}

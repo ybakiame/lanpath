@@ -16,3 +16,5 @@
 - [桌面页头导航验证](testing/desktop-page-navigation-2026-10-11.md)
 - [主题二级页与纯黑背景验证](testing/theme-settings-2026-10-11.md)
 - [桌面 Portable 与数据目录验证](testing/desktop-portable-2026-10-11.md)
+- [首次发版说明](releases/0.1.1-beta.1.md)
+- [首次发版验证](testing/first-release-2026-10-11.md)

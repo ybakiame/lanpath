@@ -1,34 +1,41 @@
 name: Client CI
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
+      - name: Free space for project SDK
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             accept-flake-config = true
       - name: Install dependencies
-        run: nix develop --command bun install --frozen-lockfile
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun install --frozen-lockfile
       - name: Install project Rust targets
-        run: nix develop --command rustup target add aarch64-linux-android
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command rustup target add aarch64-linux-android
       - name: Frontend verification
         run: |
-          nix develop --command bun run --filter lanpath-app verify
-          nix develop --command bun run --filter @lanpath/client-core verify
-          nix develop --command bun run --filter @lanpath/ui verify
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun run --filter lanpath-app verify
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun run --filter @lanpath/client-core verify
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun run --filter @lanpath/ui verify
       - name: Rust build and gates
         run: |
-          nix develop --command cargo build --workspace
-          nix develop --command bun run verify:rust
-      - name: Build branded Go AAR
-        run: nix develop --command bash apps/client/scripts/build-lanpath-core.sh
-      - name: Android debug build
-        working-directory: apps/client
-        run: nix develop ../.. --command bun run tauri android build --debug --target aarch64
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command cargo build --workspace
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun run verify:rust
+      - name: Portable and release tooling tests
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun test apps/client/scripts/package-portable.test.ts scripts/release-manifest.test.ts scripts/verify-release-signatures.test.ts
+  android:
+    uses: ./.github/workflows/android-build.yml
+    with:
+      release: false

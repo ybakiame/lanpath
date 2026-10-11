@@ -16,6 +16,10 @@ Android 经 Kotlin VpnPlugin 和 com.ybakiame.lanpath.core.libbox 运行内嵌 G
 Windows 的同一二进制分发为 NSIS 与 Portable ZIP，便携模式禁用安装器 updater，手动保留 data 更新。
 数据目录移动只在内存中重定位托管核心和证书路径，不自动迁移旧用户目录。见 [ADR-0002](adr/0002-desktop-portable-storage.md)。
 
+首次公开 beta 使用独立 updater 公钥与 Android release 证书，CI 不检出私有协议子模块。
+Windows native 构建例外保持锁定版本，Linux/Android 与发布验签使用项目 Nix；beta/rc 手动更新，稳定版使用签名 latest.json。
+见 [ADR-0003](adr/0003-first-public-release.md)。
+
 主题偏好与实际深浅解析由 @lanpath/client-core 管理；深色纯黑背景是附属布尔偏好，
 不增加主题模式或核心配置字段。应用 ThemeProvider 管理强调色并将编译期平台投影为 data-platform；
 共享 UI 消费语义令牌。主题二级页为 /settings/theme，移动与桌面共用路由和控件。

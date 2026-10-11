@@ -70,8 +70,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -116,7 +114,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: apps/client
-          args: --target ${{ matrix.target }} --config src-tauri/tauri.windows.conf.json5
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.windows.conf.json5 ${{ inputs.sign && '--config src-tauri/tauri.updater.conf.json' || '' }}
           # 不传 tagName：仅构建不创建 release，产物经 artifact 分发。
         env:
           # overlay 的 beforeBuildCommand 自动抓取种子核心（ADR-0008 D5）；交叉构建

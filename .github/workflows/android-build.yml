@@ -1,0 +1,64 @@
+name: Android Build
+on:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEY_BASE64:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free space for project SDK
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+      - name: Install dependencies and Rust target
+        run: |
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun install --frozen-lockfile
+          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command rustup target add aarch64-linux-android
+      - name: Build branded Go AAR
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bash apps/client/scripts/build-lanpath-core.sh
+      - name: Configure release signing
+        if: inputs.release
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          python3 scripts/configure-android-signing.py
+      - name: Build Android
+        working-directory: apps/client
+        run: |
+          if [ '${{ inputs.release }}' = 'true' ]; then
+            nix develop --option substituters https://cache.nixos.org --option extra-substituters "" ../.. --command bun run android:build
+          else
+            nix develop --option substituters https://cache.nixos.org --option extra-substituters "" ../.. --command bun run tauri android build --debug --target aarch64
+          fi
+      - name: Verify and stage APK
+        env:
+          RELEASE_BUILD: ${{ inputs.release }}
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bash scripts/stage-android-apk.sh
+      - name: Upload APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: lanpath-android-${{ inputs.release && 'release' || 'debug' }}
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary signing material
+        if: always() && inputs.release
+        run: |
+          rm -f "$RUNNER_TEMP/lanpath-release.p12" apps/client/src-tauri/gen/android/keystore.properties

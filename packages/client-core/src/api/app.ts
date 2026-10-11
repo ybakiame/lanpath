@@ -19,5 +19,5 @@ export function openProjectUrl(): Promise<void> {
 
 /** Android 更新通过发布页分发，不调用桌面 updater 插件。 */
 export function openReleaseUrl(): Promise<void> {
-  return openUrl(`${PROJECT_URL}/releases/latest`);
+  return openUrl(`${PROJECT_URL}/releases`);
 }

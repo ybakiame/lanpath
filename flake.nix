@@ -3,13 +3,7 @@
 
   nixConfig = {
     substituters = [
-      "https://mirrors.ustc.edu.cn/nix-channels/store?priority=10"
-      "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store?priority=15"
-      "https://mirror.sjtu.edu.cn/nix-channels/store?priority=20"
       "https://cache.nixos.org"
-    ];
-    extra-substituters = [
-      "https://mirrors.cernet.edu.cn/nix-channels/store"
     ];
     extra-trusted-public-keys = [
       "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="

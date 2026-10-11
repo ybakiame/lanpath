@@ -34,6 +34,20 @@ android {
       abiFilters += listOf("arm64-v8a")
     }
   }
+  val releaseKeystoreFile = rootProject.file("keystore.properties")
+  if (releaseKeystoreFile.exists()) {
+    val releaseKeys = Properties().apply {
+      releaseKeystoreFile.inputStream().use { load(it) }
+    }
+    signingConfigs {
+      create("release") {
+        storeFile = file(releaseKeys.getProperty("storeFile"))
+        storePassword = releaseKeys.getProperty("password")
+        keyAlias = releaseKeys.getProperty("keyAlias")
+        keyPassword = releaseKeys.getProperty("password")
+      }
+    }
+  }
   buildTypes {
     getByName("debug") {
       manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -47,6 +61,9 @@ android {
       }
     }
     getByName("release") {
+      if (releaseKeystoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("release")
+      }
       isMinifyEnabled = true
       proguardFiles(
         *fileTree(".") { include("**/*.pro") }

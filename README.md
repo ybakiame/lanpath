@@ -3,9 +3,14 @@
 跨平台代理客户端：订阅、代理策略、DNS/规则、流量与日志诊断；桌面额外提供 MITM 和脚本。
 桌面及 Android 共用 Tauri 2 + React UI，当前仅使用 sing-box 运行核心。
 
+公开仓库：[ybakiame/lanpath](https://github.com/ybakiame/lanpath) ·
+首次测试版：[v0.1.1-beta.1](https://github.com/ybakiame/lanpath/releases/tag/v0.1.1-beta.1)。
+Windows 提供 x64/arm64 安装版与 Portable；Android 提供 arm64 release 签名 APK（Android 13+）。
+
 ## 开发
 
 本地构建、运行和资源生成统一使用本仓 Nix 配置。Windows CI 原生工具链例外由维护者明确授权，版本锁定。
+协议子模块为私有治理资源，维护者需单独访问权限；公开源码编译可跳过下面的子模块初始化。
 
 ~~~bash
 git submodule update --init --recursive

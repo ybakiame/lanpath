@@ -33,7 +33,11 @@ export default function ProductCard() {
       const result = await checkForUpdate();
       if (result.manual) {
         setState({ kind: "idle" });
-        toastSuccess("已打开发布页，请下载 Portable 压缩包，退出后替换程序文件并保留 data 目录");
+        toastSuccess(
+          result.manual === "portable"
+            ? "已打开发布页，请下载 Portable 压缩包，退出后替换程序文件并保留 data 目录"
+            : "已打开发布页，测试版请手动下载安装更新",
+        );
         return;
       }
       if (result.version && result.install) {

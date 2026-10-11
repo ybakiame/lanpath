@@ -9,13 +9,25 @@ macOS WKWebView 不支持此目录 API，当前没有 macOS Portable 分发包�
 不要同时运行新旧客户端共享同一个数据目录。旧 MITM CA 名称和系统信任关系保留，避免更名造成重建。
 已有配置键和数据库 schema 保留，任何后续迁移使用版本化逻辑。
 
-新仓 GitHub 地址预定为 ybakiame/lanpath。更新与项目链接采用此地址，但远端和首次 Release
-准备好前不发布带新端点的正式包；开发阶段更新检查可能返回未发布错误。
-updater 公钥保留，签名私钥只在新仓 Secrets 配置；Android 签名同样不入库。
+公开仓库为 ybakiame/lanpath，默认 main；首次发版为 v0.1.1-beta.1。
+首次发版经用户明确授权生成 Lanpath 独立 updater 密钥与 Android release 证书；
+旧产品公钥不再用于新独立客户端。私钥保存在本机安全目录及新仓 Secrets，均不入库。
+本机备份目录为 `~/.local/share/lanpath/signing`（目录权限 700，私钥/凭据权限 600）。
+不能从 GitHub Secrets 下载原值；后续版本必须保留本次密钥，备份完整目录。
 首次身份更改无法作为旧 Android 包的原地升级；Windows 安装器更名需真实升级验收。
 
 Windows desktop-test 手动构建 NSIS，仅上传 artifact；发布工作流通过手动输入匹配版本 tag，
 构建包、生成签名更新清单后创建 Release。不同时更换打包方案。
+签名构建额外使用 `tauri.updater.conf.json` 的 v1Compatible overlay，产生 `.nsis.zip` 与 `.sig`；
+未签名测试构建不启用该 overlay。Portable 与安装版从同一份二进制组装。
+发布任务只接受相同 commit 已成功的 Client CI；发布前以代码中的公钥实际验证两种架构的更新签名。
+Android 独立工作流经 Nix 从 Go 源码构建 AAR；CI 生成 debug APK，发版使用专用 release keystore 签名并经 apksigner 验证。
+release Secrets：TAURI_SIGNING_PRIVATE_KEY、TAURI_SIGNING_PRIVATE_KEY_PASSWORD、ANDROID_KEY_BASE64、ANDROID_KEY_PASSWORD、ANDROID_KEY_ALIAS。
+keystore.properties 与 CI 临时 keystore 均不提交，任务结束清理；本地仍可构建未签名 release，再显式签名。
+测试版仅输出 `prerelease.json`，稳定版输出 `latest.json`；beta/rc 应用与 Portable 的检查更新打开发布列表，避免混入稳定自动更新通道。
+发布文件附带 SHA256SUMS；Windows 更新签名不等同 Authenticode，当前未配置 Windows 代码签名证书。
+协议子模块为私有治理资源，编译不依赖它；公开 CI 不递归检出子模块，也不向 fork PR 提供私有 token。
+GitHub Linux runner 清理预装 SDK 腾出空间，然后使用项目 Nix SDK；云端明确使用 cache.nixos.org，避免继承本机镜像配置。
 Windows CI 例外使用锁定 Rust/Bun 和固定 Windows runner 标签；本地、Linux/Android 构建仍 Nix。
 
 ## Windows Portable

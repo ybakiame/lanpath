@@ -1,6 +1,7 @@
 # 开发与工作流
 
 先 git submodule update --init --recursive，再 nix develop；根目录 bun install --frozen-lockfile。
+协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
 本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 的明确例外见 ADR。
 前端运行 bun run --filter lanpath-app dev 或 dev:android。
 浏览器使用 http://localhost:1420/?browser-debug=1；mock 不能证明真实 IPC/设备行为。
