@@ -267,7 +267,23 @@ impl ClientConfig {
             std::fs::write(&path, serde_json::to_string_pretty(&raw)?)?;
             tracing::info!("存量 tun_stack=gvisor 已迁移为 go 并写回 client.json");
         }
-        Ok(serde_json::from_value(raw)?)
+        let mut config: Self = serde_json::from_value(raw)?;
+        // 数据根由壳确定。便携目录移动后，仅在内存中重定位托管核心；
+        // 外部手动指定的核心路径保持原值，不复制或改写旧配置文件。
+        if !config.data_dir.as_os_str().is_empty()
+            && config.data_dir != data_dir
+            && let Ok(relative) = config
+                .core_binary
+                .strip_prefix(config.data_dir.join("cores"))
+            && !relative
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            config.core_binary = data_dir.join("cores").join(relative);
+        }
+        config.data_dir = data_dir.to_path_buf();
+        config.mitm.ca_dir = data_dir.join("certs");
+        Ok(config)
     }
 
     /// 将配置保存到 `data_dir/client.json`。

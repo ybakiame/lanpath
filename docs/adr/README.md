@@ -3,6 +3,7 @@
 采用 Accepted / Proposed / Superseded 状态，记录日期、背景、决定及后果。
 
 - [0001 独立仓库与正式身份](0001-independent-client.md) — Accepted
+- [0002 桌面产品数据目录与便携分发](0002-desktop-portable-storage.md) — Accepted
 
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 

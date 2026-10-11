@@ -81,6 +81,9 @@ jobs:
       - name: Install frontend dependencies (bun workspaces)
         run: bun install --frozen-lockfile
 
+      - name: Verify Portable packager
+        run: bun test apps/client/scripts/package-portable.test.ts
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@1.98.0
         with:
@@ -130,4 +133,15 @@ jobs:
           name: lanpath-windows-${{ matrix.arch }}
           # 安装包 + updater 更新包（.nsis.zip）与签名（.sig，选择签名时）。
           path: apps/client/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*
+          retention-days: 7
+
+      - name: Package Portable edition
+        run: bun apps/client/scripts/package-portable.ts '${{ matrix.target }}'
+
+      - name: Upload Portable archive
+        uses: actions/upload-artifact@v5
+        with:
+          name: lanpath-windows-${{ matrix.arch }}-portable
+          path: apps/client/src-tauri/target/${{ matrix.target }}/release/bundle/portable/*.zip
+          if-no-files-found: error
           retention-days: 7

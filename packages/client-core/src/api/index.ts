@@ -257,4 +257,4 @@ export {
   testGithubProxy,
 } from "./system";
 
-export { getAppVersion, openProjectUrl, openReleaseUrl, PROJECT_URL } from "./app";
+export { getAppVersion, isPortable, openProjectUrl, openReleaseUrl, PROJECT_URL } from "./app";

@@ -15,3 +15,4 @@
 - [Lucide 图标迁移验证](testing/lucide-migration-2026-10-11.md)
 - [桌面页头导航验证](testing/desktop-page-navigation-2026-10-11.md)
 - [主题二级页与纯黑背景验证](testing/theme-settings-2026-10-11.md)
+- [桌面 Portable 与数据目录验证](testing/desktop-portable-2026-10-11.md)

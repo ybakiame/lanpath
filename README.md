@@ -23,6 +23,9 @@ Android：先在 Nix 环境运行 bash apps/client/scripts/build-lanpath-core.sh
 
 首次 Android 安装采用新包名 com.ybakiame.lanpath，与旧包不能覆盖升级；不要先卸载旧包。
 桌面新安装使用 ~/.lanpath，已有旧数据且新目录不存在时沿用 ~/.proxy-panel-client。
+Windows/Linux 的 WebView 偏好和缓存使用该目录的 `webview` 子目录，旧 identifier 目录保留，不自动迁移。
+
+Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，保留旁边的 `lanpath.portable` 标记，所有应用数据使用程序目录下的 `data`。启动目录不影响数据位置；需要系统已安装 WebView2 Runtime。更新时退出应用、替换程序与 `seed`，保留 `data`。详见 [便携版说明](docs/operations.md)。
 迁移与发布限制见 [运维与发布](docs/operations.md)。
 
 本仓可独立构建，不需要 ProxyPanel 检出，不作为其 submodule。

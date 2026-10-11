@@ -1,26 +1,62 @@
-//! Tauri 应用级共享状态（薄层）。
+//! 桌面数据布局：安装版使用产品目录，便携版使用可执行文件旁的 data。
 
-use std::path::PathBuf;
-
+use lanpath_common::{LanpathError, LanpathResult};
 pub use lanpath_tauri::state::AppState;
+use std::path::{Path, PathBuf};
+pub const PORTABLE_MARKER: &str = "lanpath.portable";
 
-/// 默认数据目录：用户主目录下的 `.lanpath`；已有旧客户端数据时沿用旧目录。
-///
-/// 主目录经 [`dirs::home_dir`] 解析——Windows 上 `HOME` 环境变量通常不存在
-/// （此前直接读 `HOME`，未设置时回退为相对路径 `.`，数据目录落到安装目录
-/// 或启动目录下，且核心子进程因 `-D` 切换工作目录后读不到相对路径配置）。
-/// 主目录不可用时回退当前目录；两者均不可用时返回诊断用相对路径。
-pub fn default_data_dir() -> PathBuf {
-    dirs::home_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .map(|home| {
-            let current = home.join(".lanpath");
-            let legacy = home.join(".proxy-panel-client");
-            if !current.exists() && legacy.exists() {
-                legacy
-            } else {
-                current
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from(".lanpath"))
+#[derive(Debug, Clone)]
+pub struct DesktopStorage {
+    pub data_dir: PathBuf,
+    pub portable: bool,
 }
+
+impl DesktopStorage {
+    pub fn resolve() -> LanpathResult<Self> {
+        Self::from_paths(&std::env::current_exe()?, dirs::home_dir().as_deref())
+    }
+
+    fn from_paths(executable: &Path, home: Option<&Path>) -> LanpathResult<Self> {
+        let directory = executable
+            .parent()
+            .ok_or_else(|| LanpathError::Config("无法确定 Lanpath 程序所在目录".into()))?;
+        // 快捷方式或终端的工作目录不参与便携数据目录解析。
+        let marker = directory.join(PORTABLE_MARKER);
+        let portable = marker.try_exists()?;
+        if portable {
+            if !marker.is_file() {
+                return Err(LanpathError::Config("lanpath.portable 必须是文件".into()));
+            }
+            if cfg!(target_os = "macos") {
+                return Err(LanpathError::Config(
+                    "macOS 暂不支持 Portable WebView 数据布局".into(),
+                ));
+            }
+            return Ok(Self {
+                data_dir: directory.join("data"),
+                portable,
+            });
+        }
+        let home = home.ok_or_else(|| LanpathError::Config("无法解析用户主目录".into()))?;
+        let current = home.join(".lanpath");
+        let legacy = home.join(".proxy-panel-client");
+        let data_dir = if !current.try_exists()? && legacy.try_exists()? {
+            legacy
+        } else {
+            current
+        };
+        Ok(Self { data_dir, portable })
+    }
+
+    pub fn webview_dir(&self) -> PathBuf {
+        self.data_dir.join("webview")
+    }
+}
+
+#[tauri::command]
+pub fn is_portable(storage: tauri::State<'_, DesktopStorage>) -> bool {
+    storage.portable
+}
+
+#[cfg(test)]
+mod tests;

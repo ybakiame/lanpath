@@ -35,6 +35,9 @@ pub fn run() {
     ))]
     desktop::configure_wsl_webkit_workaround();
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let storage = desktop::DesktopStorage::resolve().expect("无法解析 Lanpath 数据目录");
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init());
@@ -42,22 +45,25 @@ pub fn run() {
     // 自动更新（ADR-0008 D2）：仅桌面目标注册（Android 不经 updater 分发，
     // 对应 capability 亦按 platforms 门控于桌面）。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let builder = builder
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = {
+        let builder = builder.plugin(tauri_plugin_process::init());
+        let builder = if storage.portable {
+            builder
+        } else {
+            builder.plugin(tauri_plugin_updater::Builder::new().build())
+        };
+        builder.manage(storage)
+    };
 
     let builder = builder
         .setup(|app| {
-            #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_decorations(false)?;
-            }
-            // 数据目录：桌面 `$HOME/.proxy-panel-client`；Android 应用私有目录
-            // （HOME 在 Android 为只读 `/`）。
+            // 桌面目录在创建 WebView 前确定；Android 保持应用私有目录。
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            let data_dir = desktop::default_data_dir();
+            let data_dir = app.state::<desktop::DesktopStorage>().data_dir.clone();
             #[cfg(target_os = "android")]
             let data_dir = mobile::resolve_data_dir(app);
+            // 便携目录不可写时明确终止，不悄悄使用安装版目录。
+            std::fs::create_dir_all(&data_dir)?;
             // tracing 全局 subscriber 只能初始化一次；日志初始化紧随 data_dir
             // 解析，guard 存入 AppState 持有，保证进程生命周期内文件写入线程存活。
             let log_guard = lanpath_tauri::logs::init_logging(&data_dir);
@@ -84,9 +90,23 @@ pub fn run() {
             // client.json / subscriptions.json）。
             #[cfg(target_os = "android")]
             lanpath_tauri::core_bridge::set_data_dir(data_dir.clone());
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let webview_dir = app.state::<desktop::DesktopStorage>().webview_dir();
+                std::fs::create_dir_all(&webview_dir)?;
+                for config in &app.config().app.windows {
+                    let window = tauri::WebviewWindowBuilder::from_config(app, config)?
+                        .data_directory(webview_dir.clone());
+                    #[cfg(target_os = "windows")]
+                    let window = window.decorations(false);
+                    window.build()?;
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop::state::is_portable,
             // ---- 双端通用命令（共享层单份实现，全路径注册）----
             lanpath_tauri::capabilities::get_capabilities,
             lanpath_tauri::capabilities::platform_info,
@@ -205,8 +225,17 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder.plugin(lanpath_tauri::core_bridge::vpn_plugin());
 
+    let context = tauri::generate_context!();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let context = {
+        let mut context = context;
+        for window in &mut context.config_mut().app.windows {
+            window.create = false;
+        }
+        context
+    };
     let app = builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     // ADR-0012 D3：退出清理（桌面）。正常退出路径（关窗/退出菜单）时

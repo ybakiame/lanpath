@@ -31,6 +31,11 @@ export default function ProductCard() {
         return;
       }
       const result = await checkForUpdate();
+      if (result.manual) {
+        setState({ kind: "idle" });
+        toastSuccess("已打开发布页，请下载 Portable 压缩包，退出后替换程序文件并保留 data 目录");
+        return;
+      }
       if (result.version && result.install) {
         setState({ kind: "available", version: result.version, install: result.install });
       } else {

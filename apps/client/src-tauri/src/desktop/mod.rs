@@ -7,7 +7,7 @@
 pub mod commands;
 pub mod state;
 
-pub use state::default_data_dir;
+pub use state::DesktopStorage;
 
 /// 退出清理（ADR-0012 D3）：`RunEvent::ExitRequested` 时 best-effort 停止核心
 /// 并恢复系统代理（`ClientState::stop` 的完整逆序关闭）。

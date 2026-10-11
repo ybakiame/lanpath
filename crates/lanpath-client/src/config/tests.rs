@@ -3,6 +3,39 @@
 use super::*;
 
 #[test]
+fn moved_data_rebases_managed_paths_without_rewriting_file() {
+    let old = tempfile::tempdir().unwrap();
+    let moved = tempfile::tempdir().unwrap();
+    let mut config = ClientConfig {
+        data_dir: old.path().to_path_buf(),
+        core_binary: old.path().join("cores/sing-box/1.15/sing-box"),
+        mitm: MitmClientConfig {
+            ca_dir: old.path().join("certs"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let text = serde_json::to_string(&config).unwrap();
+    let file = moved.path().join("client.json");
+    std::fs::write(&file, &text).unwrap();
+    let loaded = ClientConfig::load(moved.path()).unwrap();
+    assert_eq!(loaded.data_dir, moved.path());
+    assert_eq!(
+        loaded.core_binary,
+        moved.path().join("cores/sing-box/1.15/sing-box")
+    );
+    assert_eq!(loaded.mitm.ca_dir, moved.path().join("certs"));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+
+    config.core_binary = old.path().join("external/sing-box");
+    std::fs::write(&file, serde_json::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        ClientConfig::load(moved.path()).unwrap().core_binary,
+        config.core_binary
+    );
+}
+
+#[test]
 fn default_config_has_sane_defaults() {
     let cfg = ClientConfig::default();
     assert_eq!(cfg.mixed_port, 17890);
