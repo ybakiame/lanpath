@@ -44,7 +44,6 @@ export function SubPageShell({
         <Navbar title={title} left={back} right={action} />
       ) : (
         <header className="flex items-center gap-3">
-          {back}
           <h1 className="flex-1 text-xl font-semibold">{title}</h1>
           {action}
         </header>
