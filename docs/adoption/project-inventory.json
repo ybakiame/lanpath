@@ -1,0 +1,57 @@
+{
+  "protocol_version": "0.1.0",
+  "project": {
+    "name": "Lanpath",
+    "repository": "https://github.com/ybakiame/lanpath",
+    "revision": "initial snapshot from cd09a8aec70886a8af17514a0b8d437b626c7822",
+    "language": [
+      "Rust",
+      "TypeScript",
+      "Go",
+      "Kotlin"
+    ],
+    "framework": [
+      "Tauri 2",
+      "React",
+      "Base UI"
+    ]
+  },
+  "protocol_revision": "310fba5baa384c912e1fd8300e33d72a057908c5",
+  "observations": [
+    {
+      "id": "identity",
+      "category": "architecture",
+      "value": "Standalone desktop/Android Tauri client, React UI and embedded sing-box Go binding",
+      "evidence": [
+        "apps/client/src-tauri/tauri.conf.json",
+        "apps/client/lanpath-core/go.mod",
+        "Cargo.toml"
+      ],
+      "confidence": "high",
+      "status": "observed"
+    },
+    {
+      "id": "validation",
+      "category": "testing",
+      "value": "Inherited frontend verify and Rust gate; target-specific Kotlin and Go build paths",
+      "evidence": [
+        "apps/client/package.json",
+        "scripts/check-rust-gates.sh",
+        "apps/client/scripts/build-lanpath-core.sh"
+      ],
+      "confidence": "high",
+      "status": "observed"
+    },
+    {
+      "id": "domain",
+      "category": "architecture",
+      "value": "Server-only common error dependencies and multi-engine implementation excluded",
+      "evidence": [
+        "crates/lanpath-common/Cargo.toml",
+        "crates/lanpath-engine/src/manager/mod.rs"
+      ],
+      "confidence": "high",
+      "status": "observed"
+    }
+  ]
+}

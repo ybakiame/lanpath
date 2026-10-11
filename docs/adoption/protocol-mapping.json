@@ -1,0 +1,170 @@
+{
+  "protocol_version": "0.1.0",
+  "capabilities": [
+    {
+      "id": "project-contract",
+      "status": "Missing",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "architecture",
+      "status": "Partial",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "workflows",
+      "status": "Partial",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "testing",
+      "status": "Partial",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "evaluation",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "operations",
+      "status": "Partial",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "agents",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "tools",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "prompts",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "memory",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "mcp",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    },
+    {
+      "id": "adrs",
+      "status": "Missing",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [
+        "Client-specific documentation must replace server project contracts"
+      ],
+      "decision_required": false,
+      "decision": "Adapt the inherited contract to the explicitly authorized standalone client scope; introduce no new mandatory gates"
+    },
+    {
+      "id": "agent-adapter",
+      "status": "N/A",
+      "evidence": [
+        "Cargo.toml",
+        "apps/client/package.json"
+      ],
+      "gaps": [],
+      "decision_required": false,
+      "decision": "No AI-agent runtime, prompt/memory system, MCP server or vendor adapter is part of the client product"
+    }
+  ],
+  "open_decisions": [],
+  "proposed_changes": [
+    "README.md",
+    "AGENTS.md",
+    "docs/index.md",
+    "docs/architecture.md",
+    "docs/development.md",
+    "docs/operations.md",
+    "docs/adoption/adoption-report.json"
+  ]
+}

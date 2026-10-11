@@ -1,0 +1,67 @@
+[workspace]
+resolver = "3"
+members = ["crates/lanpath-tauri","crates/lanpath-client","crates/lanpath-common","crates/lanpath-engine","crates/lanpath-mitm","crates/lanpath-script"]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+authors = ["Lanpath and ProxyPanel Contributors"]
+repository = "https://github.com/ybakiame/lanpath"
+rust-version = "1.88"
+
+[workspace.dependencies]
+tokio = { version = "1.45", features = ["full"] }
+tokio-util = "0.7"
+axum = { version = "0.8", features = ["macros", "ws", "json"] }
+tower = { version = "0.5", features = ["full"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "macros",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+uuid = { version = "1.16", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.17"
+
+# CLI & config
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2.0"
+anyhow = "1.0"
+regex = "1"
+# 关闭 default-tls（native-tls/openssl）：统一 rustls-tls，避免 Android 等
+# 交叉编译 target 需要为 openssl-sys 准备 sysroot（客户端仅使用 rustls）。
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = "0.23"
+rustls-pemfile = "2"
+sha2 = "0.10"
+rand = "0.9"
+
+# TLS for HTTP
+tokio-rustls = "0.26"
+
+# Template / rendering
+base64 = "0.22"
+http-body-util = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+bytes = "1"
+
+# WebSocket client（无 TLS 特性：仅用于 127.0.0.1 回环 ws://，见 lanpath-client connections/ws）
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
+    "connect",
+    "handshake",
+] }
+
+# Internal crates
+lanpath-common = { path = "crates/lanpath-common" }
+lanpath-engine = { path = "crates/lanpath-engine" }
+lanpath-script = { path = "crates/lanpath-script" }
+lanpath-mitm = { path = "crates/lanpath-mitm" }
+# 共享层默认以 scripts-only 形态拉取 lanpath-client（mobile 形态无 lanpath-mitm）；
+# desktop 全功能由成员/壳层通过 lanpath-client/mitm feature 显式开启。
+lanpath-client = { path = "crates/lanpath-client", default-features = false, features = ["scripts"] }

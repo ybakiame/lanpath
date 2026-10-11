@@ -1,0 +1,40 @@
+{
+  "protocol_version": "0.1.0",
+  "project": "Lanpath",
+  "repository": "https://github.com/ybakiame/lanpath",
+  "status": "partial",
+  "changes": {
+    "created": [
+      "AGENTS.md",
+      "README.md",
+      "docs/index.md",
+      "docs/architecture.md",
+      "docs/development.md",
+      "docs/testing.md",
+      "docs/operations.md",
+      "docs/adr/0001-independent-client.md"
+    ],
+    "updated": [],
+    "preserved": [
+      "LICENSE",
+      ".protocol/agent-development-protocol"
+    ],
+    "omitted": [
+      "AI runtime agent/tool/prompt/memory/MCP documents: not applicable",
+      "Vendor-specific adapters: no new adapter introduced"
+    ]
+  },
+  "validation": {
+    "structural": "Passed: 3 published JSON schemas, 13 manifest capabilities exactly once, evidence existence, project-relative links, workflow YAML and clean pinned protocol submodule",
+    "content": "Required client-specific contract, architecture, workflows, testing, operations and ADR documents reconciled with exported code; original server contract not imported",
+    "project": "Passed in project Nix: all 3 frontend verify commands, root build, full Rust gates including desktop shell and Android target, branded Go AAR, full Android APK/AAB, clean staged-source export with independent Android target and frozen dependencies. 664 Rust tests passed; 3 ignored tests remain opt-in.",
+    "conformance": "Project contract coverage and two-pass adoption process verified; Windows hardware/new remote release acceptance remains partial. No vendor adapter conformance claim."
+  },
+  "open_decisions": [],
+  "known_limitations": [
+    "Windows build and upgrade must be validated in the new remote CI and on Windows hardware",
+    "New GitHub remote, signing secrets and initial release are not provisioned",
+    "Android package identity changes; old private application data is not migrated",
+    "No vendor adapter conformance claim; this report covers the project contract"
+  ]
+}

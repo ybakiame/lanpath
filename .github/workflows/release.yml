@@ -1,0 +1,55 @@
+name: Client Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag matching the client version (v0.1.1)
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION=$(jq -r .version apps/client/package.json)
+          test "$RELEASE_TAG" = "v$VERSION"
+          test "$(jq -r .version apps/client/src-tauri/tauri.conf.json)" = "$VERSION"
+  build:
+    needs: version
+    uses: ./.github/workflows/desktop-test.yml
+    with:
+      arch: both
+      sign: true
+    secrets: inherit
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: lanpath-windows-*
+          path: dist
+          merge-multiple: true
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+      - name: Generate signed updater manifest
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: nix develop --command bun scripts/release-manifest.ts dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(inputs.tag, '-') }}
