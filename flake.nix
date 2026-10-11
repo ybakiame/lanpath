@@ -121,10 +121,21 @@
       };
 
       shellHook = ''
+        # 配置环境变量
         export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib";
         export PKG_CONFIG_PATH="${pkgs.webkitgtk_4_1.dev}/lib/pkgconfig:${pkgs.gtk3.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.glib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
         export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath desktopLibs}:$LD_LIBRARY_PATH"
+
+        # ===== Android 签名相关 =====
+        export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+        # 把 apksigner / zipalign 放到 PATH，方便直接调用
+        export PATH="$ANDROID_BUILD_TOOLS:$PATH"
+        # debug 证书默认位置（用户家目录，可写）
+        export ANDROID_DEBUG_KEYSTORE="$HOME/.android/debug.keystore"
+
+        # 打印环境信息
         echo "Lanpath dev shell: go=$(go version 2>/dev/null | cut -d' ' -f3) bun=$(bun --version 2>/dev/null) ndk=$(basename "$ANDROID_NDK_ROOT")"
+        echo "Android build-tools: $ANDROID_BUILD_TOOLS"
       '';
     };
   };
