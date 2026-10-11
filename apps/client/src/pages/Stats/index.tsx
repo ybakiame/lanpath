@@ -186,7 +186,7 @@ export default function Stats() {
         <Card.Header>
           <Card.Title>今日汇总</Card.Title>
           <Card.Description>
-            {today ? `${today.date} · 已代理流量（排除直连与拦截）` : "本地持久化统计"}
+            {today ? `${today.date} · 已代理流量` : "本地持久化统计"}
           </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">

@@ -180,10 +180,10 @@ export default function Dashboard() {
         }
       />
 
-      {/* 3. 今日流量（持久化统计，未运行时也展示；点击进入详情页） */}
-      <TodayStatsCard running={running} />
-
       <ProxyStrategyCard running={running} subscriptionName={activeSub?.name ?? null} />
+
+      {/* 3. 今日流量（持久化统计） */}
+      <TodayStatsCard running={running} />
 
       {/* 4. 运行依赖区（仅核心运行中渲染；未运行时整组隐藏，相关轮询不发起） */}
       {running && (

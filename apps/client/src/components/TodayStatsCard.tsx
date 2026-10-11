@@ -50,7 +50,7 @@ export function TodayStatsCard({ running }: TodayStatsCardProps) {
       <Card>
         <Card.Header>
           <Card.Title>今日流量</Card.Title>
-          <Card.Description>{data ? `${data.date} · ` : ""}已代理流量（排除直连与拦截），点击进入详情</Card.Description>
+          <Card.Description>{data ? `${data.date} · ` : ""}已代理流量</Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
           <span

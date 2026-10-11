@@ -43,7 +43,7 @@ export function DesktopRunConfig({
     <Card>
       <Card.Header>
         <Card.Title>运行配置</Card.Title>
-        <Card.Description>选择生效订阅与核心二进制，满足门禁后可启动代理</Card.Description>
+        <Card.Description>选择要使用的订阅与核心版本</Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -131,10 +131,10 @@ export function DesktopRunConfig({
               onChange={(next) => void onPersist({ mitm_enabled: next })}
             >
               <Switch.Content>
+                启用 MITM
                 <Switch.Control>
                   <Switch.Thumb />
                 </Switch.Control>
-                启用 MITM
               </Switch.Content>
             </Switch>
             <span className="text-xs text-muted">拦截并解密 HTTPS 流量（重写/脚本钩子），重启代理生效</span>
@@ -146,10 +146,10 @@ export function DesktopRunConfig({
               onChange={(next) => void onPersist({ system_proxy_enabled: next })}
             >
               <Switch.Content>
+                启用系统代理
                 <Switch.Control>
                   <Switch.Thumb />
                 </Switch.Control>
-                启用系统代理
               </Switch.Content>
             </Switch>
             <span className="text-xs text-muted">接管系统代理设置指向核心 mixed 入口，随代理启停生效</span>
@@ -181,7 +181,6 @@ export function DesktopRunConfig({
               启动代理
             </Button>
           )}
-          <span className="text-sm text-muted">启动后由后端执行订阅同步并拉起核心，配置可在「设置」页修改。</span>
         </div>
       </Card.Content>
     </Card>

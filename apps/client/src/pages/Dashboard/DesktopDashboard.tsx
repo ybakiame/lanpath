@@ -264,7 +264,7 @@ export default function Dashboard() {
 
       <ProxyStrategyCard running={running} subscriptionName={activeSub?.name ?? null} />
 
-      {/* C. 今日流量（点击进入统计详情页） */}
+      {/* C. 今日流量 */}
       <TodayStatsCard running={running} />
 
       {/* D. 状态卡片 */}

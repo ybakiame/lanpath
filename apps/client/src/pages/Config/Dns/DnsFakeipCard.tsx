@@ -62,9 +62,14 @@ export function DnsFakeipCard() {
         <Card.Title>FakeIP 模式</Card.Title>
         <Card.Description>
           <div className="flex w-full items-start justify-between gap-3 pb-2">
-            <span className="min-w-0 flex-1">
-              DNS 查询立即返回虚拟 IP，连接时才按域名分流解析——可规避 DNS 污染与远程 DNS 故障，绝大多数场景推荐开启
-            </span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="min-w-0 flex-1">
+                DNS 查询立即返回虚拟 IP，连接时才按域名分流解析。
+              </span>
+              <span className="min-w-0 flex-1">
+                —— 可规避 DNS 污染与远程 DNS 故障，推荐开启
+              </span>
+            </div>
             <Switch
               aria-label="启用 FakeIP 模式"
               isSelected={enabled}

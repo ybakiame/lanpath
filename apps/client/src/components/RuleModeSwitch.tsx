@@ -91,9 +91,6 @@ export function RuleModeSwitch({ value, running, clashApiEnabled, onError, onSuc
           ))}
         </div>
       )}
-      <span className="text-xs text-zinc-500 dark:text-zinc-400">
-        {running && clashApiEnabled ? "即时生效" : "已保存，将在下次启动生效；运行时切换需开启 Clash API"}
-      </span>
     </div>
   );
 }
