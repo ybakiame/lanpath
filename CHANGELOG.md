@@ -6,6 +6,8 @@
 
 ### Added
 
+- GitHub Actions 统一使用 `.yaml`；Windows Build 与 Android Build 分别复用测试和发布构建。
+
 - 首次公开测试版：main 分支 CI、Windows x64/arm64 NSIS 与 Portable、Android arm64 release 签名 APK、独立 updater 发布密钥、验签与 SHA256 清单。
 
 - Windows x64/arm64 新增 Portable ZIP，使用可执行文件旁的 `data` 保存配置、核心、证书、日志和 WebView 偏好；更新引导至发布页，保留数据手动替换程序。

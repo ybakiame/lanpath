@@ -1,8 +1,7 @@
-name: Desktop Test Build
+name: Windows Build
 
-# 手动触发的桌面端测试构建：与 release.yml 的 desktop-windows job 同参数构建
-# Windows NSIS 安装包，但只上传 artifact，不创建 Release、不推送任何发布产物。
-# 用于发版前的手动验证 / 给测试人员分发构建包。
+# Windows 共用构建：供手动测试和 release.yaml 调用，输出 NSIS、updater（签名时）
+# 和 Portable。此工作流只上传 artifacts；Release 由调用方发布。
 
 on:
   workflow_call:
@@ -61,7 +60,7 @@ jobs:
           echo "matrix=$M" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build Desktop (Windows NSIS, ${{ matrix.arch }})
+    name: Build Windows (${{ matrix.arch }})
     needs: plan
     runs-on: windows-2022
     strategy:

@@ -33,18 +33,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api 'repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}' \
+          gh api 'repos/${{ github.repository }}/actions/workflows/ci.yaml/runs?head_sha=${{ github.sha }}' \
             --jq 'any(.workflow_runs[]; .conclusion == "success")' | grep -qx true
   build:
     needs: version
-    uses: ./.github/workflows/desktop-test.yml
+    uses: ./.github/workflows/windows-build.yaml
     with:
       arch: both
       sign: true
     secrets: inherit
   android:
     needs: version
-    uses: ./.github/workflows/android-build.yml
+    uses: ./.github/workflows/android-build.yaml
     with:
       release: true
     secrets: inherit

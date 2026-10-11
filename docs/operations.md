@@ -16,7 +16,7 @@ macOS WKWebView 不支持此目录 API，当前没有 macOS Portable 分发包�
 不能从 GitHub Secrets 下载原值；后续版本必须保留本次密钥，备份完整目录。
 首次身份更改无法作为旧 Android 包的原地升级；Windows 安装器更名需真实升级验收。
 
-Windows desktop-test 手动构建 NSIS，仅上传 artifact；发布工作流通过手动输入匹配版本 tag，
+Windows Build（`.github/workflows/windows-build.yaml`）支持手动测试与发布调用，构建 NSIS 和 Portable，仅上传 artifact；发布工作流通过手动输入匹配版本 tag，
 构建包、生成签名更新清单后创建 Release。不同时更换打包方案。
 签名构建额外使用 `tauri.updater.conf.json` 的 v1Compatible overlay，产生 `.nsis.zip` 与 `.sig`；
 未签名测试构建不启用该 overlay。Portable 与安装版从同一份二进制组装。

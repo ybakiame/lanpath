@@ -17,6 +17,8 @@
 
 ## 工作流
 
+`.github` 中的 YAML 文件统一使用 `.yaml` 扩展名。当前工作流为 `ci.yaml`、`windows-build.yaml`、`android-build.yaml` 与 `release.yaml`。
+
 | 类型 | 使用时机 | 发现与计划 | 实现与验证 | 文档与最终复查 |
 | --- | --- | --- | --- | --- |
 | feature | 新用户能力 | 读取领域、平台边界与 ADR，列验收 | 最小完整实现，相关 verify/gates 和行为验收 | CHANGELOG、架构/API 文档，复查范围 |
