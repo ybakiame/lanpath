@@ -9,7 +9,7 @@
  *
  * DOM 契约（与 HeroUI `useTheme` / Konsta 暗色变体双方兼容）：`<html>` 的
  * `light`/`dark` class 二选一 + `data-theme` 属性；`system` 时持续监听系统
- * 深浅色变化。首帧由 index.html 预置脚本就位，React 挂载后本模块无缝接管。
+ * 深浅色变化。深色启用纯黑背景时设置 data-theme-contrast="black"。首帧由 index.html 预置脚本就位，React 挂载后本模块无缝接管。
  */
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -28,6 +28,17 @@ export const DEFAULT_THEME: ThemePreference = "system";
  * 读取同一键。
  */
 export const THEME_STORAGE_KEY = "pp-ui-theme";
+
+/** 深色外观的纯黑背景偏好，独立保存以便切换浅色后仍保留选择。 */
+const PURE_BLACK_STORAGE_KEY = "lanpath-ui-oled-black";
+
+function readStoredPureBlack(): boolean {
+  try {
+    return localStorage.getItem(PURE_BLACK_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 /** 历史键（HeroUI `useTheme` 硬编码键）：仅由启动时一次性迁移读取。 */
 const LEGACY_STORAGE_KEY = "heroui-theme";
@@ -72,6 +83,9 @@ function systemPrefersDark(): boolean {
 }
 
 export interface ThemeState {
+  /** 纯黑背景偏好，仅在 resolvedTheme 为 dark 时生效。 */
+  pureBlack: boolean;
+  setPureBlack: (enabled: boolean) => void;
   /** 用户偏好（可能为 `system`）。 */
   theme: ThemePreference;
   /** 实际生效的主题（`system` 解析后的具体值）。 */
@@ -89,6 +103,7 @@ export interface ThemeState {
 export function useThemeState(): ThemeState {
   const [theme, setThemeState] = useState<ThemePreference>(readStoredPreference);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
+  const [pureBlack, setPureBlackState] = useState(readStoredPureBlack);
 
   // 监听系统深浅色变化（仅「跟随系统」时影响 resolvedTheme；常开监听成本可忽略）。
   useEffect(() => {
@@ -105,12 +120,23 @@ export function useThemeState(): ThemeState {
     root.classList.toggle("dark", resolvedTheme === "dark");
     root.classList.toggle("light", resolvedTheme === "light");
     root.setAttribute("data-theme", resolvedTheme);
-  }, [resolvedTheme]);
+    if (resolvedTheme === "dark" && pureBlack) root.dataset.themeContrast = "black";
+    else delete root.dataset.themeContrast;
+  }, [resolvedTheme, pureBlack]);
 
   return useMemo(
     () => ({
       theme,
       resolvedTheme,
+      pureBlack,
+      setPureBlack: (enabled: boolean) => {
+        setPureBlackState(enabled);
+        try {
+          localStorage.setItem(PURE_BLACK_STORAGE_KEY, String(enabled));
+        } catch {
+          /* 存储不可用时仅在本次会话生效。 */
+        }
+      },
       setTheme: (next: ThemePreference) => {
         setThemeState(next);
         try {
@@ -120,11 +146,13 @@ export function useThemeState(): ThemeState {
         }
       },
     }),
-    [theme, resolvedTheme],
+    [theme, resolvedTheme, pureBlack],
   );
 }
 
 const ThemeContext = createContext<ThemeState>({
+  pureBlack: false,
+  setPureBlack: () => undefined,
   theme: DEFAULT_THEME,
   resolvedTheme: "light",
   setTheme: () => undefined,

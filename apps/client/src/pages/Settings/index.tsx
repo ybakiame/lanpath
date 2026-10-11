@@ -1,23 +1,18 @@
-import { BellRing, Code, Globe, Info } from "lucide-react";
+import { BellRing, Code, Globe, Info, Palette } from "lucide-react";
 import { IS_MOBILE } from "@lanpath/ui";
 import DesktopSettingsSections from "./desktop/DesktopSettingsSections";
 import { useNavigate } from "react-router-dom";
 import { EntryLinkList } from "../../components/mobile/EntryLinkCard";
 import { PageShell } from "../../components/PageShell";
-import { AppearanceCard } from "./AppearanceCard";
+import { useThemePreference } from "../../theme";
+import { ACCENT_OPTIONS } from "../../appearance";
 
-/**
- * 设置主页（ADR-0003 M5.3，列表化重构）。Tab 页（非二级页），保留 PageShell 标题。
- *
- * 「外观」为直挂设置卡（主题切换高频操作，不入二级页）；其余功能分组为
- * `EntryLinkCard` 列表入口，卡片内容抽离到对应二级子页：VPN 通知 / GitHub 访问 /
- * 开发者工具 / 关于。表单状态由各子页独立实例化 `useSettingsConfig` 消费
- * （保存链路经共享 CONFIG_KEY 缓存）。
- *
- * 入站管理与 Clash API 已迁移为配置页必选切片入口（`/config/inbounds`、`/config/experimental`）。
- */
+/** 设置主页通过主题入口进入二级页；其余配置按平台能力呈现。 */
 export default function Settings() {
   const navigate = useNavigate();
+  const { theme, accent, pureBlack, resolvedTheme } = useThemePreference();
+  const themeLabel = { system: "跟随系统", light: "浅色", dark: "深色" }[theme];
+  const accentLabel = ACCENT_OPTIONS.find((option) => option.value === accent)?.label;
 
   return (
     <PageShell>
@@ -28,7 +23,16 @@ export default function Settings() {
 
       {IS_MOBILE && <p className="-mt-3 text-sm text-muted">你的外观偏好与连接工具</p>}
 
-      <AppearanceCard />
+      <EntryLinkList
+        entries={[
+          {
+            icon: <Palette className="size-5" aria-hidden="true" />,
+            title: "主题",
+            description: `${themeLabel}${resolvedTheme === "dark" && pureBlack ? "（纯黑背景）" : ""} · ${accentLabel}`,
+            onPress: () => navigate("/settings/theme"),
+          },
+        ]}
+      />
 
       {IS_MOBILE ? (
         <EntryLinkList

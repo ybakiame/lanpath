@@ -12,8 +12,10 @@
       // 双端（合并后不再与具体 UI 库耦合），React 挂载后由 ThemeProvider 接管。
       (function () {
         var stored = null;
+        var pureBlack = false;
         try {
           stored = localStorage.getItem("pp-ui-theme") || localStorage.getItem("heroui-theme");
+          pureBlack = localStorage.getItem("lanpath-ui-oled-black") === "true";
         } catch (e) {
           /* 存储不可用：按无记录处理 */
         }
@@ -21,19 +23,18 @@
         var resolved = stored === "light" || stored === "dark" ? stored : systemDark ? "dark" : "light";
         document.documentElement.classList.add(resolved);
         document.documentElement.setAttribute("data-theme", resolved);
+        if (resolved === "dark" && pureBlack) document.documentElement.dataset.themeContrast = "black";
         // Vite 在两种构建中注入 MODE，首帧形态与编译期平台保持一致。
         var mobile = "%MODE%" === "android";
         var accent = mobile ? "iris" : "blue";
-        var style = "ios";
         try {
           var savedAccent = localStorage.getItem("lanpath-ui-accent");
           if (["iris", "teal", "rose", "blue"].includes(savedAccent)) accent = savedAccent;
-          if (localStorage.getItem("pp-ui-style") === "material") style = "material";
         } catch (e) {
           /* 存储不可用时使用平台默认外观。 */
         }
         document.documentElement.dataset.accent = accent;
-        if (mobile) document.documentElement.dataset.uiStyle = style;
+        document.documentElement.dataset.platform = mobile ? "mobile" : "desktop";
       })();
     </script>
   </head>

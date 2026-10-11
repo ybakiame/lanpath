@@ -1,19 +1,4 @@
-/**
- * @lanpath/ui 令牌体系（ADR-0013 D3）。
- *
- * 设计要点：
- * - 沿用 HeroUI v3 语义令牌命名（bg-surface / text-muted / border-border …），
- *   浅色/深色以既有样式为基线；主色与 muted 按浏览器对比度检查调整，
- *   保持桌面迁移「换 import 不换 class」；
- * - `--color-primary` 为 @lanpath/ui 自有令牌：HeroUI 未定义它（桌面现存
- *   `bg-primary` 等类为静默死工具类），此处桌面映射 accent、移动端按
- *   [data-ui-style] 域取品牌蓝（对齐 Konsta brand-primary #007aff 现状）；
- * - 三层作用域：`:root` 浅色 / `.dark` 深色（client-core 主题模块同步 class）/
- *   `[data-ui-style="ios"|"material"]` 移动双主题（移动壳 ThemeProvider 同步属性，
- *   桌面不设置该属性、不受影响）；appearance.css 定义新的移动表面和
- *   data-accent 强调色轴，通过更具体的选择器覆盖这里的兼容基线；
- * - `@theme inline` 使工具类解析为运行时 var() 引用，深浅色切换无需重建 CSS。
- */
+/** 共享语义令牌；appearance.css 覆盖统一移动呈现、强调色与 OLED 纯黑主题。 */
 
 @import "./appearance.css";
 
@@ -117,7 +102,7 @@
     --separator: oklch(92% 0.004 286.32);
     --focus: var(--accent);
 
-    /* 品牌主色：桌面默认与 accent 同色；移动端由 [data-ui-style] 域覆写 */
+    /* 品牌主色与强调色共享语义轴。 */
     --primary: var(--accent);
     --primary-foreground: var(--accent-foreground);
 
@@ -222,58 +207,5 @@
     --surface-shadow: 0 0 0 0 transparent inset;
     --overlay-shadow: 0 0 1px 0 rgb(255 255 255 / 0.3) inset;
     --field-shadow: 0 0 0 0 transparent inset;
-  }
-
-  /* ============ 移动双主题域 ============ */
-  /* 仅移动壳在 <html> 设置 data-ui-style；品牌主色对齐 Konsta 现状
-     （brand-primary #007aff，Material 主题亦由该色派生 tonal 调色板）。 */
-  [data-ui-style="ios"],
-  [data-ui-style="material"] {
-    --primary: oklch(0.5 0.2093 259.82); /* #007aff */
-    --primary-foreground: oklch(100% 0 0);
-  }
-}
-
-/* 移动形态：同一令牌域覆盖 portal 中的控件、卡片及导航。 */
-@layer base {
-  [data-ui-style="ios"] {
-    --background: #f2f2f7;
-    --field-radius: 0.75rem;
-  }
-  .dark[data-ui-style="ios"] {
-    --primary: oklch(0.7 0.14 259.82);
-    --primary-foreground: oklch(0.21 0.006 285.89);
-    --background: #000;
-    --surface: #1c1c1e;
-    --overlay: #1c1c1e;
-  }
-  [data-ui-style="material"] {
-    --background: #f7f8fc;
-    --field-radius: 1rem;
-    --surface-shadow: 0 2px 6px rgb(0 0 0 / 0.08);
-  }
-  .dark[data-ui-style="material"] {
-    --primary: oklch(0.7 0.14 259.82);
-    --primary-foreground: oklch(0.21 0.006 285.89);
-    --background: #111318;
-    --surface: #1d2027;
-    --overlay: #1d2027;
-  }
-  [data-ui-style="ios"] .lanpath-tabbar-items {
-    border-radius: 9999px;
-    box-shadow: 0 2px 12px rgb(0 0 0 / 0.1);
-  }
-  [data-ui-style="material"] .lanpath-tabbar {
-    padding-inline: 0;
-    background: var(--surface);
-  }
-  [data-ui-style="material"] .lanpath-tabbar-items {
-    border-top: 1px solid var(--separator);
-  }
-  [data-ui-style="material"] .lanpath-tabbar-items a {
-    border-radius: 1rem;
-  }
-  [data-ui-style="material"] header h1 {
-    text-align: left;
   }
 }

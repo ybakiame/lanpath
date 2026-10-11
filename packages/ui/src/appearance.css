@@ -34,7 +34,7 @@
   }
 
   html[data-accent],
-  html[data-accent][data-ui-style] {
+  html[data-accent][data-platform="mobile"] {
     --primary: var(--accent);
     --primary-foreground: var(--accent-foreground);
     --accent-foreground: #fff;
@@ -49,7 +49,7 @@
     --accent-hover: color-mix(in srgb, var(--accent) 90%, #fff);
     --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
   }
-  html[data-ui-style] {
+  html[data-platform="mobile"] {
     --background: #f3f2f7;
     --surface: #fff;
     --surface-secondary: #eeedf4;
@@ -67,7 +67,7 @@
     --nav-selected: #fff;
     --nav-selected-foreground: #242331;
   }
-  html.dark[data-ui-style] {
+  html.dark[data-platform="mobile"] {
     --background: #141419;
     --surface: #24242d;
     --overlay: #24242d;
@@ -80,13 +80,38 @@
     --nav-background: #30303c;
     --surface-shadow: none;
   }
+
+  html.dark[data-theme-contrast="black"] {
+    --background: #000;
+    --surface: #000;
+    --overlay: #000;
+    --surface-secondary: #141414;
+    --surface-tertiary: #1c1c1c;
+    --surface-hover: #151515;
+    --field-background: #000;
+    --border: #363636;
+    --separator: #292929;
+    --default: #181818;
+    --hero-background: #000;
+    --nav-background: #000;
+    --surface-shadow: 0 0 0 1px var(--border);
+  }
 }
 
 /* 导航与首页主视觉使用具名组件类；其余页面复用共享卡片令牌。 */
-[data-ui-style] .lanpath-mobile-shell {
+[data-platform="mobile"] .lanpath-mobile-shell {
   background-image: radial-gradient(ellipse at 100% 0%, var(--accent-soft), transparent 55%);
 }
-[data-ui-style] .lanpath-tabbar-items {
+html[data-theme-contrast="black"] .lanpath-mobile-shell {
+  background-image: none;
+}
+html[data-theme-contrast="black"] .lanpath-status-hero {
+  border: 1px solid var(--border);
+}
+html[data-theme-contrast="black"] .lanpath-status-hero::before {
+  display: none;
+}
+[data-platform="mobile"] .lanpath-tabbar-items {
   max-width: 32rem;
   margin-inline: auto;
   border: 1px solid color-mix(in srgb, var(--nav-foreground) 14%, transparent);
@@ -95,21 +120,14 @@
   color: var(--nav-foreground);
   box-shadow: 0 8px 28px rgb(0 0 0 / 0.16);
 }
-[data-ui-style] .lanpath-tabbar-items a {
+[data-platform="mobile"] .lanpath-tabbar-items a {
   color: var(--nav-foreground);
 }
-[data-ui-style] .lanpath-tabbar-items a[aria-current="page"] {
+[data-platform="mobile"] .lanpath-tabbar-items a[aria-current="page"] {
   background: var(--nav-selected);
   color: var(--nav-selected-foreground);
 }
-[data-ui-style="material"] .lanpath-tabbar {
-  padding-inline: max(1rem, env(safe-area-inset-left), env(safe-area-inset-right));
-  background: transparent;
-}
-[data-ui-style="material"] .lanpath-tabbar-items {
-  border-radius: 1.75rem;
-}
-[data-ui-style] .lanpath-status-hero {
+[data-platform="mobile"] .lanpath-status-hero {
   position: relative;
   overflow: hidden;
   border-radius: 2rem;
@@ -139,9 +157,9 @@
   color: var(--accent-foreground);
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-ui-style] *,
-  [data-ui-style] *::before,
-  [data-ui-style] *::after {
+  [data-platform="mobile"] *,
+  [data-platform="mobile"] *::before,
+  [data-platform="mobile"] *::after {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;

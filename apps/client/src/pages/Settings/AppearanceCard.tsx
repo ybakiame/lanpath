@@ -1,8 +1,8 @@
-import { Monitor, Moon, Sun } from "lucide-react";
-import { Segmented, SegmentedButton, IS_MOBILE } from "@lanpath/ui";
+import { Monitor, Moon, Sun, Check } from "lucide-react";
+import { Segmented, SegmentedButton, Switch } from "@lanpath/ui";
 import { Card } from "@lanpath/ui";
 import { useThemePreference } from "../../theme";
-import type { ThemePreference, UiStylePreference } from "../../theme";
+import type { ThemePreference } from "../../theme";
 import { ACCENT_OPTIONS } from "../../appearance";
 
 /** 主题选项（顺序即展示顺序；跟随系统为无记录时的默认值）。 */
@@ -12,34 +12,20 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }
   { value: "dark", label: "深色", icon: Moon },
 ];
 
-/** UI 风格选项（@lanpath/ui 双主题；iOS 为无记录时的默认值）。 */
-const UI_STYLE_OPTIONS: { value: UiStylePreference; label: string }[] = [
-  { value: "ios", label: "iOS" },
-  { value: "material", label: "Material" },
-];
-
-/**
- * 外观设置卡（设置主页直挂，非二级页）。
- *
- * 两组三选/二选分段控件（@lanpath/ui Segmented）：
- * - 主题：跟随系统 / 浅色 / 深色，选择持久化到 localStorage 并即时同步 `<html>`
- *   （index.html 预置脚本在首帧前读取同一键，冷启动无闪变）；
- * - UI 风格：iOS / Material（@lanpath/ui 双主题，经 html 令牌域响应式切换，
- *   无需重启）。
- */
+/** 主题二级页：主题偏好与强调色即时保存，纯黑背景附属于深色外观。 */
 export function AppearanceCard() {
-  const { theme, setTheme, uiStyle, setUiStyle, accent, setAccent } = useThemePreference();
+  const { theme, setTheme, accent, setAccent, pureBlack, setPureBlack, resolvedTheme } = useThemePreference();
 
   return (
     <Card>
       <Card.Header>
-        <Card.Title>外观</Card.Title>
+        <Card.Title>主题模式</Card.Title>
         <Card.Description>让岚径呈现你的风格，修改即时生效</Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">主题</span>
-          <Segmented strong>
+          <Segmented strong aria-label="主题模式">
             {THEME_OPTIONS.map((option) => {
               const Icon = option.icon;
               return (
@@ -60,24 +46,21 @@ export function AppearanceCard() {
           </Segmented>
         </div>
 
-        {IS_MOBILE && (
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">界面风格</span>
-            <Segmented strong>
-              {UI_STYLE_OPTIONS.map((option) => (
-                <SegmentedButton
-                  key={option.value}
-                  active={uiStyle === option.value}
-                  onClick={() => setUiStyle(option.value)}
-                  className="min-h-12"
-                  aria-pressed={uiStyle === option.value}
-                >
-                  {option.label}
-                </SegmentedButton>
-              ))}
-            </Segmented>
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-foreground">深色外观</span>
+          <div className="flex min-h-14 items-center justify-between gap-4 rounded-2xl bg-surface-secondary p-3">
+            <span className="text-sm text-foreground">纯黑背景</span>
+            <Switch
+              aria-label="纯黑背景"
+              isSelected={pureBlack}
+              onValueChange={setPureBlack}
+              isDisabled={resolvedTheme !== "dark"}
+            />
           </div>
-        )}
+          <p className="text-xs leading-relaxed text-muted">
+            适合 OLED 屏幕，仅在深色模式下生效；跟随系统进入深色时也会应用。切换浅色会保留此偏好。
+          </p>
+        </div>
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium text-foreground">强调色</span>
           <fieldset aria-label="强调色" className="grid grid-cols-2 gap-2">
@@ -95,7 +78,7 @@ export function AppearanceCard() {
                   aria-hidden="true"
                 />
                 <span className="flex-1 text-left">{option.label}</span>
-                {accent === option.value && <span aria-hidden="true">✓</span>}
+                {accent === option.value && <Check className="size-4" aria-hidden="true" />}
               </button>
             ))}
           </fieldset>
