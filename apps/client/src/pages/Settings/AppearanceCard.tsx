@@ -3,6 +3,7 @@ import { Segmented, SegmentedButton, IS_MOBILE } from "@lanpath/ui";
 import { Card } from "@lanpath/ui";
 import { useThemePreference } from "../../theme";
 import type { ThemePreference, UiStylePreference } from "../../theme";
+import { ACCENT_OPTIONS } from "../../appearance";
 
 /** 主题选项（顺序即展示顺序；跟随系统为无记录时的默认值）。 */
 const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof SunIcon }[] = [
@@ -27,12 +28,13 @@ const UI_STYLE_OPTIONS: { value: UiStylePreference; label: string }[] = [
  *   无需重启）。
  */
 export function AppearanceCard() {
-  const { theme, setTheme, uiStyle, setUiStyle } = useThemePreference();
+  const { theme, setTheme, uiStyle, setUiStyle, accent, setAccent } = useThemePreference();
 
   return (
     <Card>
       <Card.Header>
         <Card.Title>外观</Card.Title>
+        <Card.Description>让岚径呈现你的风格，修改即时生效</Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
@@ -45,7 +47,7 @@ export function AppearanceCard() {
                   key={option.value}
                   active={theme === option.value}
                   onClick={() => setTheme(option.value)}
-                  className="min-h-11"
+                  className="min-h-12"
                   aria-pressed={theme === option.value}
                 >
                   <span className="inline-flex items-center gap-1.5">
@@ -67,7 +69,7 @@ export function AppearanceCard() {
                   key={option.value}
                   active={uiStyle === option.value}
                   onClick={() => setUiStyle(option.value)}
-                  className="min-h-8"
+                  className="min-h-12"
                   aria-pressed={uiStyle === option.value}
                 >
                   {option.label}
@@ -76,6 +78,29 @@ export function AppearanceCard() {
             </Segmented>
           </div>
         )}
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-foreground">强调色</span>
+          <fieldset aria-label="强调色" className="grid grid-cols-2 gap-2">
+            {ACCENT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={accent === option.value}
+                onClick={() => setAccent(option.value)}
+                className={`flex min-h-12 items-center gap-3 rounded-2xl border px-3 text-sm outline-none transition-colors active:opacity-70 focus-visible:outline-2 focus-visible:outline-focus ${accent === option.value ? "border-primary bg-accent-soft text-accent-soft-foreground" : "border-border text-foreground"}`}
+              >
+                <span
+                  data-accent={option.value}
+                  className="size-5 shrink-0 rounded-full bg-accent"
+                  aria-hidden="true"
+                />
+                <span className="flex-1 text-left">{option.label}</span>
+                {accent === option.value && <span aria-hidden="true">✓</span>}
+              </button>
+            ))}
+          </fieldset>
+          <p className="text-xs text-muted">用于按钮、选中状态与焦点；运行警告仍使用独立状态色。</p>
+        </div>
       </Card.Content>
     </Card>
   );

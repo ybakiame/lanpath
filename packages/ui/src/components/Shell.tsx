@@ -13,7 +13,7 @@ interface ShellProps {
 export function Shell({ children, sidebar, navigation, showNavigation, mainRef, titlebar }: ShellProps) {
   if (IS_MOBILE)
     return (
-      <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+      <div className="lanpath-mobile-shell flex h-full min-h-0 flex-col bg-background text-foreground">
         <main
           ref={mainRef}
           className={`min-h-0 flex-1 overflow-y-auto ${showNavigation ? "pb-[calc(6rem+env(safe-area-inset-bottom))]" : ""}`}

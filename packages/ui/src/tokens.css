@@ -10,9 +10,12 @@
  *   [data-ui-style] 域取品牌蓝（对齐 Konsta brand-primary #007aff 现状）；
  * - 三层作用域：`:root` 浅色 / `.dark` 深色（client-core 主题模块同步 class）/
  *   `[data-ui-style="ios"|"material"]` 移动双主题（移动壳 ThemeProvider 同步属性，
- *   桌面不设置该属性、不受影响）；
+ *   桌面不设置该属性、不受影响）；appearance.css 定义新的移动表面和
+ *   data-accent 强调色轴，通过更具体的选择器覆盖这里的兼容基线；
  * - `@theme inline` 使工具类解析为运行时 var() 引用，深浅色切换无需重建 CSS。
  */
+
+@import "./appearance.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

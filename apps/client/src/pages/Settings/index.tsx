@@ -22,9 +22,11 @@ export default function Settings() {
   return (
     <PageShell>
       <div>
-        <h1 className="text-xl font-semibold">设置</h1>
+        <h1 className={IS_MOBILE ? "text-3xl font-semibold tracking-tight" : "text-xl font-semibold"}>设置</h1>
         {!IS_MOBILE && <p className="text-sm text-muted">客户端外观与核心运行配置 · 所有修改即时保存</p>}
       </div>
+
+      {IS_MOBILE && <p className="-mt-3 text-sm text-muted">你的外观偏好与连接工具</p>}
 
       <AppearanceCard />
 

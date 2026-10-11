@@ -14,7 +14,7 @@ import {
 import { useDashboardState } from "@lanpath/client-core";
 import { ProxyStrategyCard } from "../../components/ProxyStrategyCard";
 import { PageShell } from "../../components/PageShell";
-import { StartStopFab } from "../../components/mobile/StartStopFab";
+import { StartStopButton } from "../../components/mobile/StartStopButton";
 import { StatusCard } from "../../components/mobile/StatusCard";
 import { SubscriptionSheet } from "../../components/mobile/SubscriptionSheet";
 import { TodayStatsCard } from "../../components/TodayStatsCard";
@@ -24,21 +24,7 @@ import { BrandIcon } from "../../components/BrandIcon";
 /** start_proxy 未获系统 VPN 授权时的错误前缀（Kotlin `vpn_not_authorized` reject，与 desktop 识别一致）。 */
 const VPN_AUTH_MARKER = "vpn_not_authorized";
 
-/**
- * 首页（仪表盘，ADR-0003 M5）。区块自上而下：
- *
- * 1. 头部：应用名 + 生效订阅行（点击开 SubscriptionSheet；无生效订阅时行下提示先选择）；
- * 2. 状态卡（StatusCard）：运行状态与当前模式，只读展示；
- * 3. 今日流量卡（TodayStatsCard）：本地持久化统计（已代理流量主指标），
- *    未运行时也展示，点击进入 `/stats` 详情页；
- * 4. 共享代理策略卡：路由模式、当前节点与策略组入口；运行时额外展示流量会话；
- * 5. 主操作：右下角悬浮启停按钮（StartStopFab，无生效订阅时禁用并提示选择）；点「启动代理」
- *    即完成「启动 →（遇 `vpn_not_authorized`）自动请求 VPN 授权 → 授权成功自动重试启动」
- *    的一次点击链路；授权被拒 / 重试仍失败则落错误展示（含「去授权」兜底按钮）；
- * 6. VPN 授权引导与启动失败错误：均为独立 InlineAlert 卡片，不再包裹启停按钮。
- *
- * 配置预览等开发者入口已迁移至设置页「开发者工具」分组。
- */
+/** 移动首页：订阅、连接主操作、今日流量与代理策略；状态由共享核心层提供。 */
 export default function Dashboard() {
   // ---- 局部 UI 状态 ----
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -155,18 +141,18 @@ export default function Dashboard() {
       {/* 1. 头部：应用名 + 生效订阅行 */}
       <header className="flex flex-col gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
+          <h1 className="flex items-center gap-3 text-2xl font-semibold tracking-tight">
             <BrandIcon />
             岚径 · Lanpath
           </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">仪表盘 · 核心启停与运行状态</p>
+          <p className="text-sm text-muted">让每一次连接，都有清晰的路径</p>
         </div>
         <Button
           variant="secondary"
-          className="h-12 w-full justify-between px-4 font-normal"
+          className="min-h-14 w-full justify-between rounded-2xl px-4 font-normal"
           onPress={() => setSheetOpen(true)}
         >
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">生效订阅</span>
+          <span className="text-sm text-muted">生效订阅</span>
           <span className="flex min-w-0 items-center gap-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
             <span className="truncate">
               {activeSub ? `${activeSub.name} · ${activeSub.node_count} 节点` : "请选择订阅"}
@@ -174,11 +160,25 @@ export default function Dashboard() {
             <ChevronDownIcon className="size-4 shrink-0 text-zinc-400" aria-hidden="true" />
           </span>
         </Button>
-        {!running && !canStart && <p className="text-xs text-amber-500">请先选择要使用的订阅</p>}
+        {!running && !canStart && <p className="text-xs text-muted">请先选择要使用的订阅</p>}
       </header>
 
       {/* 2. 运行状态与当前模式 */}
-      <StatusCard running={running} ruleMode={ruleMode} missingRuleSets={status?.missing_rule_sets ?? []} />
+      <StatusCard
+        running={running}
+        ruleMode={ruleMode}
+        missingRuleSets={status?.missing_rule_sets ?? []}
+        action={
+          <StartStopButton
+            running={running}
+            starting={startingPending}
+            stopping={stopMutation.isPending}
+            canStart={canStart}
+            onStart={handleStart}
+            onStop={handleStop}
+          />
+        }
+      />
 
       {/* 3. 今日流量（持久化统计，未运行时也展示；点击进入详情页） */}
       <TodayStatsCard running={running} />
@@ -220,19 +220,6 @@ export default function Dashboard() {
           {showVpnError && <div className="break-all">{vpnError}</div>}
         </InlineAlert>
       )}
-
-      {/* 底部留白：为悬浮启停按钮（FAB）让出空间，避免遮挡最后一张卡片 */}
-      <div className="h-16 shrink-0" aria-hidden="true" />
-
-      {/* 6. 悬浮启停按钮（FAB，右下角悬浮于 TabBar 之上） */}
-      <StartStopFab
-        running={running}
-        starting={startingPending}
-        stopping={stopMutation.isPending}
-        canStart={canStart}
-        onStart={handleStart}
-        onStop={handleStop}
-      />
 
       {/* 订阅切换 Sheet */}
       <SubscriptionSheet

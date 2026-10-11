@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { IS_MOBILE } from "@lanpath/ui";
 import { useThemeState } from "@lanpath/client-core";
 import type { ResolvedTheme, ThemePreference } from "@lanpath/client-core";
+import { ACCENT_STORAGE_KEY, readStoredAccent, type AccentPreference } from "./appearance";
 
 // 主题类型经本模块 re-export（消费方维持 `from "../theme"` 的既有导入路径）。
 export type { ThemePreference } from "@lanpath/client-core";
@@ -22,7 +23,7 @@ const UI_STYLE_STORAGE_KEY = "pp-ui-style";
  * 主题（浅色 / 深色 / 跟随系统）部分已上移 `@lanpath/client-core` 的 theme 模块
  * （2026-10，桌面端自 HeroUI `useTheme` 硬编码键迁入前的统一化）：唯一存储键
  * `pp-ui-theme`、存量 `heroui-theme` 一次性迁移、DOM 同步与系统监听全部由
- * 共享模块承担；本文件只保留移动端特有的 UI 风格（iOS / Material）状态。
+ * 共享模块承担；本文件管理 UI 风格与强调色这两个独立的应用外观偏好。
  */
 
 /** 读取持久化的 UI 风格（非法值/存储不可用时回落默认 ios）。 */
@@ -39,6 +40,8 @@ function readStoredUiStyle(): UiStylePreference {
 }
 
 interface ThemeContextValue {
+  accent: AccentPreference;
+  setAccent: (accent: AccentPreference) => void;
   /** 用户偏好（可能为 `system`）。 */
   theme: ThemePreference;
   /** 实际生效的主题（`system` 解析后的具体值）。 */
@@ -52,6 +55,8 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
+  accent: "iris",
+  setAccent: () => undefined,
   theme: "system",
   resolvedTheme: "light",
   setTheme: () => undefined,
@@ -65,11 +70,16 @@ const ThemeContext = createContext<ThemeContextValue>({
  * 主题部分委托 `@lanpath/client-core` 的 `useThemeState`（DOM 同步为 `<html>` 的
  * `light`/`dark` class + `data-theme` 属性，组件库暗色令牌依赖 `.dark` 类；
  * index.html 预置脚本保证首帧前已就位）；UI 风格（iOS / Material）为本 Provider
- * 自有状态。
+ * 自有状态；强调色同步 data-accent，供共享 UI 语义令牌消费。
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { theme, resolvedTheme, setTheme } = useThemeState();
   const [uiStyle, setUiStyleState] = useState<UiStylePreference>(readStoredUiStyle);
+  const [accent, setAccentState] = useState<AccentPreference>(() => readStoredAccent(IS_MOBILE ? "iris" : "blue"));
+
+  useEffect(() => {
+    document.documentElement.dataset.accent = accent;
+  }, [accent]);
 
   useEffect(() => {
     if (!IS_MOBILE) return;
@@ -81,6 +91,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ThemeContextValue>(
     () => ({
+      accent,
+      setAccent: (next) => {
+        setAccentState(next);
+        try {
+          localStorage.setItem(ACCENT_STORAGE_KEY, next);
+        } catch {
+          /* 存储不可用时仍支持会话内切换。 */
+        }
+      },
       theme,
       resolvedTheme,
       setTheme,
@@ -94,7 +113,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [theme, resolvedTheme, setTheme, uiStyle],
+    [theme, resolvedTheme, setTheme, uiStyle, accent],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

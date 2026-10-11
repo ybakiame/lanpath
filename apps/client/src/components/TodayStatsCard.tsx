@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { STATS_TODAY_KEY, statsToday } from "@lanpath/client-core";
 import type { TodaySummary } from "@lanpath/client-core";
-import { Card } from "@lanpath/ui";
+import { Card, IS_MOBILE } from "@lanpath/ui";
 import { formatBytes } from "../pages/Stats/utils";
 
 interface TodayStatsCardProps {
@@ -53,14 +53,16 @@ export function TodayStatsCard({ running }: TodayStatsCardProps) {
           <Card.Description>{data ? `${data.date} · ` : ""}已代理流量（排除直连与拦截），点击进入详情</Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
-          <span className="text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+          <span
+            className={`${IS_MOBILE ? "text-4xl tracking-tight" : "text-2xl"} font-semibold tabular-nums text-foreground`}
+          >
             {data ? formatBytes(proxiedTotal) : "-"}
           </span>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             {metrics.map(([label, value]) => (
               <div key={label} className="flex flex-col gap-0.5">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
-                <span className="text-base font-medium tabular-nums text-zinc-900 dark:text-zinc-100">{value}</span>
+                <span className="text-xs text-muted">{label}</span>
+                <span className="text-base font-medium tabular-nums text-foreground">{value}</span>
               </div>
             ))}
           </div>

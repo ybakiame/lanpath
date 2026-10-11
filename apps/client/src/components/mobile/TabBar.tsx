@@ -20,7 +20,7 @@ export function TabBar() {
             to={to}
             end={end}
             className={({ isActive }) =>
-              `flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-full text-xs outline-none focus-visible:outline-2 focus-visible:outline-focus ${isActive ? "bg-primary/10 text-primary" : "text-muted"}`
+              `flex min-h-14 flex-1 items-center justify-center gap-2 rounded-full text-sm font-medium outline-none transition-colors active:opacity-70 focus-visible:outline-2 focus-visible:outline-focus ${isActive ? "bg-primary/10 text-primary" : "text-muted"}`
             }
           >
             <Icon className="size-6" aria-hidden="true" />

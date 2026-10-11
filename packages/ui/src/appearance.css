@@ -1,0 +1,149 @@
+/* 强调色为独立语义轴，浅深主题与移动形态无需复制调色板。 */
+@layer base {
+  html[data-accent="iris"],
+  [data-accent="iris"] {
+    --accent: #6550c9;
+  }
+  html[data-accent="teal"],
+  [data-accent="teal"] {
+    --accent: #087e80;
+  }
+  html[data-accent="rose"],
+  [data-accent="rose"] {
+    --accent: #b63d72;
+  }
+  html[data-accent="blue"],
+  [data-accent="blue"] {
+    --accent: #2463c4;
+  }
+  .dark[data-accent="iris"],
+  .dark [data-accent="iris"] {
+    --accent: #b5a4ff;
+  }
+  .dark[data-accent="teal"],
+  .dark [data-accent="teal"] {
+    --accent: #79d9cf;
+  }
+  .dark[data-accent="rose"],
+  .dark [data-accent="rose"] {
+    --accent: #f4a0c0;
+  }
+  .dark[data-accent="blue"],
+  .dark [data-accent="blue"] {
+    --accent: #97beff;
+  }
+
+  html[data-accent],
+  html[data-accent][data-ui-style] {
+    --primary: var(--accent);
+    --primary-foreground: var(--accent-foreground);
+    --accent-foreground: #fff;
+    --accent-hover: color-mix(in srgb, var(--accent) 90%, #000);
+    --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    --accent-soft-foreground: var(--accent);
+    --accent-soft-hover: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    --focus: var(--accent);
+  }
+  html.dark[data-accent] {
+    --accent-foreground: #181823;
+    --accent-hover: color-mix(in srgb, var(--accent) 90%, #fff);
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  }
+  html[data-ui-style] {
+    --background: #f3f2f7;
+    --surface: #fff;
+    --surface-secondary: #eeedf4;
+    --surface-tertiary: #e5e3ee;
+    --muted: #666373;
+    --border: #dcd9e6;
+    --separator: #e8e5ef;
+    --field-radius: 1rem;
+    --surface-shadow: 0 6px 24px rgb(35 25 65 / 0.035);
+    --hero-background: #242331;
+    --hero-foreground: #fff;
+    --hero-muted: #d0ccdf;
+    --nav-background: #242331;
+    --nav-foreground: #dedbe9;
+    --nav-selected: #fff;
+    --nav-selected-foreground: #242331;
+  }
+  html.dark[data-ui-style] {
+    --background: #141419;
+    --surface: #24242d;
+    --overlay: #24242d;
+    --surface-secondary: #2d2d38;
+    --surface-tertiary: #363641;
+    --muted: #b7b4c5;
+    --border: #464351;
+    --separator: #393641;
+    --hero-background: #2e2c3e;
+    --nav-background: #30303c;
+    --surface-shadow: none;
+  }
+}
+
+/* 导航与首页主视觉使用具名组件类；其余页面复用共享卡片令牌。 */
+[data-ui-style] .lanpath-mobile-shell {
+  background-image: radial-gradient(ellipse at 100% 0%, var(--accent-soft), transparent 55%);
+}
+[data-ui-style] .lanpath-tabbar-items {
+  max-width: 32rem;
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--nav-foreground) 14%, transparent);
+  border-radius: 999px;
+  background: var(--nav-background);
+  color: var(--nav-foreground);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.16);
+}
+[data-ui-style] .lanpath-tabbar-items a {
+  color: var(--nav-foreground);
+}
+[data-ui-style] .lanpath-tabbar-items a[aria-current="page"] {
+  background: var(--nav-selected);
+  color: var(--nav-selected-foreground);
+}
+[data-ui-style="material"] .lanpath-tabbar {
+  padding-inline: max(1rem, env(safe-area-inset-left), env(safe-area-inset-right));
+  background: transparent;
+}
+[data-ui-style="material"] .lanpath-tabbar-items {
+  border-radius: 1.75rem;
+}
+[data-ui-style] .lanpath-status-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2rem;
+  background: var(--hero-background);
+  color: var(--hero-foreground);
+  isolation: isolate;
+}
+.lanpath-status-hero::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 18rem;
+  height: 18rem;
+  right: -7rem;
+  top: -8rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2.5rem color-mix(in srgb, var(--accent) 12%, transparent),
+    0 0 0 5rem color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.lanpath-hero-muted {
+  color: var(--hero-muted);
+}
+.lanpath-status-action {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-style] *,
+  [data-ui-style] *::before,
+  [data-ui-style] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

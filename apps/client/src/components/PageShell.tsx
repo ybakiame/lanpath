@@ -8,7 +8,7 @@ export function PageShell({ children }: { children: ReactNode }) {
     <div
       className={
         IS_MOBILE
-          ? "flex min-h-full flex-col gap-4 px-[max(1rem,env(safe-area-inset-left))] pt-[max(1.25rem,env(safe-area-inset-top))] pb-8"
+          ? "mx-auto flex min-h-full w-full max-w-2xl flex-col gap-5 pr-[max(1.25rem,env(safe-area-inset-right))] pl-[max(1.25rem,env(safe-area-inset-left))] pt-[calc(1.5rem+env(safe-area-inset-top))] pb-8"
           : "flex flex-col gap-6"
       }
     >
@@ -52,7 +52,7 @@ export function SubPageShell({
       <div
         className={
           IS_MOBILE
-            ? "flex flex-col gap-4 px-[max(1rem,env(safe-area-inset-left))] pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+            ? "mx-auto flex w-full max-w-2xl flex-col gap-5 pr-[max(1.25rem,env(safe-area-inset-right))] pl-[max(1.25rem,env(safe-area-inset-left))] pb-[max(1.5rem,env(safe-area-inset-bottom))]"
             : "flex flex-col gap-4"
         }
       >

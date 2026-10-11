@@ -9,7 +9,7 @@ export interface EntryLinkItem {
 }
 export function EntryLinkList({ entries }: { entries: EntryLinkItem[] }) {
   return (
-    <ul className="overflow-hidden rounded-2xl bg-surface">
+    <ul className="overflow-hidden rounded-3xl bg-surface shadow-surface">
       {entries.map(({ icon, title, description, onPress }) => (
         <li key={title} className="border-b border-separator last:border-0">
           <button
@@ -17,7 +17,7 @@ export function EntryLinkList({ entries }: { entries: EntryLinkItem[] }) {
             onClick={onPress}
             className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left outline-none active:bg-default focus-visible:bg-default"
           >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-accent-soft text-primary">
               {icon}
             </span>
             <span className="min-w-0 flex-1">

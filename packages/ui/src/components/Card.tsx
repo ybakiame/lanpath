@@ -20,7 +20,7 @@ function CardRoot({ className, children, ...rest }: CardSectionProps) {
       {...rest}
       className={cx(
         "bg-surface text-foreground",
-        IS_MOBILE ? "rounded-2xl shadow-surface" : "rounded-xl shadow-surface",
+        IS_MOBILE ? "rounded-3xl shadow-surface" : "rounded-xl shadow-surface",
         className,
       )}
     >

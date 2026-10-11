@@ -10,3 +10,4 @@
 - [协议采纳](adoption/adoption-report.md)
 
 - [拆分验证记录](verification-2026-10-11.md)
+- [移动端外观验证](testing/mobile-appearance-2026-10-11.md)

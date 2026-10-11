@@ -8,6 +8,7 @@ import {
   MapIcon,
   WifiIcon,
 } from "@heroicons/react/24/outline";
+import { IS_MOBILE } from "@lanpath/ui";
 import type { ComponentType, SVGProps } from "react";
 
 interface ConfigEntry {
@@ -69,11 +70,11 @@ export default function Config() {
   return (
     <PageShell>
       <div>
-        <h1 className="text-xl font-semibold">配置管理</h1>
+        <h1 className={IS_MOBILE ? "text-3xl font-semibold tracking-tight" : "text-xl font-semibold"}>配置管理</h1>
         <p className="text-sm text-muted">核心配置的分段编辑；修改需重启代理后生效</p>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className={IS_MOBILE ? "grid grid-cols-1 gap-3 min-[380px]:grid-cols-2" : "flex flex-col gap-2"}>
         {CONFIG_ENTRIES.map((entry) => {
           const Icon = entry.icon;
           return (
@@ -81,14 +82,29 @@ export default function Config() {
               key={entry.to}
               type="button"
               onClick={() => navigate(entry.to)}
-              className="flex items-center gap-3 rounded-xl border border-border/60 bg-surface p-4 text-left transition-colors hover:bg-surface-secondary/40"
+              className={
+                IS_MOBILE
+                  ? "flex min-h-40 flex-col items-start gap-3 rounded-3xl bg-surface p-5 text-left shadow-surface outline-none transition-colors active:bg-accent-soft focus-visible:outline-2 focus-visible:outline-focus"
+                  : "flex items-center gap-3 rounded-xl border border-border/60 bg-surface p-4 text-left transition-colors hover:bg-surface-secondary/40"
+              }
             >
-              <Icon className="size-5 shrink-0 text-muted" aria-hidden="true" />
+              <span
+                className={
+                  IS_MOBILE
+                    ? "flex size-11 items-center justify-center rounded-2xl bg-accent-soft text-primary"
+                    : "text-muted"
+                }
+              >
+                <Icon className="size-5 shrink-0" aria-hidden="true" />
+              </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-sm font-medium text-foreground">{entry.title}</span>
                 <span className="text-xs text-muted">{entry.description}</span>
               </span>
-              <ChevronRightIcon className="size-4 shrink-0 text-muted" aria-hidden="true" />
+              <ChevronRightIcon
+                className={IS_MOBILE ? "size-4 self-end text-muted" : "size-4 shrink-0 text-muted"}
+                aria-hidden="true"
+              />
             </button>
           );
         })}

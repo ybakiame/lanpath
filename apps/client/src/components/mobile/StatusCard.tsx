@@ -1,44 +1,37 @@
-import { Card, Chip } from "@lanpath/ui";
+import type { ReactNode } from "react";
+import { SignalIcon } from "@heroicons/react/24/outline";
 import { RULE_MODE_LABELS } from "../ruleModes";
 
 interface StatusCardProps {
-  /** 核心是否运行。 */
   running: boolean;
-  /** 当前出站模式（`rule` / `global` / `direct`）。 */
   ruleMode: string;
-  /** 未就绪的内置规则集（非空 = 降级运行，后台重试补齐后自动重载）。 */
   missingRuleSets?: string[];
+  action: ReactNode;
 }
 
-/**
- * 首页状态卡：运行状态大字（已连接/已停止，颜色区分）+ 出站模式。
- *
- * 当前模式以只读 chip 展示；切换统一由共享 ProxyStrategyCard 提供。
- *
- * 注：`ClientStatus` 无运行时长字段（见 `@lanpath/client-core` 的 types.ts），故不展示时长。
- */
-export function StatusCard({ running, ruleMode, missingRuleSets = [] }: StatusCardProps) {
+/** 真实核心状态为主指标；装饰路径不表示流量历史或连接质量。 */
+export function StatusCard({ running, ruleMode, missingRuleSets = [], action }: StatusCardProps) {
   return (
-    <Card>
-      <Card.Header>
-        <Card.Title>运行状态</Card.Title>
-        <Card.Description>{running ? "代理运行中，流量经系统 VPN 转发" : "代理当前未运行"}</Card.Description>
-      </Card.Header>
-      <Card.Content className="flex flex-col gap-4">
-        <span className={`text-2xl font-bold ${running ? "text-green-500" : "text-red-500"}`}>
-          {running ? "已连接" : "已停止"}
+    <section className="lanpath-status-hero flex flex-col gap-6 p-6" aria-label="运行状态">
+      <div className="flex items-center justify-between gap-3">
+        <span className="lanpath-hero-muted text-sm">连接状态</span>
+        <span className="lanpath-hero-muted flex items-center gap-2 text-xs">
+          <SignalIcon className="size-4" aria-hidden="true" />
+          {RULE_MODE_LABELS[ruleMode] ?? ruleMode}
         </span>
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">出站模式</span>
-          <Chip>{RULE_MODE_LABELS[ruleMode] ?? ruleMode}</Chip>
-        </div>
-        {running && missingRuleSets.length > 0 && (
-          <span className="text-xs text-amber-500">
-            分流规则集未全部就绪（{missingRuleSets.join("、")}
-            ），已降级运行；后台重试补齐后将自动恢复完整分流
-          </span>
-        )}
-      </Card.Content>
-    </Card>
+      </div>
+      <div className="flex flex-col gap-2" aria-live="polite">
+        <h2 className="text-4xl font-semibold tracking-tight">{running ? "已连接" : "准备连接"}</h2>
+        <p className="lanpath-hero-muted text-sm">
+          {running ? "代理运行中，沿你的路径出发" : "代理已停止，选择订阅后即可出发"}
+        </p>
+      </div>
+      {action}
+      {running && missingRuleSets.length > 0 && (
+        <p className="lanpath-hero-muted text-xs leading-relaxed">
+          分流规则集未全部就绪（{missingRuleSets.join("、")}），已降级运行；补齐后自动恢复完整分流。
+        </p>
+      )}
+    </section>
   );
 }
