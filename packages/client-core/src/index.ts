@@ -38,6 +38,7 @@ export * from "./outboundForm";
 export * from "./outboundOptions";
 export * from "./groupForm";
 export * from "./pendingRestart";
+export * from "./runtimeQueries";
 export * from "./ruleOutboundOptions";
 export * from "./ruleSetOptions";
 export * from "./routeSlice";

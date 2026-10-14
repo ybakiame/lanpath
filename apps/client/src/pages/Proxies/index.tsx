@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { proxiesList, proxiesSelect, proxiesTestDelay, proxiesTestGroup, toErrorMessage } from "@lanpath/client-core";
 import type { GroupView, ProxyList } from "@lanpath/client-core";
 import { PROXIES_KEY } from "@lanpath/client-core";
+import { useProxyStatus } from "@lanpath/client-core";
 import { toastError, toastSuccess } from "@lanpath/client-core";
 import NodeItem from "./NodeItem";
 import { SubPageShell } from "../../components/PageShell";
@@ -15,6 +16,8 @@ const REFETCH_INTERVAL_MS = 5000;
 export default function Proxies() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { data: status } = useProxyStatus();
+  const running = status?.core_running ?? false;
 
   // 测速中状态：分组名 → boolean；节点名 → boolean
   const [testingGroups, setTestingGroups] = useState<Set<string>>(new Set());
@@ -28,6 +31,7 @@ export default function Proxies() {
   const { data, isLoading, error } = useQuery<ProxyList>({
     queryKey: PROXIES_KEY,
     queryFn: proxiesList,
+    enabled: running,
     refetchInterval: (query) => {
       if (skipPollRef.current) return false;
       // 若上次查询出错（核心未运行），降低轮询频率到 10s，避免刷屏
@@ -37,8 +41,7 @@ export default function Proxies() {
     retry: false,
   });
 
-  // 核心未运行时 error 不为 null
-  const coreNotRunning = Boolean(error);
+  const coreNotRunning = !running;
 
   const nodeMap = buildNodeMap(data?.nodes ?? []);
 
@@ -169,6 +172,23 @@ export default function Proxies() {
             </Button>
           </Card.Content>
         </Card>
+      )}
+
+      {running && error && (
+        <Alert status="warning">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>代理正在运行，但策略读取失败</Alert.Title>
+            <Alert.Description>{toErrorMessage(error)}</Alert.Description>
+            <Button
+              size="sm"
+              variant="secondary"
+              onPress={() => void queryClient.invalidateQueries({ queryKey: PROXIES_KEY })}
+            >
+              重新读取
+            </Button>
+          </Alert.Content>
+        </Alert>
       )}
 
       {isLoading && !coreNotRunning && (

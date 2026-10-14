@@ -56,6 +56,7 @@ export function DesktopRunConfig({
                 id="dashboard-subscription"
                 aria-label="生效订阅"
                 value={config?.active_subscription_id ?? ""}
+                isDisabled={loading || busy !== null}
                 onChange={(key) => void onSelectSubscription(String(key ?? ""))}
                 placeholder="请选择订阅"
                 fullWidth
@@ -87,7 +88,7 @@ export function DesktopRunConfig({
               value={activeCore?.path ?? ""}
               onChange={(key) => void onSelectCore(String(key ?? ""))}
               placeholder="请选择核心"
-              isDisabled={cores.length === 0}
+              isDisabled={cores.length === 0 || loading || busy !== null}
               fullWidth
             >
               <Select.Trigger>

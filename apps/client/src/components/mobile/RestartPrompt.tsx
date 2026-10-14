@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import {
-  PROXY_STATUS_KEY,
+  writeRuntimeStatus,
   proxyStatus,
   startProxy,
   stopProxy,
@@ -76,10 +76,10 @@ export function RestartPrompt() {
     setRestarting(true);
     try {
       const stopped = await stopProxy();
-      queryClient.setQueryData(PROXY_STATUS_KEY, stopped);
+      await writeRuntimeStatus(queryClient, stopped);
       await waitCoreStopped();
       const started = await startProxy();
-      queryClient.setQueryData(PROXY_STATUS_KEY, started);
+      await writeRuntimeStatus(queryClient, started);
       reset();
       setSheetOpen(false);
       toastSuccess("代理已重启，配置已生效");

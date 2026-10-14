@@ -20,8 +20,6 @@ import DashboardStatusCards from "../DashboardStatusCards";
 
 export default function Dashboard() {
   const saveConfigMutation = useSaveConfig();
-  // 保存进行中（替代原 store.loading；start/stop 在途由 busy 覆盖）。
-  const loading = saveConfigMutation.isPending;
   // 跨页共享的最近操作错误（Alert 与 TUN 授权门禁消费）。
   const [error, setLastError] = useAtom(lastActionErrorAtom);
   const {
@@ -63,12 +61,12 @@ export default function Dashboard() {
       if (!sub) throw new Error("订阅不存在，请刷新后重试");
       await activateSubscription(sub);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setActionError(null);
       // 生效订阅切换需重启核心才生效：上报全局脏标记（RestartPrompt 消费）。
       markRestartRequired("subscription", status?.core_running ?? false);
-      void queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
-      void queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+      await queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
+      await queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
     },
     onError: (err: unknown) => {
       setActionError(toErrorMessage(err));
@@ -79,9 +77,9 @@ export default function Dashboard() {
     mutationFn: async (path: string) => {
       await setActiveCore(path);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setActionError(null);
-      void queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
+      await queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
       void queryClient.invalidateQueries({ queryKey: CORES_KEY });
     },
     onError: (err: unknown) => {
@@ -115,6 +113,9 @@ export default function Dashboard() {
     },
     [queryClient, saveConfigMutation],
   );
+
+  // 订阅/核心切换及配置重读完成前禁用启动，避免读取上一份配置。
+  const loading = saveConfigMutation.isPending || selectSubMutation.isPending || selectCoreMutation.isPending;
 
   const handleStart = async () => {
     setBusy("start");

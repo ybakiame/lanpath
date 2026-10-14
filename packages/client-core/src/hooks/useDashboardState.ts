@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listSubscriptions, startProxy, stopProxy, toErrorMessage } from "../api";
-import { PROXY_STATUS_KEY, SUBSCRIPTIONS_KEY } from "../api/keys";
+import { SUBSCRIPTIONS_KEY } from "../api/keys";
+import { writeRuntimeStatus } from "../runtimeQueries";
 import type { ClientStatus, SubscriptionView } from "../api";
 
 import { useCapabilities } from "./useCapabilities";
@@ -24,8 +25,8 @@ export function useDashboardState({
     queryFn: listSubscriptions,
     refetchInterval: 5000,
   });
-  const writeStatus = (next: ClientStatus) => {
-    queryClient.setQueryData(PROXY_STATUS_KEY, next);
+  const writeStatus = async (next: ClientStatus) => {
+    await writeRuntimeStatus(queryClient, next);
     onActionSuccess();
   };
   const reportError = (error: unknown) => onActionError(toErrorMessage(error));

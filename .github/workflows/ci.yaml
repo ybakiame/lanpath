@@ -33,8 +33,8 @@ jobs:
         run: |
           nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command cargo build --workspace
           nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun run verify:rust
-      - name: Portable and release tooling tests
-        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun test apps/client/scripts/package-portable.test.ts scripts/release-manifest.test.ts scripts/verify-release-signatures.test.ts
+      - name: Runtime cache, Portable and release tooling tests
+        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun test packages/client-core/scripts/runtime-queries.test.ts apps/client/scripts/package-portable.test.ts scripts/release-manifest.test.ts scripts/verify-release-signatures.test.ts
   android:
     uses: ./.github/workflows/android-build.yaml
     with:
