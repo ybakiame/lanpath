@@ -1,9 +1,12 @@
 # 开发与工作流
 
-先 git submodule update --init --recursive，再 nix develop；根目录 bun install --frozen-lockfile。
+先 git submodule update --init --recursive，再 nix develop --no-pure-eval；根目录运行 lanpath-install。
 协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
 本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 的明确例外见 ADR。
 主 nixpkgs 使用 nixos-26.05 并由 flake.lock 固定提交；Bun 1.4.2 通过官方归档与 SHA256 固定，避免稳定源自带版本与 Windows CI 不一致。Rust 仍由 rust-toolchain.toml 固定；Android SDK 输入保持独立锁定，此阶段不更新其传递 nixpkgs。更新主源使用 `nix flake update nixpkgs`，随后执行双端完整验证，见 ADR-0004。
+devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不维护 devenv.yaml/devenv.lock。配置入口为 devenv.nix，工具、桌面、Android 和共用命令位于 nix/；可用 direnv allow 启用已提交的 .envrc。进入 shell 仅初始化环境，不安装依赖、不构建 AAR、不启动代理。
+本地及 CI 共用 lanpath-install、lanpath-rust-targets、lanpath-verify-frontend、lanpath-verify-rust、lanpath-test-tools、lanpath-build-aar 和 lanpath-build-android-debug/release；这些命令可从仓库子目录调用，失败立即退出。仍可在 shell 中直接使用原 Bun/Cargo 命令。发布签名只由既有 release 工作流显式注入，Husky 继续作为唯一提交检查入口。
+初次构建使用 cache.nixos.org 与 devenv 官方签名缓存；devenv 任务辅助程序有独立的上游锁定构建快照，不替换项目工具链，缓存未命中时可从源码构建。不承诺 Flake 集成具有 devenv CLI 的全部评估缓存和性能特性。见 ADR-0005。
 前端运行 bun run --filter lanpath-app dev 或 dev:android。
 浏览器使用 http://localhost:1420/?browser-debug=1；mock 不能证明真实 IPC/设备行为。
 共享 UI 的 CSS 扫描由 apps/client/src/index.css 的 @source 覆盖。

@@ -28,7 +28,7 @@ keystore.properties 与 CI 临时 keystore 均不提交，任务结束清理；�
 测试版仅输出 `prerelease.json`，稳定版输出 `latest.json`；beta/rc 应用与 Portable 的检查更新打开发布列表，避免混入稳定自动更新通道。
 发布文件附带 SHA256SUMS；Windows 更新签名不等同 Authenticode，当前未配置 Windows 代码签名证书。
 协议子模块为私有治理资源，编译不依赖它；公开 CI 不递归检出子模块，也不向 fork PR 提供私有 token。
-GitHub Linux runner 清理预装 SDK 腾出空间，然后使用项目 Nix SDK；云端明确使用 cache.nixos.org，避免继承本机镜像配置。
+GitHub Linux runner 清理预装 SDK 腾出空间，然后使用项目 Nix SDK；云端明确使用 cache.nixos.org 和 devenv 官方签名缓存，避免继承本机镜像配置。Linux/Android/publish 通过 nix develop --no-pure-eval 进入同一环境；仅验证和构建命令复用 devenv scripts，不改变签名身份和发布门禁。
 Windows CI 例外使用锁定 Rust/Bun 和固定 Windows runner 标签；本地、Linux/Android 构建仍 Nix。
 
 ## Windows Portable

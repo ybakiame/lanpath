@@ -20,6 +20,8 @@ Windows 的同一二进制分发为 NSIS 与 Portable ZIP，便携模式禁用�
 Windows native 构建例外保持锁定版本，Linux/Android 与发布验签使用项目 Nix；beta/rc 手动更新，稳定版使用签名 latest.json。
 见 [ADR-0003](adr/0003-first-public-release.md)。
 
+开发环境通过 devenv 模块组织，由 Flake 输出统一 shell、flake.lock 锁定依赖。项目工具链基于 26.05，Bun 单独固定并与 Windows 对齐；Android SDK 和 devenv 辅助程序保留各自上游锁定构建快照。环境初始化不自动执行业务构建或发布，CI 复用 nix/commands.nix 中的显式命令；不引入第二份项目锁文件或提交钩子。见 ADR-0004/0005。
+
 主题偏好与实际深浅解析由 @lanpath/client-core 管理；深色纯黑背景是附属布尔偏好，
 不增加主题模式或核心配置字段。应用 ThemeProvider 管理强调色并将编译期平台投影为 data-platform；
 共享 UI 消费语义令牌。主题二级页为 /settings/theme，移动与桌面共用路由和控件。

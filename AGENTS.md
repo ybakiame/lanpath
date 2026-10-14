@@ -16,7 +16,7 @@ Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；桌面
 
 ## 环境和验证
 
-本地编译/运行一律先进入本仓 nix develop；Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
+本地编译/运行一律先进入本仓 nix develop --no-pure-eval（devenv Flake 集成）；Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
 Gradle 使用项目 wrapper，不使用宿主 Gradle。唯一环境例外：用户已授权 Windows CI
 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 Nix。
 代理可在 Nix 链接失败时设置 http_proxy/https_proxy 为 http://127.0.0.1:7899 后重试。

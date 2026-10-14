@@ -66,13 +66,15 @@ jobs:
         with:
           extra_nix_config: |
             accept-flake-config = true
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
       - name: Generate signed updater manifest
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_REPOSITORY: ${{ github.repository }}
         run: |
-          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun scripts/verify-release-signatures.ts dist
-          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun scripts/release-manifest.ts dist
+          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command bun scripts/verify-release-signatures.ts dist
+          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command bun scripts/release-manifest.ts dist
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag }}

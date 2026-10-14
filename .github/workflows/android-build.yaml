@@ -25,12 +25,14 @@ jobs:
         with:
           extra_nix_config: |
             accept-flake-config = true
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
       - name: Install dependencies and Rust target
         run: |
-          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bun install --frozen-lockfile
-          nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command rustup target add aarch64-linux-android
+          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-install
+          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-rust-targets
       - name: Build branded Go AAR
-        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bash apps/client/scripts/build-lanpath-core.sh
+        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-build-aar
       - name: Configure release signing
         if: inputs.release
         env:
@@ -43,14 +45,14 @@ jobs:
         working-directory: apps/client
         run: |
           if [ '${{ inputs.release }}' = 'true' ]; then
-            nix develop --option substituters https://cache.nixos.org --option extra-substituters "" ../.. --command bun run android:build
+            nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org ../.. --command lanpath-build-android-release
           else
-            nix develop --option substituters https://cache.nixos.org --option extra-substituters "" ../.. --command bun run tauri android build --debug --target aarch64
+            nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org ../.. --command lanpath-build-android-debug
           fi
       - name: Verify and stage APK
         env:
           RELEASE_BUILD: ${{ inputs.release }}
-        run: nix develop --option substituters https://cache.nixos.org --option extra-substituters "" --command bash scripts/stage-android-apk.sh
+        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command bash scripts/stage-android-apk.sh
       - name: Upload APK
         uses: actions/upload-artifact@v5
         with:

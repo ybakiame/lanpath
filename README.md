@@ -14,7 +14,7 @@ Windows 提供 x64/arm64 安装版与 Portable；Android 提供 arm64 release �
 
 ~~~bash
 git submodule update --init --recursive
-nix develop
+nix develop --no-pure-eval
 bun install --frozen-lockfile
 bun run --filter lanpath-app verify
 bun run verify:rust

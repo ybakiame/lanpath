@@ -14,3 +14,5 @@ node_modules/
 apps/client/src-tauri/resources/seed/
 apps/client/src-tauri/gen/android/app/libs/*.aar
 apps/client/src-tauri/gen/android/app/libs/*.jar
+.devenv
+.direnv/

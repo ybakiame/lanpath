@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 引入固定版本 devenv 的 Flake 集成，拆分工具/桌面/Android 模块；本地和 CI 共用验证与构建命令，复用唯一 flake.lock、原 Husky 和 Gradle wrapper。
+
 - 主 Nix 开发源迁至 nixos-26.05，单独固定 Bun 1.4.2 与 Windows CI 对齐；保留 Rust 和 Android SDK/NDK 约束。
 
 - 桌面窗口默认居中、最小尺寸 760×560 逻辑像素；小屏和高 DPI 下按工作区限制启动及最小尺寸。
