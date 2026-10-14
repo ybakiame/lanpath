@@ -11,7 +11,7 @@
   };
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     android-nixpkgs.url = "github:tadfisher/android-nixpkgs/stable";
   };
 
@@ -19,6 +19,14 @@
   let
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
+    # 与 Windows CI 保持 Bun 1.4.2；26.05 自带 1.3.13，不随源迁移降级锁文件工具。
+    bun = pkgs.bun.overrideAttrs {
+      version = "1.4.2";
+      src = pkgs.fetchurl {
+        url = "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-baseline.zip";
+        hash = "sha256-xngEDxT+BEDrg503y9DOTAUaMtpygGrJfeamqra/co8=";
+      };
+    };
 
     # 声明式 Android SDK：版本与 CI/真机验证所用完全一致
     android-sdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
@@ -81,12 +89,12 @@
   in {
     devShells.${system}.default = pkgs.mkShell {
       # 构建基础与工具
-      packages = desktopLibs ++ (with pkgs; [
+      packages = desktopLibs ++ [ bun ] ++ (with pkgs; [
         git curl wget unzip gnumake cmake ninja pkg-config perl
         rustup cargo-ndk
         android-sdk jdk17 gradle
         go
-        bun nodejs
+        nodejs
         llvmPackages.libclang
         clang
       ]);

@@ -18,3 +18,4 @@
 - [桌面 Portable 与数据目录验证](testing/desktop-portable-2026-10-11.md)
 - [首次发版说明](releases/0.1.1-beta.1.md)
 - [首次发版验证](testing/first-release-2026-10-11.md)
+- [主开发源稳定分支验证](testing/2026-10-15-stable-nixpkgs.md)
