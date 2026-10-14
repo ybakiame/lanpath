@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button, IS_MOBILE, Navbar } from "@lanpath/ui";
+import { DESKTOP_NAV_ITEMS } from "../layout/config/nav/desktop";
 
 export function PageShell({ children }: { children: ReactNode }) {
   return (
@@ -28,12 +29,15 @@ export function SubPageShell({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const desktopBack = !DESKTOP_NAV_ITEMS.some((item) => item.to === pathname);
+  const parent = backTo ?? (pathname.slice(0, pathname.lastIndexOf("/")) || "/");
   const back = (
     <Button
       variant="ghost"
       isIconOnly
       aria-label="返回"
-      onPress={() => (backTo ? navigate(backTo, { replace: true }) : navigate(-1))}
+      onPress={() => (IS_MOBILE ? (backTo ? navigate(backTo, { replace: true }) : navigate(-1)) : navigate(parent))}
     >
       <ArrowLeft className="size-5" />
     </Button>
@@ -44,6 +48,7 @@ export function SubPageShell({
         <Navbar title={title} left={back} right={action} />
       ) : (
         <header className="flex items-center gap-3">
+          {desktopBack && back}
           <h1 className="flex-1 text-xl font-semibold">{title}</h1>
           {action}
         </header>

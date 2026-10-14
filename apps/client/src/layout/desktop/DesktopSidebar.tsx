@@ -16,17 +16,25 @@ function visibleNavItems(capabilities: ReturnType<typeof useCapabilities>["data"
   });
 }
 
-/** 桌面端侧栏：主界面唯一导航（桌面客户端仅跑桌面，`lg` 起常显）。 */
-export function DesktopSidebar() {
+/** 宽窗口常驻，窄窗口由导航对话框承载同一菜单。 */
+export function DesktopSidebar({ compact = false, onNavigate }: { compact?: boolean; onNavigate?: () => void }) {
   const { data: capabilities } = useCapabilities();
   const items = visibleNavItems(capabilities);
 
   return (
-    <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-border/60 bg-surface p-4 lg:flex">
-      <div className="flex items-center gap-2 px-2">
-        <BrandIcon />
-        <span className="text-sm font-semibold">岚径 · Lanpath</span>
-      </div>
+    <aside
+      className={
+        compact
+          ? "flex flex-col gap-4"
+          : "hidden min-h-0 w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border/60 bg-surface p-4 lg:flex"
+      }
+    >
+      {!compact && (
+        <div className="flex items-center gap-2 px-2">
+          <BrandIcon />
+          <span className="text-sm font-semibold">岚径 · Lanpath</span>
+        </div>
+      )}
 
       <nav className="flex flex-col gap-1" aria-label="主导航">
         {items.map((item: DesktopNavItem) => (
@@ -34,6 +42,7 @@ export function DesktopSidebar() {
             key={item.to}
             to={item.to}
             end={item.to === "/"}
+            onClick={onNavigate}
             className={({ isActive }) =>
               clsx(
                 "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",

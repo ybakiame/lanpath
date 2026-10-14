@@ -96,7 +96,23 @@ pub fn run() {
                 std::fs::create_dir_all(&webview_dir)?;
                 for config in &app.config().app.windows {
                     let window = tauri::WebviewWindowBuilder::from_config(app, config)?
-                        .data_directory(webview_dir.clone());
+                        .data_directory(webview_dir.clone())
+                        .min_inner_size(760.0, 560.0)
+                        .center();
+                    // 逻辑像素随 DPI 换算；保留窗口边框空间，小屏不能被默认尺寸撑出工作区。
+                    let window = if let Ok(Some(monitor)) = app.primary_monitor() {
+                        let area = monitor
+                            .work_area()
+                            .size
+                            .to_logical::<f64>(monitor.scale_factor());
+                        let width = (area.width - 32.0).max(1.0);
+                        let height = (area.height - 48.0).max(1.0);
+                        window
+                            .inner_size(config.width.min(width), config.height.min(height))
+                            .min_inner_size(760.0_f64.min(width), 560.0_f64.min(height))
+                    } else {
+                        window
+                    };
                     #[cfg(target_os = "windows")]
                     let window = window.decorations(false);
                     window.build()?;

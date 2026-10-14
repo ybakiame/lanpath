@@ -6,6 +6,7 @@
 前端运行 bun run --filter lanpath-app dev 或 dev:android。
 浏览器使用 http://localhost:1420/?browser-debug=1；mock 不能证明真实 IPC/设备行为。
 共享 UI 的 CSS 扫描由 apps/client/src/index.css 的 @source 覆盖。
+桌面壳默认居中创建窗口，常规最小尺寸为 760×560 逻辑像素；启动与最小尺寸按主屏工作区和 DPI 收敛，保留边框空间。宽度低于 1024 时顶部提供主导航按钮，菜单支持键盘关闭与焦点恢复；侧栏直达页面保留标题，其他子页面返回显式 backTo 或路由父级。
 
 ## Android
 
