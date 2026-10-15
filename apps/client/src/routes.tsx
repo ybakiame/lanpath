@@ -33,6 +33,7 @@ const redirect = (path: string, to: string): RouteObject => ({
 });
 const sharedRoutes: RouteObject[] = [
   { path: "/", element: <Dashboard /> },
+  { path: "/override", element: <Override /> },
   { path: "/subscriptions", element: <Subscriptions /> },
   { path: "/config", element: <Config /> },
   { path: "/config/dns", element: <Dns /> },
@@ -76,7 +77,6 @@ const platformRoutes: RouteObject[] = IS_MOBILE
       { path: "/mitm", element: <Mitm /> },
       { path: "/scripts", element: <Scripts /> },
       { path: "/tools", element: <Tools /> },
-      { path: "/override", element: <Override /> },
     ];
 export function AppRoutes() {
   return useRoutes([...sharedRoutes, ...platformRoutes, redirect("*", "/")]);

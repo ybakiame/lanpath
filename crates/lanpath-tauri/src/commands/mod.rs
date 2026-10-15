@@ -21,6 +21,7 @@ mod proxy;
 mod stats;
 mod subscription;
 mod subscription_nodes;
+mod subscription_source;
 mod task;
 
 pub use baseline_view::*;
@@ -37,6 +38,7 @@ pub use proxy::*;
 pub use stats::*;
 pub use subscription::*;
 pub use subscription_nodes::*;
+pub use subscription_source::*;
 pub use task::*;
 
 use lanpath_client::SubFormat;

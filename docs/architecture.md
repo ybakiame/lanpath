@@ -25,3 +25,7 @@ Windows native 构建例外保持锁定版本，Linux/Android 与发布验签使
 主题偏好与实际深浅解析由 @lanpath/client-core 管理；深色纯黑背景是附属布尔偏好，
 不增加主题模式或核心配置字段。应用 ThemeProvider 管理强调色并将编译期平台投影为 data-platform；
 共享 UI 消费语义令牌。主题二级页为 /settings/theme，移动与桌面共用路由和控件。
+
+订阅原文与内部转换缓存分离：成功拉取保存 `<id>.source.json`，查看/导出不重新请求；
+YAML/JSON/分享链接分别导出 yaml/json/txt，桌面与 Android 均写入下载目录的 Lanpath 文件夹。
+仪表盘管理当前订阅的覆写绑定，模板管理双端共用，既有 profile_id 语义不变。见 ADR-0006。

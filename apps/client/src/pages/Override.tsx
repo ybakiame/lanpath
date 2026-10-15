@@ -1,3 +1,4 @@
+import { SubPageShell } from "../components/PageShell";
 import { useState } from "react";
 import { Alert, Button, Card } from "@lanpath/ui";
 import clsx from "clsx";
@@ -127,11 +128,10 @@ export default function Override() {
   const displayError = error ?? (profileDetailError ? toErrorMessage(profileDetailError) : null);
 
   return (
-    <div className="flex flex-col gap-6">
+    <SubPageShell title="覆写模板">
       <div>
-        <h1 className="text-xl font-semibold">覆写</h1>
         <p className="text-sm text-muted">
-          多模板管理：维护 sing-box 覆写模板，在订阅页关联后随订阅生效；合成配置预览已移至首页与订阅页
+          多模板管理：维护 sing-box 覆写模板，在首页仪表盘关联后随订阅生效；合成配置预览位于首页
         </p>
       </div>
 
@@ -140,7 +140,7 @@ export default function Override() {
         <Card className="w-full shrink-0 lg:w-80">
           <Card.Header>
             <Card.Title>覆写模板</Card.Title>
-            <Card.Description>在订阅页关联后随订阅生效</Card.Description>
+            <Card.Description>在首页仪表盘关联后随订阅生效</Card.Description>
           </Card.Header>
           <Card.Content className="flex flex-col gap-2">
             {(() => {
@@ -266,6 +266,6 @@ export default function Override() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDelete()}
       />
-    </div>
+    </SubPageShell>
   );
 }

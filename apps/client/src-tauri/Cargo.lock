@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-app"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-client"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-common"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "libc",
  "serde",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-engine"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2566,7 +2566,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-mitm"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2598,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-script"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2615,7 +2615,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-tauri"
-version = "0.1.1-beta.1"
+version = "0.1.2-beta.1"
 dependencies = [
  "chrono",
  "lanpath-client",

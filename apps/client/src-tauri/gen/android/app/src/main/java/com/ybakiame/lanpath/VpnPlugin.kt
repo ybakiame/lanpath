@@ -44,6 +44,12 @@ class NotifyPrefsArgs {
   var subscriptionName: String? = null
 }
 
+@InvokeArg
+class ExportSubscriptionArgs {
+  var filename: String = ""
+  var content: String = ""
+}
+
 /**
  * Tauri mobile plugin "vpn": exposes prepare/start/stop/isRunning/exportLogs/openLogsDir/updateNotifyPrefs commands.
  *
@@ -224,6 +230,36 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: Exception) {
       Log.e("VpnPlugin", "exportLogs failed", e)
       invoke.reject("导出日志失败: ${e.message ?: e.javaClass.simpleName}")
+    }
+  }
+
+  /** Export the original UTF-8 subscription through the existing public Downloads adapter. */
+  @Command
+  fun exportSubscription(invoke: Invoke) {
+    val args = invoke.parseArgs(ExportSubscriptionArgs::class.java)
+    if (!Regex("Lanpath-subscription-[a-f0-9-]+\\.(yaml|json|txt)").matches(args.filename)) {
+      invoke.reject("无效的导出文件名")
+      return
+    }
+    val resolver = activity.contentResolver
+    var uri: android.net.Uri? = null
+    try {
+      val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, args.filename)
+        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Lanpath/")
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+      }
+      val created = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: throw IllegalStateException("无法创建下载文件")
+      uri = created
+      resolver.openOutputStream(created)?.use { it.write(args.content.toByteArray(Charsets.UTF_8)) }
+        ?: throw IllegalStateException("无法写入下载文件")
+      resolver.update(created, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+      invoke.resolveObject("Download/Lanpath/${args.filename}")
+    } catch (e: Exception) {
+      uri?.let { resolver.delete(it, null, null) }
+      invoke.reject("导出订阅失败: ${e.message ?: e.javaClass.simpleName}")
     }
   }
 

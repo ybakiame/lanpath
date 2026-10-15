@@ -1,4 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { SUBSCRIPTION_PROFILE_MUTATION_KEY } from "@lanpath/client-core";
+import { DashboardOverride } from "./DashboardOverride";
+import { useIsMutating, useMutation, useQuery } from "@tanstack/react-query";
 import { useAtom } from "jotai";
 import { useCallback, useState } from "react";
 import { Alert } from "@lanpath/ui";
@@ -19,6 +21,7 @@ import { DesktopRunConfig } from "./DesktopRunConfig";
 import DashboardStatusCards from "../DashboardStatusCards";
 
 export default function Dashboard() {
+  const profilePending = useIsMutating({ mutationKey: SUBSCRIPTION_PROFILE_MUTATION_KEY }) > 0;
   const saveConfigMutation = useSaveConfig();
   // 跨页共享的最近操作错误（Alert 与 TUN 授权门禁消费）。
   const [error, setLastError] = useAtom(lastActionErrorAtom);
@@ -115,7 +118,8 @@ export default function Dashboard() {
   );
 
   // 订阅/核心切换及配置重读完成前禁用启动，避免读取上一份配置。
-  const loading = saveConfigMutation.isPending || selectSubMutation.isPending || selectCoreMutation.isPending;
+  const loading =
+    profilePending || saveConfigMutation.isPending || selectSubMutation.isPending || selectCoreMutation.isPending;
 
   const handleStart = async () => {
     setBusy("start");
@@ -208,7 +212,7 @@ export default function Dashboard() {
   if (activeSub?.profile_id) {
     const profile = profiles.find((p) => p.id === activeSub.profile_id);
     if (!profile) {
-      gateMessages.push("关联的覆写模板已失效，请在订阅页重新关联");
+      gateMessages.push("关联的覆写模板已失效，请在下方重新关联");
     }
   }
   const canStart = gateMessages.length === 0;
@@ -262,6 +266,8 @@ export default function Dashboard() {
         onStart={handleStart}
         onStop={handleStop}
       />
+
+      <DashboardOverride sub={activeSub} running={running} disabled={loading || busy !== null} />
 
       <ProxyStrategyCard running={running} subscriptionName={activeSub?.name ?? null} />
 

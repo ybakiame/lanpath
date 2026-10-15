@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.1.2-beta.1] - 2026-10-15
+
+- 新增订阅原文查看与导出：保留成功响应的 YAML/JSON/分享链接原始文本、注释和换行，导出到下载目录的 Lanpath 文件夹；旧订阅需刷新后使用，内部 sing-box JSON 转换不变。
+- 双端订阅列表改为自适应卡片，覆写关联迁至首页仪表盘；模板管理两端共用，保持原有按订阅绑定的语义。
+- 修复订阅刷新覆盖同期覆写关联、名称与启用状态的并发问题。
+
 - 引入固定版本 devenv 的 Flake 集成，拆分工具/桌面/Android 模块；本地和 CI 共用验证与构建命令，复用唯一 flake.lock、原 Husky 和 Gradle wrapper。
 
 - 主 Nix 开发源迁至 nixos-26.05，单独固定 Bun 1.4.2 与 Windows CI 对齐；保留 Rust 和 Android SDK/NDK 约束。

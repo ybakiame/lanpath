@@ -19,11 +19,13 @@ use crate::profile::{extract_clash_proxies, extract_nodes_singbox};
 use crate::share_link::{ShareLinkParseResult, parse_share_links};
 
 mod fetch;
+mod source;
 mod store;
 #[cfg(test)]
 mod tests;
 
 pub use fetch::*;
+pub use source::*;
 pub use store::*;
 
 /// Subscription user info, from the `subscription-userinfo` response header.
@@ -110,6 +112,8 @@ impl Default for SubFormat {
 /// line-level warnings.
 #[derive(Debug, Clone)]
 pub struct FetchResult {
+    /// Exact UTF-8 response body, before decoding or conversion.
+    pub source: String,
     pub format: SubFormat,
     pub singbox_nodes: Vec<Value>,
     pub userinfo: Option<SubscriptionInfo>,
@@ -226,7 +230,7 @@ pub fn parse_subscription_body(
     text: &str,
     info: Option<SubscriptionInfo>,
 ) -> LanpathResult<FetchResult> {
-    let trimmed = text.trim();
+    let trimmed = text.trim_start_matches('\u{feff}').trim();
     if trimmed.is_empty() {
         return Err(LanpathError::Client(
             "subscription body is empty".to_string(),
@@ -238,6 +242,7 @@ pub fn parse_subscription_body(
         && decoded.contains("://")
     {
         return Ok(share_links_result(
+            text,
             parse_share_links(&decoded),
             info,
             SubFormat::ShareLinks,
@@ -261,6 +266,7 @@ pub fn parse_subscription_body(
             }
         }
         return Ok(FetchResult {
+            source: text.to_string(),
             format: SubFormat::ClashYaml,
             singbox_nodes,
             userinfo: info,
@@ -274,6 +280,7 @@ pub fn parse_subscription_body(
         && parsed.get("outbounds").and_then(Value::as_array).is_some()
     {
         return Ok(FetchResult {
+            source: text.to_string(),
             format: SubFormat::SingBoxJson,
             singbox_nodes: extract_nodes_singbox(&parsed),
             userinfo: info,
@@ -284,6 +291,7 @@ pub fn parse_subscription_body(
     // ④ Plaintext share links.
     if trimmed.lines().any(|l| l.contains("://")) {
         return Ok(share_links_result(
+            text,
             parse_share_links(trimmed),
             info,
             SubFormat::ShareLinks,
@@ -297,6 +305,7 @@ pub fn parse_subscription_body(
 
 /// Share link parse result → [`FetchResult`].
 fn share_links_result(
+    source: &str,
     parsed: ShareLinkParseResult,
     info: Option<SubscriptionInfo>,
     format: SubFormat,
@@ -307,6 +316,7 @@ fn share_links_result(
         .map(|node| node.outbound_singbox.clone())
         .collect();
     FetchResult {
+        source: source.to_string(),
         format,
         singbox_nodes,
         userinfo: info,

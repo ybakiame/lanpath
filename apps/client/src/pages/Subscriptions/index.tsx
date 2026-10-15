@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Plus } from "lucide-react";
-import { Button, Card, Spinner, IS_MOBILE } from "@lanpath/ui";
+import { Button, Card, Spinner } from "@lanpath/ui";
 import {
   CONFIG_KEY,
-  PROFILES_KEY,
-  listProfiles,
   SUBSCRIPTIONS_KEY,
+  subscriptionSourceKey,
   addSubscription,
   listSubscriptions,
   markRestartRequired,
@@ -21,16 +20,15 @@ import {
   useClientConfig,
   useProxyStatus,
 } from "@lanpath/client-core";
-import type { SubscriptionView, ProfileView } from "@lanpath/client-core";
+import type { SubscriptionView } from "@lanpath/client-core";
 import { SubPageShell } from "../../components/PageShell";
 import { SubscriptionDeleteConfirm } from "../../components/mobile/SubscriptionDeleteConfirm";
 import { SubscriptionForm } from "./SubscriptionForm";
 import type { SubscriptionDraft } from "./SubscriptionForm";
-import ConfigPreviewModal from "../../components/desktop/ConfigPreviewModal";
-import { SubscriptionTable } from "./desktop/SubscriptionTable";
-import { SubscriptionRow } from "../../components/mobile/SubscriptionRow";
+import { SubscriptionSourceSheet } from "./SubscriptionSourceSheet";
+import { SubscriptionCard } from "./SubscriptionCard";
 
-/** 双端共享订阅 CRUD、生效与刷新；桌面保留覆写和配置预览。 */
+/** 双端共享订阅 CRUD、生效与刷新；原文查看与导出。 */
 export default function Subscriptions() {
   const queryClient = useQueryClient();
   const { data: config } = useClientConfig();
@@ -49,11 +47,6 @@ export default function Subscriptions() {
   });
 
   // ---- 局部 UI 状态 ----
-  const { data: profiles = [] } = useQuery<ProfileView[]>({
-    queryKey: PROFILES_KEY,
-    queryFn: listProfiles,
-    enabled: !IS_MOBILE,
-  });
   const [previewSub, setPreviewSub] = useState<SubscriptionView | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<SubscriptionView | null>(null);
@@ -64,7 +57,12 @@ export default function Subscriptions() {
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
   const [refreshingAll, setRefreshingAll] = useState(false);
 
-  const invalidateSubs = () => void queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+  const invalidateSubs = () => {
+    void queryClient.invalidateQueries({ queryKey: SUBSCRIPTIONS_KEY });
+    for (const sub of subscriptions) {
+      void queryClient.invalidateQueries({ queryKey: subscriptionSourceKey(sub.id) });
+    }
+  };
   const invalidateConfig = () => void queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
 
   // ---- Mutations ----
@@ -74,12 +72,11 @@ export default function Subscriptions() {
         name: draft.name,
         url: draft.url,
         user_agent: draft.userAgent || undefined,
-        profile_id: draft.profileId,
       }),
   });
   const editMutation = useMutation({
     mutationFn: ({ id, draft }: { id: string; draft: SubscriptionDraft }) =>
-      updateSubscription(id, draft.name, draft.url, draft.profileId, draft.userAgent || undefined),
+      updateSubscription(id, draft.name, draft.url, editingSub?.profile_id ?? null, draft.userAgent || undefined),
   });
   const removeMutation = useMutation({
     mutationFn: (id: string) => removeSubscription(id),
@@ -222,7 +219,7 @@ export default function Subscriptions() {
         <Card>
           <Card.Content className="flex flex-col items-center justify-center gap-3 py-12 text-center">
             <Spinner aria-hidden="true" />
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">正在加载订阅…</span>
+            <span className="text-sm text-muted">正在加载订阅…</span>
           </Card.Content>
         </Card>
       )}
@@ -230,8 +227,8 @@ export default function Subscriptions() {
       {!isLoading && queryError && (
         <Card>
           <Card.Content className="flex flex-col items-center gap-2 py-8 text-center">
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">订阅列表加载失败</span>
-            <span className="text-xs text-zinc-400 dark:text-zinc-500">{toErrorMessage(queryError)}</span>
+            <span className="text-sm text-muted">订阅列表加载失败</span>
+            <span className="text-xs text-muted">{toErrorMessage(queryError)}</span>
           </Card.Content>
         </Card>
       )}
@@ -239,10 +236,8 @@ export default function Subscriptions() {
       {!isLoading && !queryError && subscriptions.length === 0 && (
         <div className="flex flex-1 flex-col items-center justify-center gap-5 pb-16 text-center">
           <div className="flex flex-col gap-1">
-            <span className="text-base font-medium text-zinc-900 dark:text-zinc-100">添加你的第一个订阅</span>
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">
-              粘贴机场订阅链接，拉取节点并用于首页启动代理
-            </span>
+            <span className="text-base font-medium text-foreground">添加你的第一个订阅</span>
+            <span className="text-sm text-muted">粘贴机场订阅链接，拉取节点并用于首页启动代理</span>
           </div>
           <Button variant="primary" size="lg" className="min-h-12 px-8" onPress={openAdd}>
             添加订阅
@@ -253,7 +248,7 @@ export default function Subscriptions() {
       {showList && (
         <>
           <div className="flex items-center justify-between">
-            <span className="pl-1 text-xs text-zinc-500 dark:text-zinc-400">共 {subscriptions.length} 个订阅源</span>
+            <span className="pl-1 text-xs text-muted">共 {subscriptions.length} 个订阅源</span>
             <button
               type="button"
               aria-label="刷新全部订阅"
@@ -264,44 +259,28 @@ export default function Subscriptions() {
               <RefreshCw className={`size-5 ${refreshingAll ? "animate-spin" : ""}`} aria-hidden="true" />
             </button>
           </div>
-          {IS_MOBILE ? (
-            <div className="flex flex-col gap-2">
-              {subscriptions.map((sub) => (
-                <SubscriptionRow
-                  key={sub.id}
-                  sub={sub}
-                  isActive={sub.id === activeId}
-                  busy={savingId !== null || refreshingAll}
-                  refreshing={refreshingIds.has(sub.id)}
-                  onActivate={() => void handleActivate(sub)}
-                  onRefresh={() => void handleRefresh(sub)}
-                  onEdit={() => openEdit(sub)}
-                  onDelete={() => setPendingDelete(sub)}
-                />
-              ))}
-            </div>
-          ) : (
-            <SubscriptionTable
-              subs={subscriptions}
-              profiles={profiles}
-              busy={savingId !== null || refreshingAll}
-              refreshingId={refreshingIds.values().next().value ?? null}
-              onRefresh={(id) => {
-                const sub = subscriptions.find((s) => s.id === id);
-                if (sub) void handleRefresh(sub);
-              }}
-              onRemove={(id) => setPendingDelete(subscriptions.find((s) => s.id === id) ?? null)}
-              onEdit={openEdit}
-              onPreview={setPreviewSub}
-            />
-          )}
+          <div className="grid gap-4 xl:grid-cols-2">
+            {subscriptions.map((sub) => (
+              <SubscriptionCard
+                key={sub.id}
+                sub={sub}
+                isActive={sub.id === activeId}
+                busy={savingId !== null || refreshingAll || formBusy || removeMutation.isPending}
+                refreshing={refreshingIds.has(sub.id)}
+                onActivate={() => void handleActivate(sub)}
+                onRefresh={() => void handleRefresh(sub)}
+                onEdit={() => openEdit(sub)}
+                onDelete={() => setPendingDelete(sub)}
+                onSource={() => setPreviewSub(sub)}
+              />
+            ))}
+          </div>
         </>
       )}
 
       <SubscriptionForm
         isOpen={formOpen}
         editing={editingSub}
-        profiles={profiles}
         busy={formBusy}
         onClose={closeForm}
         onSave={(draft) => void handleFormSave(draft)}
@@ -313,14 +292,7 @@ export default function Subscriptions() {
         onClose={() => setPendingDelete(null)}
         onConfirm={() => void handleDeleteConfirm()}
       />
-      {!IS_MOBILE && (
-        <ConfigPreviewModal
-          isOpen={previewSub !== null}
-          onClose={() => setPreviewSub(null)}
-          title={previewSub ? `配置预览 — ${previewSub.name}` : ""}
-          subscriptionId={previewSub?.id}
-        />
-      )}
+      {previewSub && <SubscriptionSourceSheet sub={previewSub} onClose={() => setPreviewSub(null)} />}
     </SubPageShell>
   );
 }

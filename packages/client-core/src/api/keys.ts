@@ -26,6 +26,7 @@ export const PROFILES_KEY = ["profiles"] as const;
 /** 单个覆写模板详情（Override 页，按选中 id 参数化）。 */
 export const profileKey = (id: string | null) => ["profile", id] as const;
 
+export const subscriptionSourceKey = (id: string) => ["subscription_source", id] as const;
 export const SUBSCRIPTIONS_KEY = ["subscriptions"] as const;
 /** 单个订阅的静态节点 tag 列表（订阅缓存读取，按订阅 id 参数化）。 */
 export const subscriptionNodeTagsKey = (id: string) => ["subscription_node_tags", id] as const;
@@ -60,3 +61,5 @@ export const CONFIG_SLICES_KEY = ["config_slices"] as const;
 
 /** 内置 CN 分流基线只读视图（静态数据，staleTime Infinity）。 */
 export const BASELINE_VIEW_KEY = ["baseline_view"] as const;
+
+export const SUBSCRIPTION_PROFILE_MUTATION_KEY = ["set_subscription_profile"] as const;

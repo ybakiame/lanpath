@@ -120,3 +120,18 @@ export async function activateSubscription(sub: SubscriptionView): Promise<void>
   if (!sub.enabled) await setSubscriptionEnabled(sub.id, true);
   await setActiveSubscription(sub.id);
 }
+
+/** Original successful response, before base64 decoding or sing-box conversion. */
+export interface SubscriptionSourceView {
+  content: string;
+  extension: "yaml" | "json" | "txt";
+}
+export function subscriptionSource(id: string): Promise<SubscriptionSourceView> {
+  return invoke<SubscriptionSourceView>("subscription_source", { id });
+}
+export function exportSubscriptionSource(id: string): Promise<string> {
+  return invoke<string>("export_subscription_source", { id });
+}
+export function setSubscriptionProfile(id: string, profileId: string | null): Promise<void> {
+  return invoke<void>("set_subscription_profile", { id, profileId });
+}

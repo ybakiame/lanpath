@@ -43,6 +43,7 @@ export type { DerivedHostname, MitmWhitelistView } from "./core";
 // ---------------------------------------------------------------------------
 
 export type {
+  SubscriptionSourceView,
   SubscriptionUserInfo,
   SubscriptionFormat,
   SubscriptionView,
@@ -50,6 +51,9 @@ export type {
   NodeTagView,
 } from "./subscriptions";
 export {
+  subscriptionSource,
+  exportSubscriptionSource,
+  setSubscriptionProfile,
   listSubscriptions,
   addSubscription,
   removeSubscription,

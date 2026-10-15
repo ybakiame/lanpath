@@ -86,7 +86,9 @@ impl SubscriptionStore {
         if subs.len() == before {
             return Ok(());
         }
-        self.save(&subs)
+        self.save(&subs)?;
+        self.clear_cached_content(id);
+        Ok(())
     }
 
     /// Toggle subscription enabled state by id and persist; silently returns
@@ -206,6 +208,7 @@ impl SubscriptionStore {
     /// Delete subscription content cache file (URL change etc.); silently
     /// returns when file does not exist.
     pub fn clear_cached_content(&self, id: Uuid) {
+        self.clear_source(id);
         let path = self.cache_file(id);
         match std::fs::remove_file(&path) {
             Ok(()) => tracing::debug!(path = %path.display(), "subscription cache cleared"),

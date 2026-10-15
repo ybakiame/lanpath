@@ -49,14 +49,6 @@ export function usageColor(percent: number): "accent" | "warning" | "danger" {
   return "accent";
 }
 
-/** Common UA quick selections (empty = default clash.meta). */
-export const UA_PRESETS = [
-  { value: "", label: "默认" },
-  { value: "clash.meta", label: "clash.meta" },
-  { value: "clash-verge", label: "clash-verge" },
-  { value: "sing-box", label: "sing-box" },
-];
-
 /** Subscription format display name: ClashYaml → Clash, SingBoxJson → sing-box. */
 export function formatLabel(format: SubscriptionFormat): string {
   if (format === "ClashYaml") {
@@ -66,15 +58,4 @@ export function formatLabel(format: SubscriptionFormat): string {
     return "sing-box";
   }
   return "ShareLinks";
-}
-
-/** Subscription format Chip color: ShareLinks accent, ClashYaml warning, SingBoxJson success. */
-export function formatColor(format: SubscriptionFormat): "accent" | "warning" | "success" {
-  if (format === "ClashYaml") {
-    return "warning";
-  }
-  if (format === "SingBoxJson") {
-    return "success";
-  }
-  return "accent";
 }

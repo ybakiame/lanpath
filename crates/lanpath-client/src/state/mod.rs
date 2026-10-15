@@ -259,6 +259,13 @@ impl ClientState {
                         sub.user_agent.as_deref(),
                     )
                     .await?;
+                    let source = subscription::SubscriptionSource {
+                        format: fetch.format,
+                        content: fetch.source.clone(),
+                    };
+                    if let Err(e) = sub_store.write_source(sub.id, &source) {
+                        tracing::warn!(error = %e, "回写订阅原文失败（不阻断启动）");
+                    }
                     let cache = subscription::CachedSubscriptionContent {
                         format: fetch.format,
                         singbox_nodes: fetch.singbox_nodes.clone(),
@@ -286,7 +293,7 @@ impl ClientState {
             Some(pid) => {
                 let profiles = store.load()?;
                 let linked = profiles.iter().find(|p| p.id == pid).ok_or_else(|| {
-                    LanpathError::Client("订阅关联的覆写模板不存在，请在订阅页重新关联".to_string())
+                    LanpathError::Client("订阅关联的覆写模板不存在，请在首页重新关联".to_string())
                 })?;
                 profile::resolve_remote_overrides(
                     &self.config.data_dir.join("profile_cache"),

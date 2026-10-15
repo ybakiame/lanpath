@@ -1,4 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { SUBSCRIPTION_PROFILE_MUTATION_KEY } from "@lanpath/client-core";
+import { DashboardOverride } from "./DashboardOverride";
+import { useIsMutating, useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
@@ -26,6 +28,7 @@ const VPN_AUTH_MARKER = "vpn_not_authorized";
 
 /** 移动首页：订阅、连接主操作、今日流量与代理策略；状态由共享核心层提供。 */
 export default function Dashboard() {
+  const profilePending = useIsMutating({ mutationKey: SUBSCRIPTION_PROFILE_MUTATION_KEY }) > 0;
   // ---- 局部 UI 状态 ----
   const [sheetOpen, setSheetOpen] = useState(false);
   // 最近启停/授权的同步错误（展示于主操作卡片内）；`vpn_not_authorized` 由下方
@@ -107,7 +110,7 @@ export default function Dashboard() {
   };
 
   const handleStart = async () => {
-    if (startMutation.isPending || vpnAuthMutation.isPending || stopMutation.isPending) {
+    if (profilePending || startMutation.isPending || vpnAuthMutation.isPending || stopMutation.isPending) {
       return;
     }
     // 新一轮启动先清空上轮失败展示（服务侧成功启动后也会清空 vpn_last_error）。
@@ -134,7 +137,7 @@ export default function Dashboard() {
   const showActionError = message !== "" && !vpnAuthRequired;
   const showVpnError = vpnError !== null && !vpnAuthRequired;
   // 主操作 busy：覆盖「启动→授权→重试」整条链路（授权弹窗停留期间按钮禁用）。
-  const startingPending = startMutation.isPending || vpnAuthMutation.isPending;
+  const startingPending = profilePending || startMutation.isPending || vpnAuthMutation.isPending;
 
   return (
     <PageShell>
@@ -150,6 +153,7 @@ export default function Dashboard() {
         <Button
           variant="secondary"
           className="min-h-14 w-full justify-between rounded-2xl px-4 font-normal"
+          isDisabled={profilePending}
           onPress={() => setSheetOpen(true)}
         >
           <span className="text-sm text-muted">生效订阅</span>
@@ -179,6 +183,8 @@ export default function Dashboard() {
           />
         }
       />
+
+      <DashboardOverride sub={activeSub} running={running} disabled={startingPending || stopMutation.isPending} />
 
       <ProxyStrategyCard running={running} subscriptionName={activeSub?.name ?? null} />
 

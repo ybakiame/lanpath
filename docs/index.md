@@ -20,3 +20,6 @@
 - [首次发版验证](testing/first-release-2026-10-11.md)
 - [主开发源稳定分支验证](testing/2026-10-15-stable-nixpkgs.md)
 - [devenv Flake 集成验证](testing/2026-10-15-devenv-flake.md)
+
+- [订阅原文与仪表盘覆写验证](testing/2026-10-15-subscription-source.md)
+- [0.1.2-beta.1 更新说明](releases/0.1.2-beta.1.md)

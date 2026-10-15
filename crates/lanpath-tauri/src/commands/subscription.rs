@@ -97,6 +97,13 @@ pub(crate) fn cache_fetch_result(
     id: Uuid,
     fetch: &lanpath_client::FetchResult,
 ) {
+    let source = lanpath_client::SubscriptionSource {
+        format: fetch.format,
+        content: fetch.source.clone(),
+    };
+    if let Err(e) = store.write_source(id, &source) {
+        tracing::warn!(%id, error = %e, "写入订阅原文失败");
+    }
     let cached = CachedSubscriptionContent {
         format: fetch.format,
         singbox_nodes: fetch.singbox_nodes.clone(),
@@ -117,6 +124,14 @@ pub(crate) fn sub_content_from_nodes(singbox_nodes: &[serde_json::Value]) -> ser
 pub(crate) async fn apply_fetch(store: &SubscriptionStore, sub: &mut Subscription, url: &str) {
     match fetch_subscription_with_ua(url, sub.user_agent.as_deref()).await {
         Ok(result) => {
+            // A slow response must not resurrect cache after URL/UA edits or deletion.
+            let current = store
+                .load()
+                .ok()
+                .and_then(|subs| subs.into_iter().find(|s| s.id == sub.id));
+            if !current.is_some_and(|s| s.url == sub.url && s.user_agent == sub.user_agent) {
+                return;
+            }
             sub.node_count = result.singbox_nodes.len() as u64;
             sub.format = Some(result.format);
             sub.error = None;
@@ -135,8 +150,14 @@ pub(crate) fn write_subscription(
     sub: &Subscription,
 ) -> Result<(), String> {
     let mut subs = store.load().map_err(|e| format!("读取订阅失败: {e}"))?;
-    if let Some(existing) = subs.iter_mut().find(|s| s.id == sub.id) {
-        *existing = sub.clone();
+    if let Some(existing) = subs.iter_mut().find(|s| s.id == sub.id)
+        && existing.url == sub.url
+        && existing.user_agent == sub.user_agent
+    {
+        existing.userinfo = sub.userinfo.clone();
+        existing.node_count = sub.node_count;
+        existing.format = sub.format;
+        existing.error = sub.error.clone();
     }
     store.save(&subs).map_err(|e| format!("保存订阅失败: {e}"))
 }
@@ -175,6 +196,9 @@ pub async fn add_subscription(
     let mut sub = store
         .add(&name, &url, true, ua)
         .map_err(|e| format!("保存订阅失败: {e}"))?;
+    store
+        .set_profile_id(sub.id, profile_id)
+        .map_err(|e| e.to_string())?;
     sub.profile_id = profile_id;
     apply_fetch(&store, &mut sub, &url).await;
     write_subscription(&store, &sub)?;
@@ -196,10 +220,13 @@ pub async fn refresh_subscription(
         .ok_or_else(|| "订阅不存在".to_string())?;
     let url = subs[idx].url.clone();
     apply_fetch(&store, &mut subs[idx], &url).await;
-    store
-        .save(&subs)
-        .map_err(|e| format!("保存订阅失败: {e}"))?;
-    Ok(SubscriptionView::from_sub(&subs[idx]))
+    write_subscription(&store, &subs[idx])?;
+    let updated = store.load().map_err(|e| e.to_string())?;
+    updated
+        .iter()
+        .find(|sub| sub.id == id)
+        .map(SubscriptionView::from_sub)
+        .ok_or_else(|| "订阅已删除".to_string())
 }
 
 /// Remove subscription; silently returns if not found.
@@ -325,134 +352,5 @@ pub async fn update_subscription(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct TestDir(std::path::PathBuf);
-
-    impl TestDir {
-        fn new() -> Self {
-            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "lanpath-client-ui-subscription-test-{}-{}",
-                std::process::id(),
-                n
-            ));
-            std::fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-
-        fn path(&self) -> &std::path::Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn parse_profile_ref_maps_empty_or_none_to_none_and_parses_uuid() {
-        assert_eq!(parse_profile_ref(&None).unwrap(), None);
-        assert_eq!(parse_profile_ref(&Some(String::new())).unwrap(), None);
-        assert_eq!(parse_profile_ref(&Some("  ".to_string())).unwrap(), None);
-        let id = Uuid::new_v4();
-        assert_eq!(parse_profile_ref(&Some(id.to_string())).unwrap(), Some(id));
-        assert!(parse_profile_ref(&Some("not-a-uuid".to_string())).is_err());
-    }
-
-    #[test]
-    fn subscription_view_exposes_profile_id() {
-        let sub = Subscription {
-            id: Uuid::new_v4(),
-            name: "sub".to_string(),
-            url: "https://example.com/sub".to_string(),
-            enabled: true,
-            userinfo: None,
-            node_count: 0,
-            error: None,
-            user_agent: None,
-            format: None,
-            profile_id: Some(Uuid::new_v4()),
-        };
-        let view = SubscriptionView::from_sub(&sub);
-        assert_eq!(view.profile_id, sub.profile_id.map(|v| v.to_string()));
-
-        let mut sub = sub;
-        sub.profile_id = None;
-        let view = SubscriptionView::from_sub(&sub);
-        assert_eq!(view.profile_id, None);
-    }
-
-    #[test]
-    fn set_active_subscription_validates_and_persists_selection() {
-        let dir = TestDir::new();
-        let cfg = ClientConfig::new(
-            dir.path().to_path_buf(),
-            String::new(),
-            String::new(),
-            PathBuf::new(),
-        );
-        cfg.save().unwrap();
-
-        let err =
-            set_active_subscription_impl(dir.path(), Some(Uuid::new_v4().to_string())).unwrap_err();
-        assert!(err.contains("不存在"), "{err}");
-
-        let store = SubscriptionStore::new(dir.path().to_path_buf());
-        let off = store
-            .add("off", "https://example.com/sub", false, None)
-            .unwrap();
-        let err = set_active_subscription_impl(dir.path(), Some(off.id.to_string())).unwrap_err();
-        assert!(err.contains("已停用"), "{err}");
-
-        let on = store
-            .add("on", "https://example.com/sub2", true, None)
-            .unwrap();
-        set_active_subscription_impl(dir.path(), Some(on.id.to_string())).unwrap();
-        let saved = ClientConfig::load(dir.path()).unwrap();
-        assert_eq!(saved.active_subscription_id, Some(on.id));
-
-        set_active_subscription_impl(dir.path(), None).unwrap();
-        let saved = ClientConfig::load(dir.path()).unwrap();
-        assert_eq!(saved.active_subscription_id, None);
-    }
-
-    #[test]
-    fn disabling_selected_subscription_clears_active_selection() {
-        let dir = TestDir::new();
-        let store = SubscriptionStore::new(dir.path().to_path_buf());
-        let sub = store
-            .add("sub", "https://example.com/sub", true, None)
-            .unwrap();
-        let mut cfg = ClientConfig::new(
-            dir.path().to_path_buf(),
-            String::new(),
-            String::new(),
-            PathBuf::new(),
-        );
-        cfg.active_subscription_id = Some(sub.id);
-        cfg.save().unwrap();
-
-        set_subscription_enabled_impl(dir.path(), sub.id, false).unwrap();
-        let saved = ClientConfig::load(dir.path()).unwrap();
-        assert_eq!(saved.active_subscription_id, None);
-
-        set_subscription_enabled_impl(dir.path(), sub.id, true).unwrap();
-        let saved = ClientConfig::load(dir.path()).unwrap();
-        assert_eq!(saved.active_subscription_id, None);
-
-        let other = store
-            .add("other", "https://example.com/other", false, None)
-            .unwrap();
-        let mut cfg = ClientConfig::load(dir.path()).unwrap();
-        cfg.active_subscription_id = Some(sub.id);
-        cfg.save().unwrap();
-        set_subscription_enabled_impl(dir.path(), other.id, false).unwrap();
-        let saved = ClientConfig::load(dir.path()).unwrap();
-        assert_eq!(saved.active_subscription_id, Some(sub.id));
-    }
-}
+#[path = "subscription_tests.rs"]
+mod tests;

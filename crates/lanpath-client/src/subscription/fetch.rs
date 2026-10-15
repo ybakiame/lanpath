@@ -52,10 +52,12 @@ impl SubscriptionFetcher {
             )));
         }
         let info = super::parse_subscription_userinfo(resp.headers());
-        let text = resp
-            .text()
+        let bytes = resp
+            .bytes()
             .await
             .map_err(|e| LanpathError::Client(format!("failed to read subscription body: {e}")))?;
-        parse_subscription_body(&text, info)
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|e| LanpathError::Client(format!("subscription body is not UTF-8: {e}")))?;
+        parse_subscription_body(text, info)
     }
 }
