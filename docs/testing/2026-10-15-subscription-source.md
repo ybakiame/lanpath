@@ -32,3 +32,13 @@
 本地未在 Windows/Android 真机执行 Downloads 文件落盘、安装覆盖、VPN/TUN 或系统代理验收。
 Android 调试签名与公开 release 签名不同，不将 debug APK 当作 beta 升级包。
 下一 beta 继续采用手动发布页更新；签名清单验证不能替代真实安装升级。
+
+## 云端初轮发现
+
+首轮 CI（38720053342）中前端检查和 527 项客户端测试通过；旧进程回收测试
+`write_and_reap_kills_matching_orphan` 未匹配并终止外部 sleep，等待 30 秒后失败。
+本地同一 Nix 环境未复现。测试夹具改为重新执行当前原生测试二进制的专用子入口，
+避免依赖外部 sleep/PATH，并在回收前断言实际进程身份；不放宽生产身份校验或跳过测试。
+
+同轮 Android job（116372102679）已成功完成 Go AAR、Android 编译、APK 校验与产物上传，
+证明迁移后的 devenv/26.05 工具链已通过云端 Android 构建。

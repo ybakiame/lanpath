@@ -147,32 +147,33 @@ pub fn remove_pid_file(pid_path: &Path) {
 mod tests {
     use super::*;
 
-    fn sleep_pid() -> (std::process::Child, u32) {
-        let child = std::process::Command::new(which_sleep())
-            .arg("30")
+    /// Re-execute this test binary so the fixture has a stable native identity,
+    /// independent of PATH, scripts, multicall coreutils or host wrappers.
+    fn fixture_child() -> (std::process::Child, u32) {
+        let child = std::process::Command::new(fixture_binary())
+            .args([
+                "--exact",
+                "lifecycle::tests::orphan_child_fixture",
+                "--nocapture",
+            ])
+            .env("LANPATH_LIFECYCLE_CHILD_FIXTURE", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn()
-            .expect("spawn sleep");
+            .expect("spawn lifecycle fixture");
         let pid = child.id();
         (child, pid)
     }
 
-    /// sleep 可执行文件的真实路径（canonicalize 后用于 exe 匹配断言）。
-    fn sleep_exe() -> PathBuf {
-        which_sleep()
-            .canonicalize()
-            .unwrap_or_else(|_| which_sleep())
+    fn fixture_binary() -> PathBuf {
+        std::env::current_exe().expect("current test binary")
     }
 
-    fn which_sleep() -> PathBuf {
-        // 按当前开发环境的 PATH 查找，与 spawn 使用同一个文件；Nix 的 sleep 不在 /usr/bin。
-        let path = std::env::var_os("PATH").expect("PATH must be set for process tests");
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("sleep");
-            if candidate.is_file() {
-                return candidate;
-            }
+    #[test]
+    fn orphan_child_fixture() {
+        if std::env::var_os("LANPATH_LIFECYCLE_CHILD_FIXTURE").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
         }
-        panic!("sleep binary not found");
     }
 
     #[test]
@@ -189,9 +190,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pp-test-reap-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pid_path = dir.join("sing-box.pid");
-        let binary = sleep_exe();
+        let binary = fixture_binary();
 
-        let (mut child, pid) = sleep_pid();
+        let (mut child, pid) = fixture_child();
+        assert!(
+            exe_matches(pid, &binary),
+            "fixture identity mismatch: expected {}, actual {:?}",
+            binary.display(),
+            lanpath_common::process_exe_path(pid)
+        );
         write_pid_file(&pid_path, pid, &binary);
         assert!(pid_path.exists());
         assert!(lanpath_common::is_process_alive(pid));
@@ -207,14 +214,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn reap_stale_skips_pid_reuse() {
-        // PID 复用防护：pidfile 记录的是 sleep 的 pid，但管理的二进制是另一个
+        // PID 复用防护：pidfile 记录的是测试子进程的 pid，但管理的二进制是另一个
         // 路径 → exe 不匹配 → 不得误杀，仅清理 pidfile。
         let dir = std::env::temp_dir().join(format!("pp-test-reuse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pid_path = dir.join("sing-box.pid");
         let wrong_binary = PathBuf::from("/bin/false");
 
-        let (mut child, pid) = sleep_pid();
+        let (mut child, pid) = fixture_child();
         write_pid_file(&pid_path, pid, &wrong_binary);
         reap_stale(&pid_path, &wrong_binary);
 
@@ -234,9 +241,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pp-test-dead-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pid_path = dir.join("sing-box.pid");
-        let binary = sleep_exe();
+        let binary = fixture_binary();
 
-        let (mut child, pid) = sleep_pid();
+        let (mut child, pid) = fixture_child();
         write_pid_file(&pid_path, pid, &binary);
         child.kill().unwrap();
         let _ = child.wait();
