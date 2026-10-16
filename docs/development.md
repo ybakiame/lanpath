@@ -44,3 +44,6 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 首页「订阅覆写」为当前生效订阅选择模板；保存期间禁止启动/切换订阅，运行中提示重启。
 模板管理链接在移动和桌面均可进入。实际 Downloads 落盘、Android MediaStore、覆盖安装与
 代理启动后的节点更新须在目标设备验收，浏览器 mock 和主机检查不能替代。
+
+Windows TUN 授权使用 SDK 的 Administrators SID 常量；UAC 成功后正常退出旧实例，
+取消授权保留原实例，已有权限时不重复提权。原生 Windows SID 测试与真实 UAC/TUN 须在目标平台验收。

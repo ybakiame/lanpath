@@ -36,8 +36,8 @@ impl TunAuthStatus {
 /// - **Linux**：`getcap <binary>` 输出含 `cap_net_admin` → [`TunAuthStatus::Authorized`]；
 ///   否则（含 getcap 不可用 / 文件不存在）→ [`TunAuthStatus::NeedsAuth`]。
 /// - **macOS**：文件 owner 为 root 且 setuid 位已设置 → `Authorized`；否则 `NeedsAuth`。
-/// - **Windows**：简化实现（未内置管理员令牌检测），一律返回 `NeedsAuth`，
-///   由 [`authorize_tun`] 提示以管理员身份重启应用。
+/// - **Windows**：检查当前令牌的内置 Administrators 组（S-1-5-32-544），
+///   UAC 未提升时返回 `NeedsAuth`。
 pub fn tun_auth_status(core_binary: &Path) -> TunAuthStatus {
     platform_tun_auth_status(core_binary)
 }
@@ -86,17 +86,33 @@ fn platform_tun_auth_status(_core_binary: &Path) -> TunAuthStatus {
 /// Administrators 组 SID。API 失败时保守返回 `false`（按未授权处理）。
 #[cfg(target_os = "windows")]
 fn is_process_elevated() -> bool {
-    use windows_sys::Win32::Security::{
-        AllocateAndInitializeSid, CheckTokenMembership, FreeSid, SECURITY_NT_AUTHORITY,
-    };
+    use windows_sys::Win32::Security::{CheckTokenMembership, FreeSid};
 
     unsafe {
-        let mut sid: *mut core::ffi::c_void = std::ptr::null_mut();
-        if AllocateAndInitializeSid(
+        let Some(sid) = allocate_administrators_sid() else {
+            return false;
+        };
+        let mut is_member = 0i32;
+        let ok = CheckTokenMembership(std::ptr::null_mut(), sid, &mut is_member);
+        FreeSid(sid);
+        ok != 0 && is_member != 0
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn allocate_administrators_sid() -> Option<*mut core::ffi::c_void> {
+    use windows_sys::Win32::Security::{AllocateAndInitializeSid, SECURITY_NT_AUTHORITY};
+    use windows_sys::Win32::System::SystemServices::{
+        DOMAIN_ALIAS_RID_ADMINS, SECURITY_BUILTIN_DOMAIN_RID,
+    };
+    let mut sid = std::ptr::null_mut();
+    // S-1-5-32-544; use SDK constants rather than hand-written RID values.
+    let ok = unsafe {
+        AllocateAndInitializeSid(
             &SECURITY_NT_AUTHORITY,
             2,
-            0x20, // SECURITY_BUILTIN_DOMAIN_RID
-            0x22, // DOMAIN_ALIAS_RID_ADMINS
+            SECURITY_BUILTIN_DOMAIN_RID as u32,
+            DOMAIN_ALIAS_RID_ADMINS as u32,
             0,
             0,
             0,
@@ -104,16 +120,9 @@ fn is_process_elevated() -> bool {
             0,
             0,
             &mut sid,
-        ) == 0
-        {
-            return false;
-        }
-        let mut is_member = 0i32;
-        // 传空句柄表示检查当前进程令牌。
-        let ok = CheckTokenMembership(std::ptr::null_mut(), sid, &mut is_member);
-        FreeSid(sid);
-        ok != 0 && is_member != 0
-    }
+        )
+    };
+    (ok != 0).then_some(sid)
 }
 
 #[cfg(target_os = "android")]
@@ -164,7 +173,7 @@ pub fn macos_authorize_cmdline(core_binary: &Path) -> Vec<String> {
 /// - **Linux**：`pkexec setcap 'cap_net_admin,cap_net_bind_service=+ep' <binary>`；
 ///   `pkexec` 不可用时返回错误提示安装 polkit。
 /// - **macOS**：`osascript` 以管理员权限执行 `chown root:admin` + `chmod u+s`。
-/// - **Windows**：返回 `Unsupported` 错误，提示以管理员身份重启应用。
+/// - **Windows**：通过 UAC 启动提升权限的新实例，旧实例由命令层正常退出。
 pub fn authorize_tun(core_binary: &Path) -> LanpathResult<()> {
     platform_authorize_tun(core_binary)
 }
@@ -264,6 +273,18 @@ fn platform_authorize_tun(_core_binary: &Path) -> LanpathResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn administrators_sid_is_the_windows_well_known_group() {
+        use windows_sys::Win32::Security::{FreeSid, IsWellKnownSid, WinBuiltinAdministratorsSid};
+        let sid = allocate_administrators_sid().expect("allocate administrators SID");
+        let known = unsafe { IsWellKnownSid(sid, WinBuiltinAdministratorsSid) };
+        unsafe {
+            FreeSid(sid);
+        }
+        assert_ne!(known, 0, "administrator SID must be S-1-5-32-544");
+    }
 
     /// Linux 提权命令构造断言（纯函数，不执行）。
     #[test]

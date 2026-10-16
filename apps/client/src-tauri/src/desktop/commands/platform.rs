@@ -17,10 +17,25 @@ pub async fn tun_auth_status(state: State<'_, AppState>) -> Result<String, Strin
 
 /// Execute TUN authorization.
 #[tauri::command]
-pub async fn authorize_tun(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn authorize_tun(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     let cfg = ClientConfig::load(&state.data_dir).map_err(|e| format!("读取配置失败: {e}"))?;
+    if lanpath_client::tun_auth_status(&cfg.core_binary)
+        == lanpath_client::TunAuthStatus::Authorized
+    {
+        return Ok("authorized".to_string());
+    }
     lanpath_client::authorize_tun(&cfg.core_binary).map_err(|e| e.to_string())?;
-    Ok(lanpath_client::tun_auth_status(&cfg.core_binary).as_frontend_str())
+    let status = lanpath_client::tun_auth_status(&cfg.core_binary).as_frontend_str();
+    // UAC launched the elevated replacement. Close this non-elevated instance via
+    // the normal exit event so core/process and system proxy cleanup still run.
+    #[cfg(target_os = "windows")]
+    app.exit(0);
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
+    Ok(status)
 }
 
 /// GPU acceleration detection.

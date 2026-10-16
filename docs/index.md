@@ -23,3 +23,5 @@
 
 - [订阅原文与仪表盘覆写验证](testing/2026-10-15-subscription-source.md)
 - [0.1.2-beta.1 更新说明](releases/0.1.2-beta.1.md)
+
+- [Windows TUN 授权修复验证](testing/2026-10-16-windows-tun.md)
