@@ -12,6 +12,7 @@ import RuleSetMarket from "./pages/Config/RuleSetMarket";
 import Inbounds from "./pages/Config/Inbounds";
 import Experimental from "./pages/Config/ExperimentalPage";
 import Settings from "./pages/Settings";
+import BackupPage from "./pages/Settings/Backup";
 import ThemePage from "./pages/Settings/ThemePage";
 import Logs from "./pages/Logs";
 import Stats from "./pages/Stats";
@@ -46,6 +47,7 @@ const sharedRoutes: RouteObject[] = [
   { path: "/config/inbounds", element: <Inbounds /> },
   { path: "/config/experimental", element: <Experimental /> },
   { path: "/settings", element: <Settings /> },
+  { path: "/settings/backup", element: <BackupPage /> },
   { path: "/settings/theme", element: <ThemePage /> },
   { path: "/settings/requests", element: <NetworkRequests /> },
   { path: "/stats", element: <Stats /> },

@@ -1,4 +1,4 @@
-/** 外观偏好只属于 UI，不进入核心配置或 IPC。 */
+/** 外观偏好属于 UI，不进入核心配置；备份时通过专用 IPC 打包。 */
 export const ACCENT_OPTIONS = [
   { value: "iris", label: "鸢尾紫" },
   { value: "teal", label: "湖水青" },

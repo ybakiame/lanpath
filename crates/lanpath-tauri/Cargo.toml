@@ -28,6 +28,7 @@ tracing = { workspace = true }
 tracing-appender = "0.2"
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
 axum = { workspace = true }

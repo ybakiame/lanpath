@@ -42,6 +42,7 @@ urlencoding = "2"
 uuid = { workspace = true }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 tempfile = "3"
+age = { version = "0.12.1", default-features = false }
 
 # Windows：TUN 提权（管理员令牌检测 + ShellExecute runas 重启）。
 [target.'cfg(windows)'.dependencies]

@@ -25,3 +25,8 @@ pub mod state;
 pub use capabilities::*;
 pub use logs::*;
 pub use state::*;
+
+/// Apply a prepared portable backup before platform state and logging initialize.
+pub fn prepare_startup_backup(data_dir: &std::path::Path) -> lanpath_common::LanpathResult<()> {
+    lanpath_client::backup::apply_pending_at_startup(data_dir)
+}

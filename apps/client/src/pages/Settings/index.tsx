@@ -1,4 +1,4 @@
-import { BellRing, Code, Globe, Info, Palette, Network } from "lucide-react";
+import { BellRing, Code, Globe, Info, Palette, Network, Archive } from "lucide-react";
 import { IS_MOBILE } from "@lanpath/ui";
 import DesktopSettingsSections from "./desktop/DesktopSettingsSections";
 import { useNavigate } from "react-router-dom";
@@ -36,6 +36,12 @@ export default function Settings() {
             title: "网络请求",
             description: "订阅与远程资源的代理方式",
             onPress: () => navigate("/settings/requests"),
+          },
+          {
+            icon: <Archive className="size-5" aria-hidden="true" />,
+            title: "备份与恢复",
+            description: "加密导出、跨设备导入配置",
+            onPress: () => navigate("/settings/backup"),
           },
         ]}
       />

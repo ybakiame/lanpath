@@ -56,3 +56,12 @@ Windows TUN 授权使用 SDK 的 Administrators SID 常量；UAC 成功后正常
 旧开关升级先生成 client.request-proxy-v1.backup.json，再原子写入新配置，保留开启→核心、
 关闭→直连的语义。恢复时退出客户端，以备份替换 client.json；保留备份直至确认新版本稳定。
 回归与设备边界见 docs/testing/2026-10-16-subscription-and-windows-tun.md 和 ADR-0007。
+
+## 备份与恢复
+
+设置 → 备份与恢复，设置至少 12 字符密码或生成 24 位随机密码，单独保存密码后导出。
+文件位于 Downloads/Lanpath；Android 经 MediaStore 写入公共下载目录。导入 .zip.age 后输入
+密码查看摘要，确认完整替换；代理停止后重启生效。Android 点击关闭应用按钮后，从桌面重新打开。
+恢复前加密副本使用同一导入密码，可通过「使用恢复前备份」再次导入。核心、证书/私钥、
+日志、流量历史、系统授权不迁移；跨设备的外部文件引用需检查，系统代理/TUN/MITM 手动重开。
+新格式和中断恢复见 ADR-0008，测试记录见 testing/2026-10-17-encrypted-backup.md。

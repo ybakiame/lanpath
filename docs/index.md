@@ -27,3 +27,5 @@
 - [Windows TUN 授权修复验证](testing/2026-10-16-windows-tun.md)
 
 - [订阅网络策略与 Windows TUN 验证](testing/2026-10-16-subscription-and-windows-tun.md)
+
+- [加密备份与恢复验证](testing/2026-10-17-encrypted-backup.md)

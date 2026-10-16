@@ -10,6 +10,7 @@ import { Toaster } from "./components/Toaster";
 import { RestartPrompt as DesktopRestartPrompt } from "./components/desktop/RestartPrompt";
 import { RestartPrompt as MobileRestartPrompt } from "./components/mobile/RestartPrompt";
 import { AppRoutes } from "./routes";
+import { BackupLifecycle } from "./components/BackupLifecycle";
 import { WindowTitlebar } from "./components/desktop/WindowTitlebar";
 import { CompactNavigation } from "./layout/desktop/CompactNavigation";
 
@@ -23,6 +24,7 @@ function AppContent() {
   return (
     <>
       <Toaster />
+      <BackupLifecycle />
       <Shell
         mainRef={mainRef}
         titlebar={

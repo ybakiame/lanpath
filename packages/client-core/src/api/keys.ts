@@ -63,3 +63,6 @@ export const CONFIG_SLICES_KEY = ["config_slices"] as const;
 export const BASELINE_VIEW_KEY = ["baseline_view"] as const;
 
 export const SUBSCRIPTION_PROFILE_MUTATION_KEY = ["set_subscription_profile"] as const;
+
+export const BACKUP_RESTORED_KEY = ["backup-restored"] as const;
+export const BACKUP_PENDING_KEY = ["backup-pending"] as const;

@@ -64,6 +64,7 @@ pub fn run() {
             let data_dir = mobile::resolve_data_dir(app);
             // 便携目录不可写时明确终止，不悄悄使用安装版目录。
             std::fs::create_dir_all(&data_dir)?;
+            lanpath_tauri::prepare_startup_backup(&data_dir)?;
             // tracing 全局 subscriber 只能初始化一次；日志初始化紧随 data_dir
             // 解析，guard 存入 AppState 持有，保证进程生命周期内文件写入线程存活。
             let log_guard = lanpath_tauri::logs::init_logging(&data_dir);
@@ -133,6 +134,15 @@ pub fn run() {
             lanpath_tauri::logs::read_log_file_tail,
             lanpath_tauri::logs::clear_logs,
             lanpath_tauri::logs::log_frontend,
+            lanpath_tauri::commands::backup_generate_password,
+            lanpath_tauri::commands::backup_export,
+            lanpath_tauri::commands::backup_preview,
+            lanpath_tauri::commands::backup_prepare_restore,
+            lanpath_tauri::commands::backup_restored,
+            lanpath_tauri::commands::backup_acknowledge,
+            lanpath_tauri::commands::backup_restart,
+            lanpath_tauri::commands::backup_pending,
+            lanpath_tauri::commands::backup_previous,
             lanpath_tauri::commands::get_config,
             lanpath_tauri::commands::save_config,
             lanpath_tauri::commands::start_proxy,

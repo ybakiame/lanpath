@@ -233,6 +233,25 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** Explicit user action after the core stopped and restore staging was synced. */
+  @Command
+  fun closeForRestore(invoke: Invoke) {
+    if (!File(activity.filesDir, ".backup-pending").isDirectory) {
+      invoke.reject("没有待恢复的配置")
+      return
+    }
+    invoke.resolve()
+    activity.finishAndRemoveTask()
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+      android.os.Process.killProcess(android.os.Process.myPid())
+    }, 300)
+  }
+
+  @Command
+  fun exportBackup(invoke: Invoke) {
+    BackupFiles.export(activity, invoke)
+  }
+
   /** Export the original UTF-8 subscription through the existing public Downloads adapter. */
   @Command
   fun exportSubscription(invoke: Invoke) {

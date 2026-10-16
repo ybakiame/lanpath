@@ -7,6 +7,7 @@
 //! 壳以 `lanpath_tauri::commands::<name>` 注册。其余为命令共享辅助：桌面通知器
 //! （[`TauriNotifier`]）与纯转换/解析函数。
 
+mod backup;
 mod baseline_view;
 mod config;
 mod config_slices;
@@ -24,6 +25,7 @@ mod subscription_nodes;
 mod subscription_source;
 mod task;
 
+pub use backup::*;
 pub use baseline_view::*;
 pub use config::*;
 pub use config_slices::*;
