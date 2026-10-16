@@ -254,7 +254,8 @@ impl ClientState {
                 Some(cached) => cached.singbox_nodes,
                 None => {
                     tracing::info!("订阅缓存缺失，启动时兜底拉取一次");
-                    let fetch = subscription::fetch_subscription_with_ua(
+                    let fetch = subscription::fetch_subscription_for_config(
+                        &self.config,
                         &sub.url,
                         sub.user_agent.as_deref(),
                     )

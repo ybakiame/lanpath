@@ -28,7 +28,7 @@ export const CLASH_UI_OPTIONS = [
 
 /**
  * 需重启核心才生效的 ClientConfig 字段 → 脏顶级配置域映射（RestartPrompt 消费）。
- * 未列出的字段（github_proxy_prefix / fetch_via_local_proxy 等）不影响运行中核心，不上报。
+ * 未列出的字段（github_proxy_prefix / request_proxy_mode 等）不影响运行中核心，不上报。
  */
 const RESTART_KEY_BY_FIELD: Record<string, RestartDirtyKey> = {
   mixed_port: "inbounds",
@@ -88,8 +88,6 @@ export interface UseSettingsConfigReturn {
   setClashApiUi: (value: string) => void;
   githubProxyPrefix: string;
   setGithubProxyPrefix: (value: string) => void;
-  fetchViaLocalProxy: boolean;
-  setFetchViaLocalProxy: (value: boolean) => void;
   proxyTestPending: boolean;
   proxyTestResult: string | null;
   proxyTestError: string | null;
@@ -125,7 +123,6 @@ export function useSettingsConfig(): UseSettingsConfigReturn {
   const [clashApiSecret, setClashApiSecret] = useState("");
   const [clashApiUi, setClashApiUi] = useState<string>("zashboard");
   const [githubProxyPrefix, setGithubProxyPrefix] = useState("");
-  const [fetchViaLocalProxy, setFetchViaLocalProxy] = useState(false);
   const [proxyTestPending, setProxyTestPending] = useState(false);
   const [proxyTestResult, setProxyTestResult] = useState<string | null>(null);
   const [proxyTestError, setProxyTestError] = useState<string | null>(null);
@@ -149,7 +146,6 @@ export function useSettingsConfig(): UseSettingsConfigReturn {
       setClashApiSecret(config.clash_api_secret);
       setClashApiUi(config.clash_api_ui || "zashboard");
       setGithubProxyPrefix(config.github_proxy_prefix || "");
-      setFetchViaLocalProxy(config.fetch_via_local_proxy);
     }
   }
 
@@ -252,8 +248,6 @@ export function useSettingsConfig(): UseSettingsConfigReturn {
     setClashApiUi,
     githubProxyPrefix,
     setGithubProxyPrefix,
-    fetchViaLocalProxy,
-    setFetchViaLocalProxy,
     proxyTestPending,
     proxyTestResult,
     proxyTestError,

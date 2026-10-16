@@ -1,4 +1,4 @@
-import { Button, Card, Switch } from "@lanpath/ui";
+import { Button, Card } from "@lanpath/ui";
 import type { UseSettingsConfigReturn } from "./useSettingsConfig";
 import { GithubPrefixField } from "../GithubAccessCard";
 import { testGithubProxy, toErrorMessage } from "@lanpath/client-core";
@@ -9,8 +9,6 @@ interface GithubSettingsProps {
 
 export default function GithubSettings({ settings }: GithubSettingsProps) {
   const {
-    fetchViaLocalProxy,
-    setFetchViaLocalProxy,
     githubProxyPrefix,
     setGithubProxyPrefix,
     proxyTestPending,
@@ -19,7 +17,6 @@ export default function GithubSettings({ settings }: GithubSettingsProps) {
     setProxyTestPending,
     setProxyTestResult,
     setProxyTestError,
-    persist,
     persistDebounced,
   } = settings;
 
@@ -41,27 +38,9 @@ export default function GithubSettings({ settings }: GithubSettingsProps) {
     <Card>
       <Card.Header>
         <Card.Title>GitHub 访问</Card.Title>
-        <Card.Description>中国大陆网络下远程资源拉取失败时的代理配置</Card.Description>
+        <Card.Description>仅改写 GitHub 资源地址；请求代理在「网络请求」中设置</Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-surface p-4">
-          <Switch
-            isSelected={fetchViaLocalProxy}
-            onChange={(next) => {
-              setFetchViaLocalProxy(next);
-              void persist({ fetch_via_local_proxy: next });
-            }}
-          >
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              远程资源拉取走本地代理
-            </Switch.Content>
-          </Switch>
-          <span className="text-xs text-muted">经本机核心 mixed 端口转发拉取请求，需核心运行中</span>
-        </div>
-
         <div className="flex flex-col gap-2">
           <GithubPrefixField
             settings={{

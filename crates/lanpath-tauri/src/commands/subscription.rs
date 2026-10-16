@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use lanpath_client::{
     CachedSubscriptionContent, ClientConfig, Subscription, SubscriptionStore,
-    fetch_subscription_with_ua,
+    fetch_subscription_for_config,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -122,7 +122,19 @@ pub(crate) fn sub_content_from_nodes(singbox_nodes: &[serde_json::Value]) -> ser
 
 /// Apply fetch result to subscription (updates userinfo / node count, clears error on success).
 pub(crate) async fn apply_fetch(store: &SubscriptionStore, sub: &mut Subscription, url: &str) {
-    match fetch_subscription_with_ua(url, sub.user_agent.as_deref()).await {
+    let data_dir = store
+        .file()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let cfg = match ClientConfig::load_for_requests(&data_dir) {
+        Ok(cfg) => cfg,
+        Err(error) => {
+            sub.error = Some(format!("读取网络请求设置失败: {error}"));
+            return;
+        }
+    };
+    match fetch_subscription_for_config(&cfg, url, sub.user_agent.as_deref()).await {
         Ok(result) => {
             // A slow response must not resurrect cache after URL/UA edits or deletion.
             let current = store

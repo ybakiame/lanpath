@@ -22,6 +22,7 @@ import Scripts from "./pages/Scripts";
 import Tools from "./pages/Tools";
 import Override from "./pages/Override";
 import VpnNotify from "./pages/Settings/VpnNotifyPage";
+import NetworkRequests from "./pages/Settings/NetworkRequestsPage";
 import Github from "./pages/Settings/GithubPage";
 import DevTools from "./pages/Settings/DevToolsPage";
 import Diagnose from "./pages/Settings/DiagnosePage";
@@ -46,6 +47,7 @@ const sharedRoutes: RouteObject[] = [
   { path: "/config/experimental", element: <Experimental /> },
   { path: "/settings", element: <Settings /> },
   { path: "/settings/theme", element: <ThemePage /> },
+  { path: "/settings/requests", element: <NetworkRequests /> },
   { path: "/stats", element: <Stats /> },
   { path: "/logs", element: <Logs /> },
   { path: "/proxies", element: <Proxies /> },

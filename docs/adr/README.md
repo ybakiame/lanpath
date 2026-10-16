@@ -10,6 +10,8 @@
 
 - [0006 订阅原文与仪表盘覆写配置](0006-subscription-source-and-dashboard-overrides.md) — Accepted
 
+- [0007 订阅网络代理与会话](0007-subscription-network-session.md) — Accepted
+
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 
 ## 继承决策的历史编号

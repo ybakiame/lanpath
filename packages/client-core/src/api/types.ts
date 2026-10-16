@@ -49,8 +49,9 @@ export interface ClientConfig {
   clash_api_ui: string;
   /** GitHub proxy prefix (e.g. `https://gh-proxy.com`; empty = direct GitHub). */
   github_proxy_prefix: string;
-  /** Whether remote resource fetching goes through local core mixed port (`http://127.0.0.1:{mixed_port}`). */
-  fetch_via_local_proxy: boolean;
+  /** Shared outbound policy for subscriptions, core downloads and remote resources. */
+  request_proxy_mode: "none" | "system" | "core" | "custom";
+  request_proxy_url: string;
   /** Rule mode: `rule` / `global` / `direct` (default `rule`). */
   rule_mode: string;
   /** Whether to show upload/download traffic in the Android VPN notification. */

@@ -60,9 +60,9 @@ fn default_config_has_sane_defaults() {
     assert_eq!(cfg.clash_api_port, 9090);
     assert!(cfg.clash_api_secret.is_empty());
     assert_eq!(cfg.clash_api_ui, "zashboard");
-    // GitHub 访问默认直连：无代理前缀、不走本地代理。
+    // GitHub 无镜像前缀；新请求策略默认跟随系统。
     assert!(cfg.github_proxy_prefix.is_empty());
-    assert!(!cfg.fetch_via_local_proxy);
+    assert_eq!(cfg.request_proxy_mode, crate::RequestProxyMode::System);
     // 规则模式默认 rule。
     assert_eq!(cfg.rule_mode, "rule");
     assert_eq!(cfg.normalized_rule_mode(), "rule");
@@ -112,7 +112,7 @@ fn serde_roundtrip() {
     cfg.clash_api_secret = "sekret".to_string();
     cfg.clash_api_ui = "metacubexd".to_string();
     cfg.github_proxy_prefix = "https://gh-proxy.com".to_string();
-    cfg.fetch_via_local_proxy = true;
+    cfg.request_proxy_mode = crate::RequestProxyMode::Core;
     cfg.rule_mode = "global".to_string();
     cfg.active_subscription_id = Some(uuid::Uuid::new_v4());
     let json = serde_json::to_string(&cfg).unwrap();
@@ -147,9 +147,9 @@ fn serde_missing_new_fields_defaults() {
     assert_eq!(cfg.clash_api_port, 9090);
     assert!(cfg.clash_api_secret.is_empty());
     assert_eq!(cfg.clash_api_ui, "zashboard");
-    // 旧 client.json 缺失 GitHub 访问字段时按默认值解析（直连、不代理）。
+    // 单纯 serde 缺字段使用默认值；磁盘旧配置由 load 一次性迁移。
     assert!(cfg.github_proxy_prefix.is_empty());
-    assert!(!cfg.fetch_via_local_proxy);
+    assert_eq!(cfg.request_proxy_mode, crate::RequestProxyMode::System);
     // 旧 client.json 缺失 active_subscription_id 时按默认值解析（未选中订阅）。
     assert_eq!(cfg.active_subscription_id, None);
     // Old client.json missing group_selections should parse with default empty map.
@@ -273,4 +273,71 @@ fn load_tolerates_legacy_singbox_core_type_field() {
     // 非 mihomo 存量不回写（core_type 字段在下次 save 时自然剔除）。
     let text = std::fs::read_to_string(dir.path().join("client.json")).unwrap();
     assert!(text.contains("core_type"));
+}
+
+#[test]
+fn request_policy_migration_preserves_legacy_choice_and_backup() {
+    for (legacy, mode) in [
+        (true, RequestProxyMode::Core),
+        (false, RequestProxyMode::None),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let text = format!("{{\n  \"fetch_via_local_proxy\": {legacy}, \"mixed_port\": 18789\n}}");
+        let file = dir.path().join("client.json");
+        let backup = dir.path().join("client.request-proxy-v1.backup.json");
+        std::fs::write(&file, &text).unwrap();
+        let loaded = ClientConfig::load(dir.path()).unwrap();
+        assert_eq!(loaded.request_proxy_mode, mode);
+        assert_eq!(loaded.mixed_port, 18789);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);
+        let upgraded = std::fs::read_to_string(&file).unwrap();
+        assert!(!upgraded.contains("fetch_via_local_proxy"));
+        ClientConfig::load(dir.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), upgraded);
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);
+    }
+}
+
+#[test]
+fn request_policy_migration_backup_failure_keeps_original_and_can_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("client.json");
+    let backup = dir.path().join("client.request-proxy-v1.backup.json");
+    let text = r#"{"fetch_via_local_proxy":true}"#;
+    std::fs::write(&file, text).unwrap();
+    std::fs::create_dir(&backup).unwrap();
+    assert!(ClientConfig::load(dir.path()).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    std::fs::remove_dir(&backup).unwrap();
+    assert_eq!(
+        ClientConfig::load(dir.path()).unwrap().request_proxy_mode,
+        RequestProxyMode::Core
+    );
+}
+
+#[test]
+fn custom_request_proxy_validation_redacts_credentials() {
+    let mut cfg = ClientConfig {
+        request_proxy_mode: RequestProxyMode::Custom,
+        ..Default::default()
+    };
+    for url in [
+        "http://user:secret@127.0.0.1:7890",
+        "socks5h://127.0.0.1:1080",
+        "https://proxy.example:8443",
+    ] {
+        cfg.request_proxy_url = url.into();
+        cfg.validate_request_proxy().unwrap();
+    }
+    for url in [
+        "",
+        "ftp://user:secret@proxy.example",
+        "http://127.0.0.1:0",
+        "http://proxy.example/path",
+        "http://proxy.example?password=secret",
+    ] {
+        cfg.request_proxy_url = url.into();
+        let error = cfg.validate_request_proxy().unwrap_err().to_string();
+        assert!(!error.contains("secret"));
+    }
 }

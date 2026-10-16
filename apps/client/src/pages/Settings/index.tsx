@@ -1,4 +1,4 @@
-import { BellRing, Code, Globe, Info, Palette } from "lucide-react";
+import { BellRing, Code, Globe, Info, Palette, Network } from "lucide-react";
 import { IS_MOBILE } from "@lanpath/ui";
 import DesktopSettingsSections from "./desktop/DesktopSettingsSections";
 import { useNavigate } from "react-router-dom";
@@ -18,7 +18,7 @@ export default function Settings() {
     <PageShell>
       <div>
         <h1 className={IS_MOBILE ? "text-3xl font-semibold tracking-tight" : "text-xl font-semibold"}>设置</h1>
-        {!IS_MOBILE && <p className="text-sm text-muted">客户端外观与核心运行配置 · 所有修改即时保存</p>}
+        {!IS_MOBILE && <p className="text-sm text-muted">客户端外观、网络请求与核心运行配置</p>}
       </div>
 
       {IS_MOBILE && <p className="-mt-3 text-sm text-muted">你的外观偏好与连接工具</p>}
@@ -30,6 +30,12 @@ export default function Settings() {
             title: "主题",
             description: `${themeLabel}${resolvedTheme === "dark" && pureBlack ? "（纯黑背景）" : ""} · ${accentLabel}`,
             onPress: () => navigate("/settings/theme"),
+          },
+          {
+            icon: <Network className="size-5" aria-hidden="true" />,
+            title: "网络请求",
+            description: "订阅与远程资源的代理方式",
+            onPress: () => navigate("/settings/requests"),
           },
         ]}
       />

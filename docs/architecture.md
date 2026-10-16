@@ -29,3 +29,6 @@ Windows native 构建例外保持锁定版本，Linux/Android 与发布验签使
 订阅原文与内部转换缓存分离：成功拉取保存 `<id>.source.json`，查看/导出不重新请求；
 YAML/JSON/分享链接分别导出 yaml/json/txt，桌面与 Android 均写入下载目录的 Lanpath 文件夹。
 仪表盘管理当前订阅的覆写绑定，模板管理双端共用，既有 profile_id 语义不变。见 ADR-0006。
+
+客户端订阅、远程资源与核心下载共用 request_network 的四种请求代理策略；GitHub 镜像仅改写 URL。
+配置与 IPC 统一使用 request_proxy_mode/request_proxy_url，旧布尔开关备份后一次性迁移，见 ADR-0007。

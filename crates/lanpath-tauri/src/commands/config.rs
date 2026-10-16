@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use lanpath_client::ClientConfig;
+use lanpath_client::{ClientConfig, RequestProxyMode};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -51,8 +51,9 @@ pub struct ClientConfigView {
     pub clash_api_ui: String,
     /// GitHub proxy prefix (e.g. `https://gh-proxy.com`; empty = direct).
     pub github_proxy_prefix: String,
-    /// Whether remote resource fetching goes through local core mixed port proxy.
-    pub fetch_via_local_proxy: bool,
+    /// Shared subscription / remote resource proxy policy.
+    pub request_proxy_mode: RequestProxyMode,
+    pub request_proxy_url: String,
     /// Rule mode: `rule` / `global` / `direct` (default `rule`).
     ///
     /// Invalid values are persisted as-is and normalized on read by
@@ -85,7 +86,8 @@ impl Default for ClientConfigView {
             clash_api_secret: String::new(),
             clash_api_ui: "zashboard".to_string(),
             github_proxy_prefix: String::new(),
-            fetch_via_local_proxy: false,
+            request_proxy_mode: RequestProxyMode::System,
+            request_proxy_url: String::new(),
             rule_mode: "rule".to_string(),
             vpn_notify_show_selection: true,
         }
@@ -119,7 +121,8 @@ impl ClientConfigView {
             clash_api_secret: cfg.clash_api_secret.clone(),
             clash_api_ui: cfg.clash_api_ui.clone(),
             github_proxy_prefix: cfg.github_proxy_prefix.clone(),
-            fetch_via_local_proxy: cfg.fetch_via_local_proxy,
+            request_proxy_mode: cfg.request_proxy_mode,
+            request_proxy_url: cfg.request_proxy_url.clone(),
             rule_mode: cfg.rule_mode.clone(),
             vpn_notify_show_selection: cfg.vpn_notify_show_selection,
         }
@@ -151,11 +154,14 @@ impl ClientConfigView {
             "clash_api_secret": self.clash_api_secret,
             "clash_api_ui": self.clash_api_ui,
             "github_proxy_prefix": self.github_proxy_prefix,
-            "fetch_via_local_proxy": self.fetch_via_local_proxy,
+            "request_proxy_mode": self.request_proxy_mode,
+            "request_proxy_url": self.request_proxy_url,
             "rule_mode": self.rule_mode,
             "vpn_notify_show_selection": self.vpn_notify_show_selection,
         });
-        serde_json::from_value::<ClientConfig>(value).map_err(|e| e.to_string())
+        let cfg = serde_json::from_value::<ClientConfig>(value).map_err(|e| e.to_string())?;
+        cfg.validate_request_proxy().map_err(|e| e.to_string())?;
+        Ok(cfg)
     }
 }
 
@@ -264,7 +270,7 @@ mod tests {
         view.clash_api_secret = "sekret".to_string();
         view.clash_api_ui = "yacd".to_string();
         view.github_proxy_prefix = "https://gh-proxy.com".to_string();
-        view.fetch_via_local_proxy = true;
+        view.request_proxy_mode = RequestProxyMode::Core;
         view.rule_mode = "direct".to_string();
 
         let result = save_config_impl(dir.path(), view.clone()).unwrap();
@@ -288,7 +294,7 @@ mod tests {
         assert_eq!(saved.clash_api_secret, "sekret");
         assert_eq!(saved.clash_api_ui, "yacd");
         assert_eq!(saved.github_proxy_prefix, "https://gh-proxy.com");
-        assert!(saved.fetch_via_local_proxy);
+        assert_eq!(saved.request_proxy_mode, RequestProxyMode::Core);
         assert_eq!(saved.rule_mode, "direct");
 
         let view2 = ClientConfigView::from_config(&saved);
@@ -303,7 +309,7 @@ mod tests {
         assert_eq!(view2.clash_api_secret, "sekret");
         assert_eq!(view2.clash_api_ui, "yacd");
         assert_eq!(view2.github_proxy_prefix, "https://gh-proxy.com");
-        assert!(view2.fetch_via_local_proxy);
+        assert_eq!(view2.request_proxy_mode, RequestProxyMode::Core);
         assert_eq!(view2.rule_mode, "direct");
     }
 
@@ -326,7 +332,8 @@ mod tests {
             "missing fields should default"
         );
         assert!(
-            view.github_proxy_prefix.is_empty() && !view.fetch_via_local_proxy,
+            view.github_proxy_prefix.is_empty()
+                && view.request_proxy_mode == RequestProxyMode::System,
             "old frontend missing GitHub fields should default"
         );
         let result = save_config_impl(dir.path(), view).unwrap();

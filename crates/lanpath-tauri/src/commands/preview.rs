@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
 use lanpath_client::{
     ClientConfig, EffectiveOverrides, PanelFeatures, SubscriptionStore, apply_panel_features,
-    build_core_config_v2, compose_singbox_config, fetch_subscription_with_ua,
+    build_core_config_v2, compose_singbox_config, fetch_subscription_for_config,
     inject_local_override_warn_only, resolve_remote_overrides,
 };
 use tauri::State;
@@ -63,7 +63,7 @@ pub(crate) async fn preview_core_config_impl(
         if let Some(cached) = sub_store.load_cached_content(sub.id) {
             sub_content_from_nodes(&cached.singbox_nodes)
         } else {
-            let fetch = fetch_subscription_with_ua(&sub.url, sub.user_agent.as_deref())
+            let fetch = fetch_subscription_for_config(&cfg, &sub.url, sub.user_agent.as_deref())
                 .await
                 .map_err(|e| format!("拉取订阅「{}」失败: {e}", sub.name))?;
             cache_fetch_result(&sub_store, sub.id, &fetch);
@@ -84,9 +84,10 @@ pub(crate) async fn preview_core_config_impl(
                 if let Some(cached) = sub_store.load_cached_content(sub.id) {
                     sub_content_from_nodes(&cached.singbox_nodes)
                 } else {
-                    let fetch = fetch_subscription_with_ua(&sub.url, sub.user_agent.as_deref())
-                        .await
-                        .map_err(|e| format!("拉取订阅失败: {e}"))?;
+                    let fetch =
+                        fetch_subscription_for_config(&cfg, &sub.url, sub.user_agent.as_deref())
+                            .await
+                            .map_err(|e| format!("拉取订阅失败: {e}"))?;
                     cache_fetch_result(&sub_store, sub.id, &fetch);
                     sub_content_from_nodes(&fetch.singbox_nodes)
                 }

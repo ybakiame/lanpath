@@ -63,6 +63,8 @@ export function SettingsInput({
       <input
         id={id}
         aria-label={label}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error || hint ? `${id}-description` : undefined}
         type={type}
         inputMode={inputMode}
         autoComplete="off"
@@ -76,9 +78,13 @@ export function SettingsInput({
         className={settingsInputClass}
       />
       {error ? (
-        <span className="text-xs text-amber-500">{error}</span>
+        <span id={`${id}-description`} className="text-xs text-amber-500">
+          {error}
+        </span>
       ) : hint ? (
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">{hint}</span>
+        <span id={`${id}-description`} className="text-xs text-zinc-500 dark:text-zinc-400">
+          {hint}
+        </span>
       ) : null}
     </div>
   );

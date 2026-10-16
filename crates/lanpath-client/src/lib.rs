@@ -25,6 +25,7 @@ pub mod privilege;
 pub mod profile;
 pub mod proxies;
 pub mod remote;
+mod request_network;
 pub mod ruleset_manager;
 pub mod runner;
 pub mod share_link;
@@ -127,30 +128,6 @@ pub fn apply_github_proxy_prefix(url: &str, prefix: &str) -> String {
     format!("{}/{}", prefix.trim_end_matches('/'), url)
 }
 
-/// 构建远程资源拉取客户端：`fetch_via_local_proxy` 时经
-/// `http://127.0.0.1:{mixed_port}` 本地核心 mixed 入站代理（构建失败回退无代理直连），
-/// 否则 `.no_proxy()` 直连。
-fn build_fetch_client(timeout: std::time::Duration, cfg: &config::ClientConfig) -> reqwest::Client {
-    let no_proxy_client = || {
-        reqwest::Client::builder()
-            .timeout(timeout)
-            .no_proxy()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    };
-    if cfg.fetch_via_local_proxy
-        && let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{}", cfg.mixed_port))
-        && let Ok(client) = reqwest::Client::builder()
-            .timeout(timeout)
-            .proxy(proxy)
-            .build()
-    {
-        return client;
-    }
-    // 本地代理客户端构建失败（非法地址等）→ 回退为无代理直连。
-    no_proxy_client()
-}
-
 /// 读取响应体字节；非 2xx 视为失败（沿用既有 fetch 语义）。
 async fn read_body_bytes(resp: reqwest::Response, url: &str) -> Result<bytes::Bytes, String> {
     let status = resp.status();
@@ -179,10 +156,10 @@ async fn fetch_url_bytes_with_retry(
 
 /// 远程资源二进制拉取（Hub 订阅 / 脚本 / 图标共用入口）。
 ///
-/// - 从 `data_dir/client.json` best-effort 读取 GitHub 访问设置（失败按默认值）
+/// - 从 `data_dir/client.json` 读取请求策略；首装使用默认值，配置损坏/迁移失败返回错误
 /// - URL 先经 [`normalize_resource_url`] 归一化，GitHub URL 再经
 ///   [`apply_github_proxy_prefix`] 拼接配置的代理前缀
-/// - `fetch_via_local_proxy` 时请求经本机核心 mixed 端口代理，否则 `no_proxy()` 直连
+/// - 订阅与远程资源共用不使用 / 系统 / 核心 / 自定义代理策略
 /// - 请求层错误重试一次；最终失败且原始 URL 是 GitHub URL 时，错误信息追加
 ///   「设置 → GitHub 访问」的处理提示
 pub async fn fetch_resource_bytes(
@@ -193,17 +170,17 @@ pub async fn fetch_resource_bytes(
     use lanpath_common::LanpathError;
 
     let is_github = is_github_url(url);
-    let cfg = config::ClientConfig::load(data_dir).unwrap_or_default();
+    let cfg = config::ClientConfig::load_for_requests(data_dir)?;
     let request_url =
         apply_github_proxy_prefix(&normalize_resource_url(url), &cfg.github_proxy_prefix);
-    let client = build_fetch_client(timeout, &cfg);
+    let client = request_network::build_client(timeout, &cfg)?;
 
     match fetch_url_bytes_with_retry(&client, &request_url).await {
         Ok(bytes) => Ok(bytes),
         Err(e) => {
             if is_github {
                 Err(LanpathError::Client(format!(
-                    "{e}（GitHub 直连失败：可在「设置 → GitHub 访问」中配置代理前缀或开启「走本地代理」后重试）"
+                    "{e}（GitHub 请求失败：请检查「设置 → 网络请求」或「GitHub 访问」中的镜像前缀）"
                 )))
             } else {
                 Err(LanpathError::Client(e))
@@ -250,10 +227,10 @@ pub async fn fetch_resource_last_modified(
     use lanpath_common::LanpathError;
 
     let is_github = is_github_url(url);
-    let cfg = config::ClientConfig::load(data_dir).unwrap_or_default();
+    let cfg = config::ClientConfig::load_for_requests(data_dir)?;
     let request_url =
         apply_github_proxy_prefix(&normalize_resource_url(url), &cfg.github_proxy_prefix);
-    let client = build_fetch_client(timeout, &cfg);
+    let client = request_network::build_client(timeout, &cfg)?;
 
     let result = match client.head(&request_url).send().await {
         Ok(resp) => read_last_modified(resp, &request_url),
@@ -269,7 +246,7 @@ pub async fn fetch_resource_last_modified(
         Err(e) => {
             if is_github {
                 Err(LanpathError::Client(format!(
-                    "{e}（GitHub 直连失败：可在「设置 → GitHub 访问」中配置代理前缀或开启「走本地代理」后重试）"
+                    "{e}（GitHub 请求失败：请检查「设置 → 网络请求」或「GitHub 访问」中的镜像前缀）"
                 )))
             } else {
                 Err(LanpathError::Client(e))
@@ -279,7 +256,7 @@ pub async fn fetch_resource_last_modified(
 }
 
 /// 远程资源文本拉取（Hub 订阅 / 脚本 / 嗅探共用入口），语义与
-/// [`fetch_resource_bytes`] 一致（GitHub 代理前缀 / 走本地代理 / 重试 / 提示）。
+/// [`fetch_resource_bytes`] 一致（GitHub 代理前缀 / 请求代理策略 / 重试 / 提示）。
 ///
 /// 返回体按 UTF-8 解码；非 UTF-8 内容视为失败。
 pub async fn fetch_resource_text(

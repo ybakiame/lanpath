@@ -47,3 +47,12 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 
 Windows TUN 授权使用 SDK 的 Administrators SID 常量；UAC 成功后正常退出旧实例，
 取消授权保留原实例，已有权限时不重复提权。原生 Windows SID 测试与真实 UAC/TUN 须在目标平台验收。
+
+## 网络请求设置
+
+设置 → 网络请求对订阅添加/刷新、预览/启动缺缓存、远程资源与核心下载统一选择
+不使用、系统、核心、自定义代理；GitHub 访问只配置 URL 镜像前缀。自定义支持 HTTP(S)/SOCKS5，
+保存对后续请求生效。系统模式无配置时直连，Linux 主要读取环境变量；代理不可用会返回错误。
+旧开关升级先生成 client.request-proxy-v1.backup.json，再原子写入新配置，保留开启→核心、
+关闭→直连的语义。恢复时退出客户端，以备份替换 client.json；保留备份直至确认新版本稳定。
+回归与设备边界见 docs/testing/2026-10-16-subscription-and-windows-tun.md 和 ADR-0007。

@@ -78,7 +78,7 @@ impl ClientCoreInventory {
         // are not affected.
         let url = crate::apply_github_proxy_prefix(&url, &self.github_proxy_prefix());
         let resp = self
-            .client
+            .http_client()?
             .get(&url)
             .timeout(std::time::Duration::from_secs(super::HTTP_TIMEOUT_SECS))
             .header("User-Agent", "lanpath-client")

@@ -7,8 +7,11 @@ use lanpath_common::LanpathResult;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod migration;
+mod request_proxy;
 #[cfg(test)]
 mod tests;
+pub use request_proxy::RequestProxyMode;
 
 /// MITM 代理的客户端视图配置。
 ///
@@ -112,8 +115,10 @@ pub struct ClientConfig {
     /// GitHub 代理前缀（如 `https://gh-proxy.com`）：GitHub 资源 URL 将拼接为该前缀代理；
     /// 空串 = 直连 GitHub。
     pub github_proxy_prefix: String,
-    /// 远程资源拉取是否经本地核心 mixed 端口（`http://127.0.0.1:{mixed_port}`）代理。
-    pub fetch_via_local_proxy: bool,
+    /// 客户端订阅与远程资源的请求代理策略，与 GitHub 镜像前缀独立。
+    pub request_proxy_mode: RequestProxyMode,
+    /// 自定义 HTTP(S)/SOCKS 代理地址，仅 custom 模式使用。
+    pub request_proxy_url: String,
     /// Rule mode: `rule` / `global` / `direct` (default `rule`).
     ///
     /// Persisted to client.json. sing-box mode is only the route rule `clash_mode` matching value:
@@ -190,7 +195,8 @@ impl Default for ClientConfig {
             clash_api_secret: String::new(),
             clash_api_ui: "zashboard".to_string(),
             github_proxy_prefix: String::new(),
-            fetch_via_local_proxy: false,
+            request_proxy_mode: RequestProxyMode::System,
+            request_proxy_url: String::new(),
             rule_mode: "rule".to_string(),
             group_selections: HashMap::new(),
             vpn_notify_show_selection: true,
@@ -243,6 +249,7 @@ impl ClientConfig {
         let path = data_dir.join("client.json");
         let text = std::fs::read_to_string(&path)?;
         let mut raw: serde_json::Value = serde_json::from_str(&text)?;
+        migration::migrate_request_proxy(&path, &text, &mut raw)?;
         let legacy_mihomo = raw.get("core_type").and_then(|v| v.as_str()) == Some("mihomo");
         if legacy_mihomo {
             let mihomo_binary = raw
@@ -284,6 +291,15 @@ impl ClientConfig {
         config.data_dir = data_dir.to_path_buf();
         config.mitm.ca_dir = data_dir.join("certs");
         Ok(config)
+    }
+
+    /// 首装可使用默认请求策略；损坏配置或迁移失败必须返回错误。
+    pub fn load_for_requests(data_dir: &Path) -> LanpathResult<Self> {
+        if data_dir.join("client.json").exists() {
+            Self::load(data_dir)
+        } else {
+            Ok(Self::new(data_dir.to_path_buf(), "", "", PathBuf::new()))
+        }
     }
 
     /// 将配置保存到 `data_dir/client.json`。

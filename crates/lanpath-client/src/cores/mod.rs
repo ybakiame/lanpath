@@ -57,7 +57,6 @@ pub struct LocalCore {
 pub struct ClientCoreInventory {
     data_dir: PathBuf,
     api_base: String,
-    client: reqwest::Client,
 }
 
 impl ClientCoreInventory {
@@ -79,21 +78,24 @@ impl ClientCoreInventory {
                 "删除遗留 mihomo 核心目录失败"
             );
         }
-        // 超时纪律：connect_timeout 覆盖全部请求；30s 总超时只按请求施加于
-        // release 元数据 API（响应体小），**不**施加于核心二进制下载——
-        // reqwest 的 Client 级 .timeout() 会把 body 流式下载计入总时长，
-        // 慢速直连网络下 ~30MB 的核心包必然超时被砍（实测 WSL 直连 GitHub
-        // 延迟高，30s 内下不完）。
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
-            .no_proxy()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             data_dir,
             api_base: api_base.into(),
-            client,
         }
+    }
+
+    /// Read the latest global policy per operation; downloads have no total timeout.
+    fn http_client(&self) -> LanpathResult<reqwest::Client> {
+        let cfg = ClientConfig::load_for_requests(&self.data_dir)?;
+        crate::request_network::build_builder(&cfg)?
+            .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| {
+                LanpathError::Core(format!(
+                    "Failed to build download client: {}",
+                    e.without_url()
+                ))
+            })
     }
 
     /// GitHub proxy prefix (from settings page "GitHub Access"): best-effort read from
@@ -215,7 +217,7 @@ impl ClientCoreInventory {
         // 核心下载成功后随附下载对应架构的 wintun.dll；失败不阻塞核心安装（TUN
         // 启动时会报「Unable to load library」，错误信息足够明确）。
         #[cfg(target_os = "windows")]
-        if let Err(e) = download::ensure_wintun(&self.client, &dir).await {
+        if let Err(e) = download::ensure_wintun(&self.http_client()?, &dir).await {
             tracing::warn!(error = %e, "wintun.dll 下载失败，TUN 模式将不可用");
         }
 
@@ -297,7 +299,7 @@ impl ClientCoreInventory {
     /// Download `url` to `dest` (chunked streaming to disk).
     async fn download_to(&self, url: &str, dest: &Path) -> LanpathResult<()> {
         let mut resp = self
-            .client
+            .http_client()?
             .get(url)
             .header("User-Agent", "lanpath-client")
             .send()
@@ -339,7 +341,7 @@ impl ClientCoreInventory {
         // are not affected.
         let url = crate::apply_github_proxy_prefix(&url, &self.github_proxy_prefix());
         let resp = self
-            .client
+            .http_client()?
             .get(&url)
             .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
             .header("User-Agent", "lanpath-client")

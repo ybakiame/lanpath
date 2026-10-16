@@ -19,6 +19,8 @@ use crate::profile::{extract_clash_proxies, extract_nodes_singbox};
 use crate::share_link::{ShareLinkParseResult, parse_share_links};
 
 mod fetch;
+#[cfg(test)]
+mod network_tests;
 mod source;
 mod store;
 #[cfg(test)]
@@ -171,27 +173,20 @@ pub fn node_tags_from_nodes(nodes: &[Value]) -> Vec<NodeTagView> {
         .collect()
 }
 
-/// Generic subscription fetch (module-level entry): GET (no_proxy, 30s timeout)
+/// Generic subscription fetch (module-level entry): GET (system proxy, 30s timeout)
 /// → sniff format.
 ///
 /// `ua` is `None` / empty string uses default UA `clash.meta`; some
 /// subscription sources return different formats based on UA, which can be
 /// customized.
 pub async fn fetch_subscription_with_ua(url: &str, ua: Option<&str>) -> LanpathResult<FetchResult> {
-    let ua = ua
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("clash.meta");
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .no_proxy()
-        .user_agent(ua)
-        .build()
-        .map_err(|e| LanpathError::Client(format!("failed to build http client: {e}")))?;
-    SubscriptionFetcher::with_client(client).fetch(url).await
+    let client = fetch::build_client(Duration::from_secs(30), None)?;
+    SubscriptionFetcher::with_client(client)
+        .fetch_with_user_agent(url, ua)
+        .await
 }
 
-/// Generic subscription fetch (module-level entry): GET (no_proxy, 30s timeout,
+/// Generic subscription fetch (module-level entry): GET (system proxy, 30s timeout,
 /// default UA "clash.meta") → sniff format.
 pub async fn fetch_subscription(url: &str) -> LanpathResult<FetchResult> {
     fetch_subscription_with_ua(url, None).await
