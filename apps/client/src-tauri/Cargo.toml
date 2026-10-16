@@ -1,6 +1,6 @@
 [package]
 name = "lanpath-app"
-version = "0.1.2-beta.1"
+version = "0.1.3-beta.1"
 edition = "2021"
 description = "岚径 Lanpath 客户端壳（Tauri 2 命令层，单壳双目标：Linux/Windows/macOS + Android）"
 license = "AGPL-3.0-or-later"
