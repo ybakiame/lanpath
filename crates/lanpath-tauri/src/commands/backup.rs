@@ -6,15 +6,13 @@ use lanpath_client::backup::{self, Appearance, BackupSummary};
 use tauri::Manager;
 use tauri::State;
 
-fn unpack(content: &str, password: &str) -> Result<backup::Snapshot, String> {
+fn unpack(content: &str) -> Result<Vec<u8>, String> {
     if content.len() > backup::MAX_ARCHIVE.div_ceil(3) * 4 {
         return Err("备份文件超过 16 MiB".into());
     }
-    let bytes = STANDARD
+    STANDARD
         .decode(content)
-        .map_err(|_| "备份文件编码无效".to_string())?;
-    backup::decode(&bytes, password)
-        .map_err(|_| "备份无法解密或校验：请检查密码、文件完整性和备份版本".into())
+        .map_err(|_| "备份文件编码无效".into())
 }
 
 #[tauri::command]
@@ -68,37 +66,49 @@ pub async fn backup_export(
 }
 
 #[tauri::command]
-pub async fn backup_preview(content: String, password: String) -> Result<BackupSummary, String> {
-    tauri::async_runtime::spawn_blocking(move || unpack(&content, &password).map(|s| s.summary))
-        .await
-        .map_err(|_| "备份校验任务未能完成".to_string())?
+pub async fn backup_preview(
+    state: State<'_, AppState>,
+    content: String,
+    password: String,
+) -> Result<backup::BackupPreview, String> {
+    let cache = std::sync::Arc::clone(&state.backup_previews);
+    let work_cache = std::sync::Arc::clone(&cache);
+    let preview = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = unpack(&content)?;
+        work_cache
+            .inspect(&bytes, password)
+            .map_err(|_| "备份无法解密或校验：请检查密码、文件完整性和备份版本".to_string())
+    })
+    .await
+    .map_err(|_| "备份校验任务未能完成".to_string())??;
+    let id = preview.preview_id.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        cache.discard(&id);
+    });
+    Ok(preview)
 }
 
 #[tauri::command]
 pub async fn backup_prepare_restore(
     state: State<'_, AppState>,
-    content: String,
-    password: String,
+    preview_id: String,
     appearance: Option<Appearance>,
 ) -> Result<String, String> {
-    let snapshot = tauri::async_runtime::spawn_blocking({
-        let password = password.clone();
-        move || unpack(&content, &password)
-    })
-    .await
-    .map_err(|_| "恢复任务未能完成".to_string())??;
+    let prepared = state
+        .backup_previews
+        .take(&preview_id)
+        .map_err(|e| e.to_string())?;
     let mut lock = state.client.lock().await;
     if let Some(client) = lock.as_mut() {
         client.stop().await;
     }
     *lock = None;
     let dir = state.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        backup::prepare_restore(&dir, snapshot, &password, appearance)
-    })
-    .await
-    .map_err(|_| "恢复准备未能完成".to_string())?
-    .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || prepared.prepare(&dir, appearance))
+        .await
+        .map_err(|_| "恢复准备未能完成".to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Read-only startup result; frontend acknowledges after applying appearance.

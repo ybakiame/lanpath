@@ -65,3 +65,6 @@ Windows TUN 授权使用 SDK 的 Administrators SID 常量；UAC 成功后正常
 恢复前加密副本使用同一导入密码，可通过「使用恢复前备份」再次导入。核心、证书/私钥、
 日志、流量历史、系统授权不迁移；跨设备的外部文件引用需检查，系统代理/TUN/MITM 手动重开。
 新格式和中断恢复见 ADR-0008，测试记录见 testing/2026-10-17-encrypted-backup.md。
+
+Android 启动先授权再准备配置，跨页 busy 由共享 mutation key 读取；备份预览五分钟有效、确认一次消费。
+密码派生热循环在根与独立壳的 dev/release 均启用 opt-level=3，不降低加密参数，见 ADR-0009。

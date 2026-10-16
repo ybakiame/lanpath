@@ -65,3 +65,13 @@ lanpath-mitm = { path = "crates/lanpath-mitm" }
 # 共享层默认以 scripts-only 形态拉取 lanpath-client（mobile 形态无 lanpath-mitm）；
 # desktop 全功能由成员/壳层通过 lanpath-client/mitm feature 显式开启。
 lanpath-client = { path = "crates/lanpath-client", default-features = false, features = ["scripts"] }
+
+# 密码派生保留 scrypt N=2^17；热循环独立优化，避免 debug/z 导致移动端长时间等待。
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.release.package.scrypt]
+opt-level = 3
+[profile.release.package.salsa20]
+opt-level = 3

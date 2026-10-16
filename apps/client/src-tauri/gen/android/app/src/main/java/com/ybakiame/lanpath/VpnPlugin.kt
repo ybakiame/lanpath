@@ -81,20 +81,32 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
    * 请求系统 VPN 授权：`VpnService.prepare` 返回非空 intent 时发起
    * Activity 跳转（结果由 [prepareCallback] 处理）；已授权时直接 resolve。
    */
+  private val permissionPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
   @Command
   fun prepare(invoke: Invoke) {
-    val prepareIntent = VpnService.prepare(activity)
-    if (prepareIntent == null) {
-      // 已授权，无需跳转。
-      invoke.resolve()
+    if (!permissionPending.compareAndSet(false, true)) {
+      invoke.reject("vpn authorization is already pending", "vpn_auth_pending")
       return
     }
-    startActivityForResult(invoke, prepareIntent, "prepareCallback")
+    try {
+      val prepareIntent = VpnService.prepare(activity)
+      if (prepareIntent == null) {
+        permissionPending.set(false)
+        invoke.resolve()
+        return
+      }
+      startActivityForResult(invoke, prepareIntent, "prepareCallback")
+    } catch (_: Exception) {
+      permissionPending.set(false)
+      invoke.reject("unable to request vpn permission", ERROR_NOT_AUTHORIZED)
+    }
   }
 
   /** prepare 的 Activity 结果回调：RESULT_OK = 用户允许创建 VPN。 */
   @ActivityCallback
   fun prepareCallback(invoke: Invoke, result: ActivityResult) {
+    permissionPending.set(false)
     if (result.resultCode == Activity.RESULT_OK) {
       invoke.resolve()
     } else {

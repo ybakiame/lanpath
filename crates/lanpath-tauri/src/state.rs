@@ -21,6 +21,10 @@ pub struct AppState {
     pub client: Arc<Mutex<Option<ClientState>>>,
     /// 数据目录（配置、证书、核心二进制统一存放于此）。
     pub data_dir: PathBuf,
+    /// 单槽、短期、一次性内存预览，不持久化密码。
+    pub backup_previews: Arc<lanpath_client::backup::PreviewCache>,
+    /// 覆盖授权与启动全程；重复请求立即拒绝，不排队。
+    pub start_gate: Mutex<()>,
     /// 流量统计存储（懒打开；打开失败时降级为 `None`，统计命令报错、tracker 仅内存态）。
     stats: tokio::sync::OnceCell<Option<Arc<StatsStore>>>,
     /// 日志非阻塞写入线程的保活 guard。
@@ -37,6 +41,8 @@ impl AppState {
             client: Arc::new(Mutex::new(None)),
             data_dir,
             stats: tokio::sync::OnceCell::new(),
+            backup_previews: Arc::new(Default::default()),
+            start_gate: Mutex::new(()),
             _log_guard: log_guard,
         }
     }

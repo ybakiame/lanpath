@@ -221,7 +221,7 @@ pub async fn request_vpn_permission() -> Result<(), String> {
         .run_mobile_plugin_async::<serde_json::Value>("prepare", ())
         .await
         .map(|_| ())
-        .map_err(|e| format!("VPN 授权失败: {e}"))
+        .map_err(|e| format!("VPN 授权失败: {}", plugin_error(e)))
 }
 
 /// Read last VPN start error (Android only).

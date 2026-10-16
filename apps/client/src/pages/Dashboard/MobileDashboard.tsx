@@ -1,13 +1,14 @@
 import { SUBSCRIPTION_PROFILE_MUTATION_KEY } from "@lanpath/client-core";
 import { DashboardOverride } from "./DashboardOverride";
-import { useIsMutating, useMutation, useQuery } from "@tanstack/react-query";
+import { useIsMutating, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useAtom } from "jotai";
 import { ChevronDown } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button } from "@lanpath/ui";
 import {
+  lastActionErrorAtom,
   VPN_ERROR_KEY,
-  requestVpnPermission,
   toErrorMessage,
   toastError,
   toastSuccess,
@@ -33,7 +34,7 @@ export default function Dashboard() {
   const [sheetOpen, setSheetOpen] = useState(false);
   // 最近启停/授权的同步错误（展示于主操作卡片内）；`vpn_not_authorized` 由下方
   // 「需要 VPN 授权」引导接管，自动授权/重试链路期间主按钮呈 busy 态。
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useAtom(lastActionErrorAtom);
 
   const {
     queryClient,
@@ -46,6 +47,8 @@ export default function Dashboard() {
     ruleMode,
     startMutation,
     stopMutation,
+    startPending,
+    stopPending,
   } = useDashboardState({
     onActionError: setActionError,
     onActionSuccess: () => setActionError(null),
@@ -63,62 +66,17 @@ export default function Dashboard() {
   });
   const vpnError = vpnErrorData ?? null;
 
-  const reportError = (err: unknown) => setActionError(toErrorMessage(err));
-  // 系统 VPN 授权（request_vpn_permission → VpnService.prepare）。
-  const vpnAuthMutation = useMutation({
-    mutationFn: requestVpnPermission,
-    onSuccess: () => {
-      // 授权成功：清空失败展示，后续由调用方（自动链路 / 兜底按钮）重试启动。
-      setActionError(null);
-      queryClient.setQueryData<string | null>(VPN_ERROR_KEY, null);
-    },
-    onError: reportError,
-  });
-
-  const isVpnAuthError = (err: unknown) => toErrorMessage(err).includes(VPN_AUTH_MARKER);
-
-  /**
-   * 启动代理一次。成功回写状态 + toast；`vpn_not_authorized` 返回 "auth-needed"
-   * 交授权链路处理（不 toast），其余失败 toast + actionError 展示。
-   */
-  const attemptStart = async (): Promise<"ok" | "auth-needed" | "failed"> => {
+  // The backend handles authorization before expensive preparation; one mutation
+  // covers the entire flow and remains visible after leaving/remounting this page.
+  const handleStart = async () => {
+    if (profilePending || startPending || stopPending) return;
+    setActionError(null);
+    queryClient.setQueryData<string | null>(VPN_ERROR_KEY, null);
     try {
       await startMutation.mutateAsync();
       toastSuccess("代理已启动");
-      return "ok";
     } catch (err) {
-      if (isVpnAuthError(err)) {
-        return "auth-needed";
-      }
-      toastError(toErrorMessage(err));
-      return "failed";
-    }
-  };
-
-  /** 请求系统 VPN 授权；授权成功后自动重试启动一次（handleStart 与「去授权」兜底按钮共用）。 */
-  const authorizeAndStart = async () => {
-    try {
-      await vpnAuthMutation.mutateAsync();
-    } catch (err) {
-      // 授权被拒/取消：mutation onError 已把错误写入 actionError（含 vpn_not_authorized），
-      // 卡内显示「需要 VPN 授权」引导并保留「去授权」按钮供用户改变主意后再发起。
-      reportError(err);
-      return;
-    }
-    // 授权成功 → 自动重试启动一次（仅一次，防循环）；仍失败走下方错误展示（含 vpnLastError 轮询兜底）。
-    await attemptStart();
-  };
-
-  const handleStart = async () => {
-    if (profilePending || startMutation.isPending || vpnAuthMutation.isPending || stopMutation.isPending) {
-      return;
-    }
-    // 新一轮启动先清空上轮失败展示（服务侧成功启动后也会清空 vpn_last_error）。
-    setActionError(null);
-    queryClient.setQueryData<string | null>(VPN_ERROR_KEY, null);
-    if ((await attemptStart()) === "auth-needed") {
-      // 未获系统 VPN 授权 → 自动拉起系统授权弹窗，授权成功后在同一链路内重试启动。
-      await authorizeAndStart();
+      if (!toErrorMessage(err).includes(VPN_AUTH_MARKER)) toastError(toErrorMessage(err));
     }
   };
 
@@ -137,7 +95,7 @@ export default function Dashboard() {
   const showActionError = message !== "" && !vpnAuthRequired;
   const showVpnError = vpnError !== null && !vpnAuthRequired;
   // 主操作 busy：覆盖「启动→授权→重试」整条链路（授权弹窗停留期间按钮禁用）。
-  const startingPending = profilePending || startMutation.isPending || vpnAuthMutation.isPending;
+  const startingPending = profilePending || startPending;
 
   return (
     <PageShell>
@@ -153,7 +111,7 @@ export default function Dashboard() {
         <Button
           variant="secondary"
           className="min-h-14 w-full justify-between rounded-2xl px-4 font-normal"
-          isDisabled={profilePending}
+          isDisabled={startingPending || stopPending}
           onPress={() => setSheetOpen(true)}
         >
           <span className="text-sm text-muted">生效订阅</span>
@@ -176,7 +134,7 @@ export default function Dashboard() {
           <StartStopButton
             running={running}
             starting={startingPending}
-            stopping={stopMutation.isPending}
+            stopping={stopPending}
             canStart={canStart}
             onStart={handleStart}
             onStop={handleStop}
@@ -184,7 +142,7 @@ export default function Dashboard() {
         }
       />
 
-      <DashboardOverride sub={activeSub} running={running} disabled={startingPending || stopMutation.isPending} />
+      <DashboardOverride sub={activeSub} running={running} disabled={startingPending || stopPending} />
 
       <ProxyStrategyCard running={running} subscriptionName={activeSub?.name ?? null} />
 
@@ -210,8 +168,8 @@ export default function Dashboard() {
               variant="secondary"
               size="lg"
               className="min-h-11"
-              isPending={vpnAuthMutation.isPending}
-              onPress={() => void authorizeAndStart()}
+              isPending={startPending}
+              onPress={() => void handleStart()}
             >
               去授权
             </Button>

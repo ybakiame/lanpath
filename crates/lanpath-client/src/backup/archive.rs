@@ -72,6 +72,9 @@ pub fn decode(encrypted: &[u8], password: &str) -> LanpathResult<Snapshot> {
     if encrypted.len() > MAX_ARCHIVE || password.len() > 1024 {
         return Err(invalid("备份文件或密码超过限制"));
     }
+    let _guard = CRYPTO_LOCK
+        .lock()
+        .map_err(|_| invalid("解密服务暂不可用"))?;
     let decryptor =
         age::Decryptor::new(encrypted).map_err(|_| invalid("不是受支持的加密备份文件"))?;
     let mut identity = age::scrypt::Identity::new(SecretString::from(password.to_owned()));

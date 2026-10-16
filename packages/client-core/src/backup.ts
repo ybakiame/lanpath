@@ -20,10 +20,13 @@ export const backupPending = () => invoke<boolean>("backup_pending");
 export const backupGeneratePassword = () => invoke<string>("backup_generate_password");
 export const backupExport = (password: string, appearance: BackupAppearance) =>
   invoke<string>("backup_export", { password, appearance });
+export interface BackupPreview extends BackupSummary {
+  preview_id: string;
+}
 export const backupPreview = (content: string, password: string) =>
-  invoke<BackupSummary>("backup_preview", { content, password });
-export const backupPrepareRestore = (content: string, password: string, appearance: BackupAppearance) =>
-  invoke<string>("backup_prepare_restore", { content, password, appearance });
+  invoke<BackupPreview>("backup_preview", { content, password });
+export const backupPrepareRestore = (previewId: string, appearance: BackupAppearance) =>
+  invoke<string>("backup_prepare_restore", { previewId, appearance });
 export const backupPrevious = () => invoke<string | null>("backup_previous");
 export const backupRestored = () => invoke<BackupSummary | null>("backup_restored");
 export const backupAcknowledge = () => invoke<void>("backup_acknowledge");

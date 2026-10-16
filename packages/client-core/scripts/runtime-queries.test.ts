@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { MutationObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { writeRuntimeStatus } from "../src/runtimeQueries";
-import { PROXIES_KEY, PROXY_STATUS_KEY } from "../src/api/keys";
+import { PROXIES_KEY, PROXY_STATUS_KEY, START_PROXY_MUTATION_KEY } from "../src/api/keys";
 import type { ClientStatus } from "../src/api/types";
 
 const status: ClientStatus = {
@@ -95,5 +95,25 @@ test("late replies from the previous core cannot overwrite new nodes or start st
   await Promise.all([nodes, polling]);
   expect(client.getQueryData(PROXIES_KEY)).toEqual(["new subscription"]);
   expect(client.getQueryData(PROXY_STATUS_KEY)).toEqual(status);
+  client.clear();
+});
+
+
+test("startup remains globally pending after the dashboard observer unmounts", async () => {
+  const client = new QueryClient();
+  let finish!: () => void;
+  const permission = new Promise<void>((resolve) => { finish = resolve; });
+  const options = { mutationKey: START_PROXY_MUTATION_KEY, mutationFn: () => permission };
+  const first = new MutationObserver(client, options);
+  const unsubscribe = first.subscribe(() => undefined);
+  const result = first.mutate();
+  expect(client.isMutating({ mutationKey: START_PROXY_MUTATION_KEY })).toBe(1);
+  unsubscribe();
+  const remounted = new MutationObserver(client, options);
+  expect(remounted.getCurrentResult().isPending).toBe(false);
+  expect(client.isMutating({ mutationKey: START_PROXY_MUTATION_KEY })).toBe(1);
+  finish();
+  await result;
+  expect(client.isMutating({ mutationKey: START_PROXY_MUTATION_KEY })).toBe(0);
   client.clear();
 });

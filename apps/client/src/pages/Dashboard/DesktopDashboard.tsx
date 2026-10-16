@@ -35,8 +35,10 @@ export default function Dashboard() {
     running,
     startMutation,
     stopMutation,
+    startPending,
+    stopPending,
   } = useDashboardState({ onActionError: setLastError, onActionSuccess: () => setLastError(null) });
-  const [busy, setBusy] = useState<"start" | "stop" | null>(null);
+  const busy = startPending ? "start" : stopPending ? "stop" : null;
   const [actionError, setActionError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -122,7 +124,7 @@ export default function Dashboard() {
     profilePending || saveConfigMutation.isPending || selectSubMutation.isPending || selectCoreMutation.isPending;
 
   const handleStart = async () => {
-    setBusy("start");
+    if (startPending || stopPending) return;
     try {
       await startMutation.mutateAsync();
       toastSuccess("代理已启动");
@@ -134,11 +136,10 @@ export default function Dashboard() {
         toastError(message);
       }
     }
-    setBusy(null);
   };
 
   const handleStop = async () => {
-    setBusy("stop");
+    if (startPending || stopPending) return;
     try {
       await stopMutation.mutateAsync();
       toastSuccess("代理已停止");
@@ -148,7 +149,6 @@ export default function Dashboard() {
         toastError(message);
       }
     }
-    setBusy(null);
   };
 
   /** 选择生效订阅：仅持久化 active_subscription_id（单核心，无格式联动）。 */

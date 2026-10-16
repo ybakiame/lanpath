@@ -5,7 +5,7 @@ import { Spinner } from "@lanpath/ui";
 interface StartStopButtonProps {
   /** 核心是否运行中：决定启停图标与文案。 */
   running: boolean;
-  /** 启动链路 busy（`startMutation.isPending || vpnAuthMutation.isPending`）。 */
+  /** 启动链路的全局 busy（包含系统授权与配置准备，切页后仍保留）。 */
   starting: boolean;
   /** 停止请求进行中（`stopMutation.isPending`）。 */
   stopping: boolean;

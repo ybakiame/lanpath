@@ -29,3 +29,5 @@
 - [订阅网络策略与 Windows TUN 验证](testing/2026-10-16-subscription-and-windows-tun.md)
 
 - [加密备份与恢复验证](testing/2026-10-17-encrypted-backup.md)
+
+- [Android 启动与备份性能回归](testing/2026-10-17-android-start-backup-performance.md)

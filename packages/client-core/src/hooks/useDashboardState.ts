@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listSubscriptions, startProxy, stopProxy, toErrorMessage } from "../api";
-import { SUBSCRIPTIONS_KEY } from "../api/keys";
+import { START_PROXY_MUTATION_KEY, STOP_PROXY_MUTATION_KEY, SUBSCRIPTIONS_KEY } from "../api/keys";
 import { writeRuntimeStatus } from "../runtimeQueries";
 import type { ClientStatus, SubscriptionView } from "../api";
 
@@ -30,8 +30,20 @@ export function useDashboardState({
     onActionSuccess();
   };
   const reportError = (error: unknown) => onActionError(toErrorMessage(error));
-  const startMutation = useMutation({ mutationFn: startProxy, onSuccess: writeStatus, onError: reportError });
-  const stopMutation = useMutation({ mutationFn: stopProxy, onSuccess: writeStatus, onError: reportError });
+  const startPending = useIsMutating({ mutationKey: START_PROXY_MUTATION_KEY }) > 0;
+  const stopPending = useIsMutating({ mutationKey: STOP_PROXY_MUTATION_KEY }) > 0;
+  const startMutation = useMutation({
+    mutationKey: START_PROXY_MUTATION_KEY,
+    mutationFn: startProxy,
+    onSuccess: writeStatus,
+    onError: reportError,
+  });
+  const stopMutation = useMutation({
+    mutationKey: STOP_PROXY_MUTATION_KEY,
+    mutationFn: stopProxy,
+    onSuccess: writeStatus,
+    onError: reportError,
+  });
   const activeSub = subscriptions.find((sub) => sub.id === config?.active_subscription_id) ?? null;
   return {
     queryClient,
@@ -44,5 +56,7 @@ export function useDashboardState({
     ruleMode: status?.rule_mode ?? config?.rule_mode ?? "rule",
     startMutation,
     stopMutation,
+    startPending,
+    stopPending,
   };
 }

@@ -66,3 +66,6 @@ export const SUBSCRIPTION_PROFILE_MUTATION_KEY = ["set_subscription_profile"] as
 
 export const BACKUP_RESTORED_KEY = ["backup-restored"] as const;
 export const BACKUP_PENDING_KEY = ["backup-pending"] as const;
+
+export const START_PROXY_MUTATION_KEY = ["start_proxy"] as const;
+export const STOP_PROXY_MUTATION_KEY = ["stop_proxy"] as const;

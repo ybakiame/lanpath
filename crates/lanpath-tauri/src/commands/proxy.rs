@@ -43,6 +43,13 @@ pub async fn start_proxy(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<ClientStatusView, String> {
+    let _start = state
+        .start_gate
+        .try_lock()
+        .map_err(|_| "启动操作正在进行，请等待完成".to_string())?;
+    // Android permission must precede subscription/network/config preparation.
+    #[cfg(target_os = "android")]
+    crate::core_bridge::request_vpn_permission().await?;
     let mut lock = state.client.lock().await;
     if lock.is_none() {
         let cfg = ClientConfig::load(&state.data_dir)

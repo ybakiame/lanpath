@@ -47,7 +47,11 @@ export function ImportCard({ appearance }: { appearance: BackupAppearance }) {
     mutationFn: () => backupPreview(file!.content, password),
   });
   const restore = useMutation({
-    mutationFn: () => backupPrepareRestore(file!.content, password, appearance),
+    onError: () => {
+      inspect.reset();
+      setConfirmed(false);
+    },
+    mutationFn: () => backupPrepareRestore(inspect.data!.preview_id, appearance),
     onSuccess: async () => {
       setPassword("");
       setFile(null);
