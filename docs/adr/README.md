@@ -20,6 +20,8 @@
 
 - [0011 规则集分类、检索与条件更新](0011-ruleset-categories-and-update-checks.md) — Accepted
 
+- [0012 GPUI 桌面壳本地验证](0012-gpui-desktop-local-validation.md) — Proposed
+
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 
 ## 继承决策的历史编号
