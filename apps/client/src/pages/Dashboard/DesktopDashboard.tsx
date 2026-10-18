@@ -1,3 +1,4 @@
+import { StartupFeedback } from "./StartupFeedback";
 import { SUBSCRIPTION_PROFILE_MUTATION_KEY } from "@lanpath/client-core";
 import { DashboardOverride } from "./DashboardOverride";
 import { useIsMutating, useMutation, useQuery } from "@tanstack/react-query";
@@ -36,6 +37,7 @@ export default function Dashboard() {
     startMutation,
     stopMutation,
     startPending,
+    startupStage,
     stopPending,
   } = useDashboardState({ onActionError: setLastError, onActionSuccess: () => setLastError(null) });
   const busy = startPending ? "start" : stopPending ? "stop" : null;
@@ -223,6 +225,8 @@ export default function Dashboard() {
         <h1 className="text-xl font-semibold">仪表盘</h1>
         <p className="text-sm text-muted">代理核心运行状态与启停控制</p>
       </div>
+
+      <StartupFeedback stage={startupStage} />
 
       {alertError && !tunAuthRequired && (
         <Alert status="danger">

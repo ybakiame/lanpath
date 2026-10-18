@@ -99,3 +99,8 @@ export function getMitmCaTrustStatus(): Promise<MitmCaTrustView> {
 export function installMitmCa(): Promise<MitmCaTrustView> {
   return invoke<MitmCaTrustView>("install_mitm_ca");
 }
+
+/** Available even while configuration composition holds the runtime lock. */
+export function proxyStartupProgress(): Promise<string | null> {
+  return invoke<string | null>("proxy_startup_progress");
+}

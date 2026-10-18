@@ -30,7 +30,7 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     cfg.mitm.ca_dir = Default::default();
     files.insert("client.json".into(), serde_json::to_vec(&cfg)?);
     for (name, bytes) in &mut files {
-        if name.ends_with(".json") {
+        if name.ends_with(".json") && !name.starts_with("rulesets/") {
             let mut value: serde_json::Value = serde_json::from_slice(bytes)?;
             rewrite_paths(&mut value, &dir.to_string_lossy(), "$LANPATH_DATA");
             *bytes = serde_json::to_vec(&value)?;
@@ -38,7 +38,7 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     }
     let mut snapshot = Snapshot {
         summary: BackupSummary {
-            version: 1,
+            version: 2,
             app_version: env!("CARGO_PKG_VERSION").into(),
             platform: std::env::consts::OS.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -119,6 +119,9 @@ pub(super) fn rewrite_paths(value: &mut serde_json::Value, from: &str, to: &str)
 }
 
 pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
+    if !matches!(snapshot.summary.version, 1 | 2) {
+        return Err(invalid("备份版本不受支持，请更新客户端"));
+    }
     check_size(&snapshot.files)?;
     let mut folded = HashSet::new();
     for name in snapshot.files.keys() {
@@ -179,7 +182,7 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
 
 pub(super) fn relocate(snapshot: &mut Snapshot, dir: &Path) -> LanpathResult<()> {
     for (name, bytes) in &mut snapshot.files {
-        if name.ends_with(".json") {
+        if name.ends_with(".json") && !name.starts_with("rulesets/") {
             let mut value: serde_json::Value = serde_json::from_slice(bytes)?;
             rewrite_paths(&mut value, "$LANPATH_DATA", &dir.to_string_lossy());
             *bytes = serde_json::to_vec(&value)?;

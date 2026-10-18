@@ -26,6 +26,7 @@ export {
   getConfig,
   saveConfig,
   startProxy,
+  proxyStartupProgress,
   stopProxy,
   proxyStatus,
   setRuleMode,

@@ -215,7 +215,7 @@ fn archive_enforces_version_duplicates_and_expanded_limit() {
     assert!(snapshot::validate(&mut snapshot).is_err());
     snapshot.files.remove("scripts/Node.js");
     snapshot.files.remove("scripts/node.js");
-    snapshot.summary.version = 2;
+    snapshot.summary.version = 3;
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default();
     zip.start_file("manifest.json", options).unwrap();
@@ -236,4 +236,90 @@ fn archive_enforces_version_duplicates_and_expanded_limit() {
         zip.write_all(&chunk).unwrap();
     }
     assert!(archive::unpack(zip.finish().unwrap().into_inner()).is_err());
+}
+
+#[test]
+fn ruleset_files_roundtrip_and_restore_without_changing_source_content() {
+    let (source, _) = fixture();
+    let binary = b"SRS\0\x01binary-rules";
+    let json = b"{\n  \"version\": 3, \"rules\": []\n}\n";
+    std::fs::create_dir_all(source.path().join("rulesets/builtin")).unwrap();
+    std::fs::create_dir_all(source.path().join("rulesets/custom")).unwrap();
+    std::fs::write(
+        source.path().join("rulesets/builtin/geosite-private.srs"),
+        binary,
+    )
+    .unwrap();
+    std::fs::write(source.path().join("rulesets/custom/manual.json"), json).unwrap();
+    let snapshot = capture(source.path(), None).unwrap();
+    assert_eq!(snapshot.summary.version, 2);
+    let encrypted = encode(&snapshot, "correct horse battery staple").unwrap();
+    let snapshot = decode(&encrypted, "correct horse battery staple").unwrap();
+    let target = tempfile::tempdir().unwrap();
+    prepare_restore(
+        target.path(),
+        snapshot,
+        "correct horse battery staple",
+        None,
+    )
+    .unwrap();
+    apply_pending(target.path()).unwrap();
+    assert_eq!(
+        std::fs::read(target.path().join("rulesets/builtin/geosite-private.srs")).unwrap(),
+        binary
+    );
+    assert_eq!(
+        std::fs::read(target.path().join("rulesets/custom/manual.json")).unwrap(),
+        json
+    );
+}
+
+#[test]
+fn legacy_backup_decodes_and_old_journal_does_not_remove_rulesets() {
+    let (_source, mut snapshot) = fixture();
+    snapshot.summary.version = 1;
+    let bytes = encode(&snapshot, "correct horse battery staple").unwrap();
+    assert_eq!(
+        decode(&bytes, "correct horse battery staple")
+            .unwrap()
+            .summary
+            .version,
+        1
+    );
+    let target = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(target.path().join("rulesets/custom")).unwrap();
+    std::fs::write(target.path().join("rulesets/custom/keep.srs"), b"keep").unwrap();
+    std::fs::create_dir_all(target.path().join(".backup-transaction/original")).unwrap();
+    std::fs::write(
+        target.path().join(".backup-journal.json"),
+        br#"{"originals":[],"committed":false}"#,
+    )
+    .unwrap();
+    apply_pending(target.path()).unwrap();
+    assert_eq!(
+        std::fs::read(target.path().join("rulesets/custom/keep.srs")).unwrap(),
+        b"keep"
+    );
+}
+
+#[test]
+fn interrupted_v2_transaction_rolls_back_ruleset_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir
+        .path()
+        .join(".backup-transaction/original/rulesets/custom");
+    std::fs::create_dir_all(&original).unwrap();
+    std::fs::write(original.join("rules.srs"), b"original").unwrap();
+    std::fs::create_dir_all(dir.path().join("rulesets/custom")).unwrap();
+    std::fs::write(dir.path().join("rulesets/custom/rules.srs"), b"incoming").unwrap();
+    std::fs::write(
+        dir.path().join(".backup-journal.json"),
+        br#"{"roots":["rulesets"],"originals":["rulesets"],"committed":false}"#,
+    )
+    .unwrap();
+    apply_pending(dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("rulesets/custom/rules.srs")).unwrap(),
+        b"original"
+    );
 }

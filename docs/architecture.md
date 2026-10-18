@@ -36,3 +36,6 @@ YAML/JSON/分享链接分别导出 yaml/json/txt，桌面与 Android 均写入�
 备份由 lanpath-client::backup 负责白名单快照、age 加密与启动恢复事务；lanpath-tauri 提供
 摘要/准备/导出命令，UI 经 client-core 调用。恢复在平台组装的状态初始化前应用，Android 仅适配
 密文文件导出到 MediaStore，配置不进入 Go 桥。见 ADR-0008。
+
+备份 v2 额外迁移 rulesets 文件并兼容 v1；启动阶段由独立内存状态提供，
+client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。

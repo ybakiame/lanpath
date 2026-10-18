@@ -15,13 +15,13 @@
 
 首期压缩包上限 16 MiB、解压上限 64 MiB、最多 1024 个业务文件。解压检查实际读取长度，
 拒绝绝对路径、穿越、符号链接、重复/大小写重名、Windows 保留文件名及白名单外文件。
-仅接受格式版本 1，压缩包包含加密 manifest（版本、时间、平台、计数、外观）。
+新导出格式版本 2，导入兼容版本 1、2（规则集扩展见 ADR-0010），压缩包包含加密 manifest（版本、时间、平台、计数、外观）。
 
 ## 范围与适配
 
 包含 client.json、subscriptions.json、profiles.json、local_override.json、config_slices.json、
-remotes.json，以及 subscription_cache、profile_cache、scripts、remote_cache、script_store。
-不备份核心、CA/私钥、日志、流量库、WebView 数据、运行缓存、已下载规则集和图标。
+remotes.json，以及 subscription_cache、profile_cache、scripts、remote_cache、script_store、rulesets。
+不备份核心、CA/私钥、日志、流量库、WebView 数据、运行缓存和图标。
 外观仅备份主题/强调色/纯黑偏好，不复制浏览器存储或会话。
 
 源数据目录下的 JSON 路径转为逻辑占位符，导入后重定位；外部文件引用由用户检查。

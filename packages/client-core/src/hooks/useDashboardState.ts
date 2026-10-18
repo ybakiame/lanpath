@@ -1,6 +1,11 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listSubscriptions, startProxy, stopProxy, toErrorMessage } from "../api";
-import { START_PROXY_MUTATION_KEY, STOP_PROXY_MUTATION_KEY, SUBSCRIPTIONS_KEY } from "../api/keys";
+import { listSubscriptions, proxyStartupProgress, startProxy, stopProxy, toErrorMessage } from "../api";
+import {
+  START_PROXY_MUTATION_KEY,
+  STOP_PROXY_MUTATION_KEY,
+  SUBSCRIPTIONS_KEY,
+  PROXY_STARTUP_PROGRESS_KEY,
+} from "../api/keys";
 import { writeRuntimeStatus } from "../runtimeQueries";
 import type { ClientStatus, SubscriptionView } from "../api";
 
@@ -32,9 +37,19 @@ export function useDashboardState({
   const reportError = (error: unknown) => onActionError(toErrorMessage(error));
   const startPending = useIsMutating({ mutationKey: START_PROXY_MUTATION_KEY }) > 0;
   const stopPending = useIsMutating({ mutationKey: STOP_PROXY_MUTATION_KEY }) > 0;
+  const { data: startupStage } = useQuery({
+    queryKey: PROXY_STARTUP_PROGRESS_KEY,
+    queryFn: proxyStartupProgress,
+    enabled: startPending,
+    refetchInterval: startPending ? 500 : false,
+    staleTime: 0,
+  });
   const startMutation = useMutation({
     mutationKey: START_PROXY_MUTATION_KEY,
     mutationFn: startProxy,
+    onMutate: () => {
+      queryClient.setQueryData(PROXY_STARTUP_PROGRESS_KEY, null);
+    },
     onSuccess: writeStatus,
     onError: reportError,
   });
@@ -57,6 +72,7 @@ export function useDashboardState({
     startMutation,
     stopMutation,
     startPending,
+    startupStage: startPending ? (startupStage ?? "准备启动") : null,
     stopPending,
   };
 }

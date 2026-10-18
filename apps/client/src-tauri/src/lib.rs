@@ -148,6 +148,7 @@ pub fn run() {
             lanpath_tauri::commands::start_proxy,
             lanpath_tauri::commands::stop_proxy,
             lanpath_tauri::commands::proxy_status,
+            lanpath_tauri::commands::proxy_startup_progress,
             lanpath_tauri::commands::set_rule_mode,
             lanpath_tauri::commands::list_profiles,
             lanpath_tauri::commands::create_profile,

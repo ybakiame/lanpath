@@ -200,6 +200,17 @@ mod tests {
         let store = LocalOverrideStore::new(dir.path().to_path_buf());
         store.save(&ovr).unwrap();
 
+        let manager = RuleSetManager::new(dir.path().into());
+        std::fs::create_dir_all(manager.custom_rule_set_dir()).unwrap();
+        std::fs::write(
+            manager.custom_rule_set_file_path(
+                "c-1",
+                lanpath_client::local_override::RuleSetFormat::Binary,
+            ),
+            "cached-body",
+        )
+        .unwrap();
+
         let outcome = run_update_rule_set(dir.path(), "c-1").await.unwrap();
         assert_eq!(
             (outcome.updated, outcome.skipped, outcome.failed),

@@ -74,7 +74,8 @@ impl RuleSetManager {
     /// - Manual: the persisted `<id>.json` file must exist.
     pub fn has_custom_rule_set_file(&self, rs: &CustomRuleSet) -> bool {
         let format = rs.file_format();
-        self.custom_rule_set_file_path(&rs.id, format).exists()
+        std::fs::metadata(self.custom_rule_set_file_path(&rs.id, format))
+            .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
     }
 
     /// Persist Manual custom rule set contents to `<custom_dir>/<id>.json`
@@ -126,6 +127,20 @@ impl RuleSetManager {
             }
         }
 
+        Ok(())
+    }
+
+    /// Recreate a missing manual file from its saved configuration, without deleting other files.
+    pub fn restore_missing_manual_rule_set(&self, rs: &CustomRuleSet) -> LanpathResult<()> {
+        if let CustomRuleSetSource::Manual { content } = &rs.source
+            && !self.has_custom_rule_set_file(rs)
+        {
+            std::fs::create_dir_all(self.custom_rule_set_dir())?;
+            std::fs::write(
+                self.custom_rule_set_file_path(&rs.id, RuleSetFormat::Source),
+                content,
+            )?;
+        }
         Ok(())
     }
 
@@ -181,7 +196,8 @@ impl RuleSetManager {
             Some(lm) => {
                 rs.remote_updated_at = lm;
                 // 已下载过且远端未更新 → 跳过（`last_updated` 为下载完成时间）。
-                if rs.last_updated > 0 && lm <= rs.last_updated {
+                if self.has_custom_rule_set_file(rs) && rs.last_updated > 0 && lm <= rs.last_updated
+                {
                     return RuleSetUpdateStatus::Skipped;
                 }
             }

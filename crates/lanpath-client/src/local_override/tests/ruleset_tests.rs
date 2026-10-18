@@ -164,6 +164,12 @@ async fn update_custom_remotes_covers_all_remote_with_smart_skip() {
             format: RuleSetFormat::Source,
         },
     );
+    std::fs::create_dir_all(mgr.custom_rule_set_dir()).unwrap();
+    std::fs::write(
+        mgr.custom_rule_set_file_path("c-stale", RuleSetFormat::Source),
+        "cached",
+    )
+    .unwrap();
     stale.last_updated = 2_000_000_000;
     ovr.custom_rule_sets.push(stale);
     // 无 Last-Modified 头 → 下载。
@@ -209,11 +215,11 @@ async fn update_custom_remotes_covers_all_remote_with_smart_skip() {
     assert!(ovr.custom_rule_sets[0].last_updated > 0);
     assert_eq!(ovr.custom_rule_sets[0].remote_updated_at, 784_111_777);
 
-    // c-stale：跳过，remote_updated_at 刷新但 last_updated 不变、无文件写入。
+    // c-stale：跳过，保留已有缓存，remote_updated_at 刷新。
     assert_eq!(ovr.custom_rule_sets[1].last_updated, 2_000_000_000);
     assert_eq!(ovr.custom_rule_sets[1].remote_updated_at, 784_111_777);
     assert!(
-        !mgr.custom_rule_set_file_path("c-stale", RuleSetFormat::Source)
+        mgr.custom_rule_set_file_path("c-stale", RuleSetFormat::Source)
             .exists()
     );
 
@@ -273,6 +279,12 @@ async fn update_single_rule_set_smart_skip() {
             format: RuleSetFormat::Source,
         },
     );
+    std::fs::create_dir_all(mgr.custom_rule_set_dir()).unwrap();
+    std::fs::write(
+        mgr.custom_rule_set_file_path("s", RuleSetFormat::Source),
+        "cached",
+    )
+    .unwrap();
     stale.last_updated = 2_000_000_000;
     assert_eq!(
         mgr.update_custom_rule_set(&mut stale).await,
@@ -281,7 +293,7 @@ async fn update_single_rule_set_smart_skip() {
     assert_eq!(stale.remote_updated_at, 784_111_777);
     assert_eq!(stale.last_updated, 2_000_000_000);
     assert!(
-        !mgr.custom_rule_set_file_path("s", RuleSetFormat::Source)
+        mgr.custom_rule_set_file_path("s", RuleSetFormat::Source)
             .exists()
     );
 
@@ -330,4 +342,128 @@ async fn update_single_rule_set_smart_skip() {
         mgr.update_custom_rule_set(&mut manual).await,
         RuleSetUpdateStatus::Skipped
     );
+}
+
+#[tokio::test]
+async fn missing_cache_downloads_even_when_timestamp_matches_remote() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new().route(
+                "/rules",
+                axum::routing::get(|| async {
+                    (
+                        [("last-modified", "Sun, 06 Nov 1994 08:49:37 GMT")],
+                        "restored-content",
+                    )
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = RuleSetManager::new(dir.path().into());
+    let mut rs = custom(
+        "restored",
+        "restored",
+        CustomRuleSetSource::Remote {
+            url: format!("http://{addr}/rules"),
+            format: RuleSetFormat::Source,
+        },
+    );
+    rs.last_updated = 2_000_000_000;
+    assert_eq!(
+        mgr.update_custom_rule_set(&mut rs).await,
+        RuleSetUpdateStatus::Updated
+    );
+    assert_eq!(
+        std::fs::read_to_string(mgr.custom_rule_set_file_path(&rs.id, rs.file_format())).unwrap(),
+        "restored-content"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn startup_downloads_only_referenced_route_or_dns_sets_and_skips_existing() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = calls.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new().route(
+                "/rules",
+                axum::routing::get(move || {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    async { "rule-content" }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::super::LocalOverrideStore::new(dir.path().into());
+    let mut ovr = store.load().unwrap();
+    for rule in &mut ovr.singbox.rules {
+        rule.enabled = false;
+    }
+    ovr.custom_rule_sets = ["route", "dns", "unused"]
+        .map(|tag| {
+            custom(
+                tag,
+                tag,
+                CustomRuleSetSource::Remote {
+                    url: format!("http://{addr}/rules"),
+                    format: RuleSetFormat::Binary,
+                },
+            )
+        })
+        .to_vec();
+    let mut rule = ovr.singbox.rules[0].clone();
+    rule.id = "route-card".into();
+    rule.builtin = false;
+    rule.target = "route".into();
+    rule.match_type = super::super::RuleMatchType::RuleSet;
+    rule.enabled = true;
+    ovr.singbox.rules.push(rule);
+    store.save(&ovr).unwrap();
+    let config = serde_json::json!({"dns":{"rules":[{"rule_set":["dns"]}]}});
+    let stages = std::sync::Mutex::new(Vec::new());
+    let progress = |stage: &str| stages.lock().unwrap().push(stage.to_owned());
+    super::super::download_missing_rule_sets_warn_only(dir.path(), &config, &progress).await;
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+    assert_eq!(stages.lock().unwrap().len(), 2);
+    super::super::download_missing_rule_sets_warn_only(dir.path(), &config, &progress).await;
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+    assert!(
+        !RuleSetManager::new(dir.path().into()).has_custom_rule_set_file(&ovr.custom_rule_sets[2])
+    );
+    server.abort();
+}
+
+#[test]
+fn missing_manual_file_is_recreated_without_overwriting_existing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = RuleSetManager::new(dir.path().into());
+    let rs = custom(
+        "manual",
+        "manual",
+        CustomRuleSetSource::Manual {
+            content: r#"{"version":3,"rules":[]}"#.into(),
+        },
+    );
+    mgr.restore_missing_manual_rule_set(&rs).unwrap();
+    let file = mgr.custom_rule_set_file_path(&rs.id, rs.file_format());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        r#"{"version":3,"rules":[]}"#
+    );
+    std::fs::write(&file, "existing").unwrap();
+    mgr.restore_missing_manual_rule_set(&rs).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "existing");
 }

@@ -68,3 +68,7 @@ Windows TUN 授权使用 SDK 的 Administrators SID 常量；UAC 成功后正常
 
 Android 启动先授权再准备配置，跨页 busy 由共享 mutation key 读取；备份预览五分钟有效、确认一次消费。
 密码派生热循环在根与独立壳的 dev/release 均启用 opt-level=3，不降低加密参数，见 ADR-0009。
+
+新导出备份为 v2，包含 rulesets 本地文件；导入兼容 v1/v2，旧备份缺文件时仍需联网。
+启动阶段通过独立 proxy_startup_progress 查询展示，避免被运行状态锁阻塞；只补下载被启用路由/DNS 引用的缺失远程规则集。
+见 ADR-0010 与 testing/2026-10-18-ruleset-backup-startup.md。

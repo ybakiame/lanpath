@@ -47,9 +47,13 @@ pub async fn start_proxy(
         .start_gate
         .try_lock()
         .map_err(|_| "启动操作正在进行，请等待完成".to_string())?;
+    let _progress = state.startup_progress.begin();
     // Android permission must precede subscription/network/config preparation.
     #[cfg(target_os = "android")]
-    crate::core_bridge::request_vpn_permission().await?;
+    {
+        state.startup_progress.set(Some("等待系统 VPN 授权"));
+        crate::core_bridge::request_vpn_permission().await?;
+    }
     let mut lock = state.client.lock().await;
     if lock.is_none() {
         let cfg = ClientConfig::load(&state.data_dir)
@@ -66,7 +70,10 @@ pub async fn start_proxy(
     if let Some(store) = state.stats_store().await {
         client.set_stats_store(store);
     }
-    client.start().await.map_err(|e| format!("启动失败: {e}"))?;
+    client
+        .start_with_progress(&|stage| state.startup_progress.set(Some(stage)))
+        .await
+        .map_err(|e| format!("启动失败: {e}"))?;
     let status = client.status().await;
     // 降级启动（内置规则集未全部本地化）：后台重试下载，补齐后自动重载核心恢复完整
     // 分流（延迟下载能力；详见 lanpath_client::ruleset_manager 模块文档）。

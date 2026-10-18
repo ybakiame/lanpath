@@ -25,6 +25,8 @@ pub struct AppState {
     pub backup_previews: Arc<lanpath_client::backup::PreviewCache>,
     /// 覆盖授权与启动全程；重复请求立即拒绝，不排队。
     pub start_gate: Mutex<()>,
+    /// Readable while startup holds the client lock; never persisted.
+    pub startup_progress: crate::commands::StartupProgress,
     /// 流量统计存储（懒打开；打开失败时降级为 `None`，统计命令报错、tracker 仅内存态）。
     stats: tokio::sync::OnceCell<Option<Arc<StatsStore>>>,
     /// 日志非阻塞写入线程的保活 guard。
@@ -43,6 +45,7 @@ impl AppState {
             stats: tokio::sync::OnceCell::new(),
             backup_previews: Arc::new(Default::default()),
             start_gate: Mutex::new(()),
+            startup_progress: Default::default(),
             _log_guard: log_guard,
         }
     }

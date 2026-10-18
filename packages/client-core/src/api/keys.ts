@@ -9,6 +9,7 @@
 export const CAPABILITIES_KEY = ["capabilities"] as const;
 
 export const CONFIG_KEY = ["config"] as const;
+export const PROXY_STARTUP_PROGRESS_KEY = ["proxy_startup_progress"] as const;
 export const PROXY_STATUS_KEY = ["proxy_status"] as const;
 export const TRAFFIC_KEY = ["traffic"] as const;
 export const MITM_WHITELIST_KEY = ["mitmWhitelist"] as const;

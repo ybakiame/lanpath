@@ -37,7 +37,9 @@ export function ExportCard({ appearance }: { appearance: BackupAppearance }) {
     <Card>
       <Card.Header>
         <Card.Title>导出加密备份</Card.Title>
-        <Card.Description>订阅、覆写模板、分流配置、脚本及外观偏好，打包为 .zip.age 文件。</Card.Description>
+        <Card.Description>
+          订阅、覆写模板、分流配置、规则集文件、脚本及外观偏好，打包为 .zip.age 文件。
+        </Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-4">
         <p className="text-sm text-muted">密码不会写入备份，也无法找回。推荐生成随机密码，与备份文件分开保存。</p>

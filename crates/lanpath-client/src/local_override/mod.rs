@@ -80,18 +80,39 @@ pub fn inject_local_override_warn_only(data_dir: &std::path::Path, config: &mut 
 /// 背景：社区/市场规则集是 remote 资源，添加后需「立即更新」才有本地内容；用户未下载时
 /// 引用它的规则会在规则集物化阶段被剥离（`ruleset_manager`），表现为「规则加了但不生
 /// 效」。启动时统一补下载一次（逐个尝试，单条失败仅告警），让「添加即用」成立。
-pub async fn download_missing_rule_sets_warn_only(data_dir: &std::path::Path) {
+pub async fn download_missing_rule_sets_warn_only(
+    data_dir: &std::path::Path,
+    config: &Value,
+    progress: &(dyn Fn(&str) + Send + Sync),
+) {
     let store = LocalOverrideStore::new(data_dir.to_path_buf());
     let Ok(ovr) = store.load() else {
         return;
     };
     let manager = RuleSetManager::new(data_dir.to_path_buf());
+    let mut referenced: std::collections::HashSet<String> = ovr
+        .singbox
+        .rules
+        .iter()
+        .filter(|r| r.enabled && matches!(r.match_type, RuleMatchType::RuleSet))
+        .flat_map(|r| parse_rule_set_tags(&r.target))
+        .collect();
+    if let Some(obj) = config.as_object() {
+        referenced.extend(singbox::collect_dns_rule_set_tags(obj));
+    }
     for rs in &ovr.custom_rule_sets {
+        if !referenced.contains(&rs.tag) {
+            continue;
+        }
+        if let Err(error) = manager.restore_missing_manual_rule_set(rs) {
+            tracing::warn!(tag = %rs.tag, error = %error, "本地规则集恢复失败");
+        }
         if !matches!(rs.source, CustomRuleSetSource::Remote { .. })
             || manager.has_custom_rule_set_file(rs)
         {
             continue;
         }
+        progress(&format!("下载缺失规则集：{}", rs.tag));
         if let Err(e) = manager.download_custom_rule_set(rs).await {
             tracing::warn!(
                 tag = %rs.tag,

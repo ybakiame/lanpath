@@ -1,3 +1,4 @@
+import { StartupFeedback } from "./StartupFeedback";
 import { SUBSCRIPTION_PROFILE_MUTATION_KEY } from "@lanpath/client-core";
 import { DashboardOverride } from "./DashboardOverride";
 import { useIsMutating, useQuery } from "@tanstack/react-query";
@@ -48,6 +49,7 @@ export default function Dashboard() {
     startMutation,
     stopMutation,
     startPending,
+    startupStage,
     stopPending,
   } = useDashboardState({
     onActionError: setActionError,
@@ -127,6 +129,7 @@ export default function Dashboard() {
 
       {/* 2. 运行状态与当前模式 */}
       <StatusCard
+        starting={startPending}
         running={running}
         ruleMode={ruleMode}
         missingRuleSets={status?.missing_rule_sets ?? []}
@@ -141,6 +144,8 @@ export default function Dashboard() {
           />
         }
       />
+
+      <StartupFeedback stage={startupStage} />
 
       <DashboardOverride sub={activeSub} running={running} disabled={startingPending || stopPending} />
 

@@ -210,7 +210,7 @@ fn remove_rule_set_entries_by_tag(
 /// The sing-box `rule_set` match field accepts either a single string or an
 /// array of strings; both forms are collected. Missing / malformed DNS rules
 /// contribute nothing (matching the route-side tolerance for unknown tags).
-fn collect_dns_rule_set_tags(obj: &serde_json::Map<String, Value>) -> HashSet<String> {
+pub(super) fn collect_dns_rule_set_tags(obj: &serde_json::Map<String, Value>) -> HashSet<String> {
     obj.get("dns")
         .and_then(Value::as_object)
         .and_then(|dns| dns.get("rules"))

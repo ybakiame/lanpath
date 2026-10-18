@@ -134,7 +134,7 @@ pub(super) fn unpack(compressed: Vec<u8>) -> LanpathResult<Snapshot> {
         }
     }
     let summary = manifest.ok_or_else(|| invalid("缺少备份目录"))?;
-    if summary.version != 1 {
+    if !matches!(summary.version, 1 | 2) {
         return Err(invalid("备份版本不受支持，请更新客户端"));
     }
     let mut snapshot = Snapshot { summary, files };

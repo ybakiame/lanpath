@@ -11,7 +11,17 @@ const JOURNAL: &str = ".backup-journal.json";
 #[derive(Serialize, Deserialize)]
 struct Journal {
     originals: Vec<String>,
+    #[serde(default = "legacy_roots")]
+    roots: Vec<String>,
     committed: bool,
+}
+
+fn legacy_roots() -> Vec<String> {
+    ROOTS
+        .iter()
+        .filter(|root| **root != "rulesets")
+        .map(|root| (*root).into())
+        .collect()
 }
 
 pub fn prepare_restore(
@@ -80,6 +90,7 @@ pub fn apply_pending(dir: &Path) -> LanpathResult<()> {
     }
     let mut journal = Journal {
         originals: Vec::new(),
+        roots: ROOTS.iter().map(|root| (*root).into()).collect(),
         committed: false,
     };
     for root in ROOTS {
@@ -120,16 +131,14 @@ pub fn apply_pending(dir: &Path) -> LanpathResult<()> {
 
 fn recover(dir: &Path) -> LanpathResult<()> {
     let journal: Journal = serde_json::from_slice(&std::fs::read(dir.join(JOURNAL))?)?;
-    if journal
-        .originals
-        .iter()
-        .any(|s| !ROOTS.contains(&s.as_str()))
+    if journal.roots.iter().any(|s| !ROOTS.contains(&s.as_str()))
+        || journal.originals.iter().any(|s| !journal.roots.contains(s))
     {
         return Err(invalid("恢复日志无效"));
     }
     let work = dir.join(WORK);
     if !journal.committed {
-        for root in ROOTS {
+        for root in &journal.roots {
             let original = work.join("original").join(root);
             let target = dir.join(root);
             if original.exists() {

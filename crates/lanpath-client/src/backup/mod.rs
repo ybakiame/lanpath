@@ -30,6 +30,7 @@ pub(super) const ROOTS: &[&str] = &[
     "scripts",
     "remote_cache",
     "script_store",
+    "rulesets",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
