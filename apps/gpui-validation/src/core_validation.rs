@@ -1,10 +1,12 @@
-use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
+use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 use lanpath_engine::{CoreManager, SingBoxProcessManager};
 use serde_json::{Value, json};
 use tokio::runtime::{Builder, Runtime};
 
 const DEFAULT_CORE_PORT: u16 = 17899;
+const CLASH_API_PORT: u16 = 19090;
+const PLACEHOLDER_SOCKS_PORT: u16 = 19091;
 const CORE_BINARY_ENV: &str = "LANPATH_GPUI_CORE_BINARY";
 const CORE_DATA_DIR_ENV: &str = "LANPATH_GPUI_CORE_DATA_DIR";
 const CORE_PORT_ENV: &str = "LANPATH_GPUI_CORE_PORT";
@@ -17,6 +19,7 @@ pub(crate) struct CoreValidationService {
     config: Value,
     data_dir: PathBuf,
     port: u16,
+    api_port: u16,
     configuration_error: Option<String>,
 }
 
@@ -71,8 +74,27 @@ impl CoreValidationService {
                 "listen": "127.0.0.1",
                 "listen_port": port
             }],
-            "outbounds": [{ "type": "direct", "tag": "direct" }],
-            "route": { "final": "direct" }
+            "outbounds": [
+                {
+                    "type": "selector",
+                    "tag": "proxy",
+                    "outbounds": ["direct", "local-socks"],
+                    "default": "direct"
+                },
+                { "type": "direct", "tag": "direct" },
+                {
+                    "type": "socks",
+                    "tag": "local-socks",
+                    "server": "127.0.0.1",
+                    "server_port": PLACEHOLDER_SOCKS_PORT
+                }
+            ],
+            "route": { "final": "proxy" },
+            "experimental": {
+                "clash_api": {
+                    "external_controller": format!("127.0.0.1:{CLASH_API_PORT}")
+                }
+            }
         });
 
         Self {
@@ -81,6 +103,7 @@ impl CoreValidationService {
             config,
             data_dir,
             port,
+            api_port: CLASH_API_PORT,
             configuration_error,
         }
     }
@@ -97,6 +120,10 @@ impl CoreValidationService {
         self.port
     }
 
+    pub(crate) fn api_port(&self) -> u16 {
+        self.api_port
+    }
+
     /// Synchronous entry point for GPUI's background executor. Never call this
     /// on the window thread: process wait and lifecycle cleanup are blocking.
     pub(crate) fn start(&self) -> Result<(), String> {
@@ -109,6 +136,10 @@ impl CoreValidationService {
             let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, self.port))
                 .await
                 .map_err(|error| format!("隔离端口 {} 不可用：{error}", self.port))?;
+            let api_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, self.api_port))
+                .await
+                .map_err(|error| format!("Clash API 端口 {} 不可用：{error}", self.api_port))?;
+            drop(api_listener);
             drop(listener);
             manager
                 .start(&self.config)
@@ -121,6 +152,17 @@ impl CoreValidationService {
     pub(crate) fn stop(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
         runtime.block_on(async { manager.stop().await.map_err(|error| error.to_string()) })
+    }
+
+    pub(crate) fn block_on<F: Future>(&self, future: F) -> Result<F::Output, String> {
+        if let Some(error) = &self.configuration_error {
+            return Err(error.clone());
+        }
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Tokio runtime 不可用".to_string())?;
+        Ok(runtime.block_on(future))
     }
 
     fn parts(&self) -> Result<(&Runtime, &Arc<SingBoxProcessManager>), String> {

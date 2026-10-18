@@ -1,4 +1,7 @@
 mod core_validation;
+mod proxy_list;
+mod proxy_validation;
+mod proxy_view;
 
 use std::sync::Arc;
 
@@ -7,12 +10,15 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, WindowExt as _,
     button::Button,
     input::{Editor, EditorState},
+    list::{ListEvent, ListState},
     switch::Switch,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Task,
-    TitlebarOptions, Window, WindowOptions, div,
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+    Subscription, Task, TitlebarOptions, Window, WindowOptions, div,
 };
+use proxy_list::ProxyListDelegate;
+use proxy_validation::ProxyValidationService;
 
 const YAML_SAMPLE: &str = r#"dns:
   servers:
@@ -64,6 +70,11 @@ enum CoreOperationKind {
     Stop,
 }
 
+enum ProxyOperation {
+    Refresh,
+    Select(String),
+}
+
 struct ValidationView {
     active: EditorLanguage,
     read_only: bool,
@@ -75,6 +86,13 @@ struct ValidationView {
     core_busy: Option<CoreOperationKind>,
     core_task: Option<Task<()>>,
     core_error: Option<String>,
+    proxies: ProxyValidationService,
+    proxy_list: Entity<ListState<ProxyListDelegate>>,
+    proxy_busy: Option<ProxyOperation>,
+    proxy_task: Option<Task<()>>,
+    proxy_load_error: Option<String>,
+    proxy_action_error: Option<String>,
+    _proxy_subscription: Subscription,
 }
 
 impl ValidationView {
@@ -101,17 +119,40 @@ impl ValidationView {
                 .default_value(JAVASCRIPT_SAMPLE)
         });
 
+        let core = Arc::new(CoreValidationService::from_env());
+        let proxies = ProxyValidationService::new(core.api_port());
+        let proxy_list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
+        let _proxy_subscription = cx.subscribe_in(
+            &proxy_list,
+            window,
+            |this, state, event: &ListEvent, _, cx| {
+                if let ListEvent::Confirm(ix) = event {
+                    let Some(name) = state.read(cx).delegate().member(ix.row) else {
+                        return;
+                    };
+                    this.select_proxy(name, cx);
+                }
+            },
+        );
+
         Self {
             active: EditorLanguage::Yaml,
             read_only: false,
             yaml,
             json,
             javascript,
-            core: Arc::new(CoreValidationService::from_env()),
+            core,
             core_running: false,
             core_busy: None,
             core_task: None,
             core_error: None,
+            proxies,
+            proxy_list,
+            proxy_busy: None,
+            proxy_task: None,
+            proxy_load_error: None,
+            proxy_action_error: None,
+            _proxy_subscription,
         }
     }
 
@@ -120,24 +161,49 @@ impl ValidationView {
             CoreOperationKind::Start => self.core_running,
             CoreOperationKind::Stop => !self.core_running,
         };
-        if self.core_busy.is_some() || !self.core.is_configured() || invalid_state {
+        if self.core_busy.is_some()
+            || self.proxy_busy.is_some()
+            || !self.core.is_configured()
+            || invalid_state
+        {
             return;
         }
 
         self.core_busy = Some(kind);
         self.core_error = None;
         self.core_task = None;
+        if matches!(kind, CoreOperationKind::Start) {
+            self.clear_proxies(cx);
+        }
         let service = self.core.clone();
+        let proxies = self.proxies.clone();
         let task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
                     match kind {
-                        CoreOperationKind::Start => service.start(),
-                        CoreOperationKind::Stop => service.stop(),
+                        CoreOperationKind::Start => {
+                            let result = service.start();
+                            let proxy_result = if result.is_ok() {
+                                Some(
+                                    service
+                                        .block_on(async {
+                                            proxies.wait_ready().await?;
+                                            proxies.list().await
+                                        })
+                                        .and_then(|result| result),
+                                )
+                            } else {
+                                None
+                            };
+                            (result, proxy_result)
+                        }
+                        CoreOperationKind::Stop => (service.stop(), None),
                     }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                let (result, proxy_result) = result;
+                let succeeded = result.is_ok();
                 match result {
                     Ok(()) => {
                         this.core_running = matches!(kind, CoreOperationKind::Start);
@@ -145,6 +211,12 @@ impl ValidationView {
                     Err(error) => {
                         this.core_error = Some(error);
                     }
+                }
+                if succeeded && matches!(kind, CoreOperationKind::Stop) {
+                    this.clear_proxies(cx);
+                }
+                if let Some(proxy_result) = proxy_result {
+                    this.apply_proxy_result(proxy_result, true, cx);
                 }
                 this.core_busy = None;
                 cx.notify();
@@ -184,7 +256,7 @@ impl Render for ValidationView {
             EditorLanguage::Json => &self.json,
             EditorLanguage::JavaScript => &self.javascript,
         };
-        let core_busy = self.core_busy.is_some();
+        let operation_busy = self.core_busy.is_some() || self.proxy_busy.is_some();
         let mode = if self.read_only {
             "只读"
         } else {
@@ -281,7 +353,7 @@ impl Render for ValidationView {
                     .child(
                         Button::new("core-start")
                             .label("启动隔离核心")
-                            .disabled(core_busy || self.core_running || !self.core.is_configured())
+                            .disabled(operation_busy || self.core_running || !self.core.is_configured())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.run_core_operation(CoreOperationKind::Start, cx);
                             })),
@@ -289,7 +361,7 @@ impl Render for ValidationView {
                     .child(
                         Button::new("core-stop")
                             .label("停止核心")
-                            .disabled(core_busy || !self.core_running)
+                            .disabled(operation_busy || !self.core_running)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.run_core_operation(CoreOperationKind::Stop, cx);
                             })),
@@ -313,6 +385,7 @@ impl Render for ValidationView {
                             .aria_label("Override 编辑器"),
                     ),
             )
+            .child(self.render_proxy_panel(cx))
     }
 }
 
