@@ -16,6 +16,14 @@ Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；桌面
 
 ## 环境和验证
 
+按任务读取仓库 skills，不要求工具自动发现：
+
+- 环境准备、依赖或下载排错：[lanpath-environment](.agents/skills/lanpath-environment/SKILL.md)。
+- 按改动范围选择构建、测试与行为验收：[lanpath-build-verify](.agents/skills/lanpath-build-verify/SKILL.md)。
+- ADB 已连接设备上的原生行为调试：[lanpath-android-debug](.agents/skills/lanpath-android-debug/SKILL.md)。
+
+Skills 为操作指引，不替代本文件、docs 或实际脚本；不增加门禁或扩大任务授权。
+
 本地编译/运行一律先进入本仓 nix develop --no-pure-eval（devenv Flake 集成）；Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
 Gradle 使用项目 wrapper，不使用宿主 Gradle。唯一环境例外：用户已授权 Windows CI
 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 Nix。

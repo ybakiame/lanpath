@@ -1,5 +1,9 @@
 # 开发与工作流
 
+Agent 可按任务读取仓库内的 [环境准备 skill](../.agents/skills/lanpath-environment/SKILL.md) 与
+[构建验证 skill](../.agents/skills/lanpath-build-verify/SKILL.md)。入口见 AGENTS.md，工具未自动发现时可直接读取。
+Skills 只组织既有流程；命令以 nix/commands.nix、包脚本和构建脚本为准，项目约束仍以 AGENTS 与本文为准。
+
 先 git submodule update --init --recursive，再 nix develop --no-pure-eval；根目录运行 lanpath-install。
 协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
 本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 的明确例外见 ADR。
@@ -14,6 +18,8 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 代理启停和重启成功后共用 writeRuntimeStatus 取消旧状态轮询/运行查询，重置策略与活动连接缓存；启动后刷新已挂载查询，停止时不重拉核心数据。缓存回归用 `bun test packages/client-core/scripts/runtime-queries.test.ts`（在本仓 Nix 环境）执行，CI 同步执行；浏览器 mock 不等于真实核心验收。
 
 ## Android
+
+ADB 已连接设备的选择、按授权安装、日志采集和原生行为验收见 [Android 调试 skill](../.agents/skills/lanpath-android-debug/SKILL.md)。
 
 在根目录执行 bash apps/client/scripts/build-lanpath-core.sh，生成未跟踪的 lanpathcore.aar。
 进入 apps/client 执行 bun run tauri android dev --target aarch64，使用前端热更新。
