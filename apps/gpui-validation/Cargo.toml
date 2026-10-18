@@ -1,0 +1,26 @@
+[package]
+name = "lanpath-gpui-validation"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+authors = ["Lanpath and ProxyPanel Contributors"]
+repository = "https://github.com/ybakiame/lanpath"
+rust-version = "1.92"
+publish = false
+
+[dependencies]
+gpui-kit = { version = "0.7.3", features = ["tree-sitter-javascript", "tree-sitter-yaml"] }
+
+# 独立本地验证应用：不进入根 workspace、Android target 或现有 CI 门禁。
+[workspace]
+
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-kit = { opt-level = 3 }
+gpui-kit-assets = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }

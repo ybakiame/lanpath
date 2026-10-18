@@ -2,7 +2,7 @@
 let
   libraries = with pkgs; [
     webkitgtk_4_1 gtk3 glib glib-networking gdk-pixbuf pango cairo libsoup_3
-    openssl alsa-lib libxkbcommon libX11 libXcursor libXrandr libXi dbus libGL
+    openssl alsa-lib libxkbcommon wayland libX11 libXcursor libXrandr libXi dbus libGL
     nss nspr at-spi2-core libdrm mesa expat cups libpng librsvg fontconfig
     freetype harfbuzz libepoxy xz bzip2 zstd
   ];
