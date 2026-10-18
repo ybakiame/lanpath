@@ -2,7 +2,7 @@
 
 - 状态：Proposed
 - 日期：2026-10-18
-- 决策来源：用户要求在独立分支记录架构决策并开始本地验证，且不得影响现有 Tauri 分支迭代；本次未授权发布、全量迁移或替换现行桌面壳。
+- 决策来源：用户要求在独立分支记录架构决策并开始本地验证，且不得影响现有 Tauri 分支迭代；本次未授权发布、全量迁移或替换现行桌面壳。用户随后明确授权本验证分支在本机使用原生 Windows Rust/MSVC 工具链。
 
 ## 背景
 
@@ -18,6 +18,8 @@ GPUI Kit 已提供桌面窗口、组件、编辑器和测试能力，但移动�
 
 原型采用单一 `gpui-kit` 依赖及其默认上游 GPUI 后端，初验不同时引入 `gpui-fast`、直接 GPUI 依赖或嵌入式 WebView。
 现有 `lanpath-client`、`lanpath-engine`、`lanpath-common`、`lanpath-mitm` 和 `lanpath-script` 是复用边界；如验证需要提取框架中立状态或命令逻辑，必须保留 Android 的 Tauri 薄适配，不复制业务语义。
+
+本验证分支可在本机 Windows 使用现有原生 Rust/MSVC/CMake 工具链构建和运行原型。该例外仅限 ADR-0012 的隔离验证，不改变其他分支及 CI 的 Nix/原生分工；缺失组件或需要安装、升级、替换时必须另行请求用户处理，不自动修改宿主配置。
 
 应用身份、版本与更新签名身份、`~/.lanpath` 和 Portable 数据布局、NSIS/updater ZIP/Portable ZIP、种子核心与许可资产均保持不变。
 本阶段不自动迁移或删除 WebView 数据，不改变外观偏好既有处理，不新增托盘、单实例、deep link 或新强制 CI 门禁。
