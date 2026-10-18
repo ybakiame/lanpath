@@ -2,9 +2,12 @@ mod connection_list;
 mod connections_view;
 mod core_validation;
 mod editor_view;
+mod observation;
 mod proxy_list;
 mod proxy_validation;
 mod proxy_view;
+mod stats_list;
+mod stats_view;
 
 use std::sync::Arc;
 
@@ -23,6 +26,7 @@ use gpui_kit::{
 };
 use proxy_list::ProxyListDelegate;
 use proxy_validation::ProxyValidationService;
+use stats_view::StatsView;
 
 const YAML_SAMPLE: &str = r#"dns:
   servers:
@@ -84,6 +88,7 @@ enum ValidationPage {
     Editor,
     Proxies,
     Connections,
+    Stats,
 }
 
 struct ValidationView {
@@ -95,6 +100,9 @@ struct ValidationView {
     javascript: Entity<EditorState>,
     core: Arc<CoreValidationService>,
     connections: Entity<ConnectionsView>,
+    stats: Entity<StatsView>,
+    closing: bool,
+    close_task: Option<Task<()>>,
     core_running: bool,
     core_busy: Option<CoreOperationKind>,
     core_task: Option<Task<()>>,
@@ -135,6 +143,7 @@ impl ValidationView {
         let core = Arc::new(CoreValidationService::from_env());
         let proxies = ProxyValidationService::new(core.api_port());
         let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
+        let stats = cx.new(|cx| StatsView::new(core.clone(), window, cx));
         let proxy_list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
         let _proxy_subscription = cx.subscribe_in(
             &proxy_list,
@@ -148,6 +157,11 @@ impl ValidationView {
                 }
             },
         );
+        let view = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            view.update(cx, |view, cx| view.request_close(window, cx))
+                .is_err()
+        });
 
         Self {
             page: ValidationPage::Editor,
@@ -158,6 +172,9 @@ impl ValidationView {
             javascript,
             core,
             connections,
+            stats,
+            closing: false,
+            close_task: None,
             core_running: false,
             core_busy: None,
             core_task: None,
@@ -178,6 +195,7 @@ impl ValidationView {
             CoreOperationKind::Stop => !self.core_running,
         };
         if self.core_busy.is_some()
+            || self.closing
             || self.proxy_busy.is_some()
             || !self.core.is_configured()
             || invalid_state
@@ -230,8 +248,12 @@ impl ValidationView {
                         this.core_error = Some(error);
                     }
                 }
-                this.connections
-                    .update(cx, |view, cx| view.set_running(this.core_running, cx));
+                this.connections.update(cx, |view, cx| {
+                    view.set_running(this.core_running && !this.closing, cx)
+                });
+                this.stats.update(cx, |view, cx| {
+                    view.set_running(this.core_running && !this.closing, cx)
+                });
                 if succeeded && matches!(kind, CoreOperationKind::Stop) {
                     this.clear_proxies(cx);
                 }
@@ -247,6 +269,9 @@ impl ValidationView {
     }
 
     fn core_status(&self) -> String {
+        if self.closing {
+            return "正在停止隔离核心与连接跟踪…".to_string();
+        }
         if let Some(kind) = self.core_busy {
             return match kind {
                 CoreOperationKind::Start => "正在启动隔离核心…".to_string(),
@@ -273,17 +298,75 @@ impl ValidationView {
         self.connections.update(cx, |view, cx| {
             view.set_active(page == ValidationPage::Connections, cx)
         });
+        self.stats.update(cx, |view, cx| {
+            view.set_active(page == ValidationPage::Stats, cx)
+        });
+        cx.notify();
+    }
+
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.closing {
+            return;
+        }
+        self.closing = true;
+        self.connections
+            .update(cx, |view, cx| view.set_running(false, cx));
+        self.stats
+            .update(cx, |view, cx| view.set_running(false, cx));
+        let core = self.core.clone();
+        self.close_task = Some(cx.spawn_in(window, async move |this, cx| {
+            // Finish already accepted commands before stopping their shared
+            // tracker/runtime. New commands are disabled while closing.
+            loop {
+                let Ok(busy) = this.update(cx, |this, _| {
+                    this.core_busy.is_some() || this.proxy_busy.is_some()
+                }) else {
+                    return;
+                };
+                if !busy {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(20))
+                    .await;
+            }
+            let result = cx
+                .background_spawn(async move {
+                    if core.is_configured() {
+                        core.stop()
+                    } else {
+                        Ok(())
+                    }
+                })
+                .await;
+            let _ = cx.update(|window, cx| {
+                this.update(cx, |this, cx| match result {
+                    Ok(()) => window.remove_window(),
+                    Err(error) => {
+                        this.closing = false;
+                        this.core_error = Some(error);
+                        this.connections
+                            .update(cx, |view, cx| view.set_running(this.core_running, cx));
+                        this.stats
+                            .update(cx, |view, cx| view.set_running(this.core_running, cx));
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
+        }));
         cx.notify();
     }
 }
 
 impl Render for ValidationView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation_busy = self.core_busy.is_some() || self.proxy_busy.is_some();
+        let operation_busy = self.closing || self.core_busy.is_some() || self.proxy_busy.is_some();
         let content = match self.page {
             ValidationPage::Editor => self.render_editor_panel(cx).into_any_element(),
             ValidationPage::Proxies => self.render_proxy_panel(cx).into_any_element(),
             ValidationPage::Connections => self.connections.clone().into_any_element(),
+            ValidationPage::Stats => self.stats.clone().into_any_element(),
         };
 
         div()
@@ -331,10 +414,18 @@ impl Render for ValidationView {
                     )
                     .child(
                         Button::new("page-connections")
-                            .label("活动连接")
+                            .label("连接")
                             .selected(self.page == ValidationPage::Connections)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_page(ValidationPage::Connections, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("page-stats")
+                            .label("统计")
+                            .selected(self.page == ValidationPage::Stats)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(ValidationPage::Stats, cx);
                             })),
                     ),
             )

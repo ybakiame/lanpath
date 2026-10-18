@@ -4,7 +4,7 @@ use std::{
 };
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _,
+    ActiveTheme as _, Disableable as _, Selectable as _,
     button::Button,
     list::{List, ListState},
 };
@@ -23,6 +23,7 @@ pub(crate) struct ConnectionsView {
     active: bool,
     busy: bool,
     closing: bool,
+    show_closed: bool,
     loaded: bool,
     generation: u64,
     next_poll: Instant,
@@ -72,6 +73,7 @@ impl ConnectionsView {
             active: false,
             busy: false,
             closing: false,
+            show_closed: false,
             loaded: false,
             generation: 0,
             next_poll: Instant::now(),
@@ -111,8 +113,27 @@ impl ConnectionsView {
         cx.notify();
     }
 
+    fn select_kind(&mut self, show_closed: bool, cx: &mut Context<Self>) {
+        if self.show_closed == show_closed {
+            return;
+        }
+        self.show_closed = show_closed;
+        self.generation += 1;
+        self.loaded = false;
+        self.load_error = None;
+        self.action_error = None;
+        self.notice = None;
+        self.list.update(cx, |list, cx| {
+            list.delegate_mut().replace(Vec::new());
+            cx.notify();
+        });
+        self.next_poll = Instant::now();
+        self.request(None, cx);
+        cx.notify();
+    }
+
     fn request(&mut self, close_id: Option<String>, cx: &mut Context<Self>) {
-        if !self.running || !self.active || self.busy {
+        if !self.running || !self.active || self.busy || (self.show_closed && close_id.is_some()) {
             return;
         }
         self.busy = true;
@@ -122,6 +143,7 @@ impl ConnectionsView {
             self.notice = None;
         }
         let generation = self.generation;
+        let show_closed = self.show_closed;
         let core = self.core.clone();
         self.request_task = Some(cx.spawn(async move |this, cx| {
             let closing = close_id.is_some();
@@ -137,9 +159,13 @@ impl ConnectionsView {
                         } else {
                             None
                         };
-                        let result = clash_get_connections(core.api_port(), "")
-                            .await
-                            .map_err(|e| e.to_string());
+                        // Retain the HTTP health/error contract; tracker.closed()
+                        // alone cannot distinguish a stale snapshot from a live one.
+                        let result = match clash_get_connections(core.api_port(), "").await {
+                            Ok(_) if show_closed => Ok(core.observations().closed().await),
+                            Ok(rows) => Ok(rows),
+                            Err(error) => Err(error.to_string()),
+                        };
                         (close_result, result)
                     })
                     .unwrap_or_else(|error| (None, Err(error)))
@@ -206,7 +232,11 @@ impl Render for ConnectionsView {
         } else if !self.loaded {
             "正在读取活动连接…".to_string()
         } else {
-            format!("{count} 个活动连接 · 每 2 秒轮询 · 切页暂停")
+            if self.show_closed {
+                format!("{count} 条当前会话关闭记录 · 最多 500 条 · 每 2 秒刷新")
+            } else {
+                format!("{count} 个活动连接 · 每 2 秒轮询 · 切页暂停显示刷新")
+            }
         };
         div()
             .flex()
@@ -219,7 +249,7 @@ impl Render for ConnectionsView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child("活动连接")
+                    .child("连接")
                     .child(
                         Button::new("connections-refresh")
                             .label("刷新连接")
@@ -229,7 +259,9 @@ impl Render for ConnectionsView {
                     .child(
                         Button::new("connection-close")
                             .label("关闭所选连接")
-                            .disabled(!self.running || self.busy || !has_selection)
+                            .disabled(
+                                self.show_closed || !self.running || self.busy || !has_selection,
+                            )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let id = this
                                     .list
@@ -241,6 +273,24 @@ impl Render for ConnectionsView {
                                     this.request(Some(id), cx);
                                 }
                             })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("connections-active")
+                            .label("活动连接")
+                            .selected(!self.show_closed)
+                            .on_click(cx.listener(|this, _, _, cx| this.select_kind(false, cx))),
+                    )
+                    .child(
+                        Button::new("connections-closed")
+                            .label("会话已关闭")
+                            .selected(self.show_closed)
+                            .on_click(cx.listener(|this, _, _, cx| this.select_kind(true, cx))),
                     ),
             )
             .child(

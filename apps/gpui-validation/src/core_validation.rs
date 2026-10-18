@@ -4,6 +4,8 @@ use lanpath_engine::{CoreManager, SingBoxProcessManager};
 use serde_json::{Value, json};
 use tokio::runtime::{Builder, Runtime};
 
+use crate::observation::ObservationService;
+
 const DEFAULT_CORE_PORT: u16 = 17899;
 const CLASH_API_PORT: u16 = 19090;
 const PLACEHOLDER_SOCKS_PORT: u16 = 19091;
@@ -15,6 +17,7 @@ pub(crate) struct CoreValidationService {
     // Drop the manager before the runtime so the lifecycle guard and output
     // readers retain a live runtime during teardown.
     manager: Option<Arc<SingBoxProcessManager>>,
+    observations: ObservationService,
     runtime: Option<Runtime>,
     config: Value,
     data_dir: PathBuf,
@@ -99,6 +102,7 @@ impl CoreValidationService {
 
         Self {
             manager,
+            observations: ObservationService::new(data_dir.clone()),
             runtime,
             config,
             data_dir,
@@ -124,6 +128,10 @@ impl CoreValidationService {
         self.api_port
     }
 
+    pub(crate) fn observations(&self) -> &ObservationService {
+        &self.observations
+    }
+
     /// Synchronous entry point for GPUI's background executor. Never call this
     /// on the window thread: process wait and lifecycle cleanup are blocking.
     pub(crate) fn start(&self) -> Result<(), String> {
@@ -132,6 +140,7 @@ impl CoreValidationService {
             tokio::fs::create_dir_all(&self.data_dir)
                 .await
                 .map_err(|error| format!("无法创建隔离数据目录：{error}"))?;
+            self.observations.prepare().await?;
             manager.reap_stale();
             let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, self.port))
                 .await
@@ -144,20 +153,27 @@ impl CoreValidationService {
             manager
                 .start(&self.config)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            if let Err(error) = self.observations.start(self.api_port).await {
+                return match manager.stop().await {
+                    Ok(()) => Err(error),
+                    Err(stop_error) => Err(format!("{error}；核心回收失败：{stop_error}")),
+                };
+            }
+            Ok(())
         })
     }
 
     /// See `start`: this blocks only on a GPUI background worker.
     pub(crate) fn stop(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
-        runtime.block_on(async { manager.stop().await.map_err(|error| error.to_string()) })
+        runtime.block_on(async {
+            self.observations.stop().await;
+            manager.stop().await.map_err(|error| error.to_string())
+        })
     }
 
     pub(crate) fn block_on<F: Future>(&self, future: F) -> Result<F::Output, String> {
-        if let Some(error) = &self.configuration_error {
-            return Err(error.clone());
-        }
         let runtime = self
             .runtime
             .as_ref()

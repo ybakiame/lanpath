@@ -46,7 +46,11 @@ impl ValidationView {
     }
 
     fn refresh_proxies(&mut self, cx: &mut Context<Self>) {
-        if !self.core_running || self.core_busy.is_some() || self.proxy_busy.is_some() {
+        if self.closing
+            || !self.core_running
+            || self.core_busy.is_some()
+            || self.proxy_busy.is_some()
+        {
             return;
         }
         self.proxy_busy = Some(ProxyOperation::Refresh);
@@ -69,7 +73,11 @@ impl ValidationView {
     }
 
     pub(crate) fn select_proxy(&mut self, name: String, cx: &mut Context<Self>) {
-        if !self.core_running || self.core_busy.is_some() || self.proxy_busy.is_some() {
+        if self.closing
+            || !self.core_running
+            || self.core_busy.is_some()
+            || self.proxy_busy.is_some()
+        {
             self.proxy_list.update(cx, |state, cx| {
                 state.delegate_mut().reset_selection();
                 cx.notify();
@@ -127,7 +135,7 @@ impl ValidationView {
     }
 
     pub(crate) fn render_proxy_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation_busy = self.core_busy.is_some() || self.proxy_busy.is_some();
+        let operation_busy = self.closing || self.core_busy.is_some() || self.proxy_busy.is_some();
         div()
             .flex()
             .flex_col()
