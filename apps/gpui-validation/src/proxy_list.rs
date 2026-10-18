@@ -63,6 +63,7 @@ impl ListDelegate for ProxyListDelegate {
         Some(
             ListItem::new(ix)
                 .child(Label::new(member.clone()))
+                .accessibility_label(member.clone())
                 .selected(Some(ix) == self.selected_index),
         )
     }
