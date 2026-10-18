@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/lanpath-tauri","crates/lanpath-client","crates/lanpath-common","crates/lanpath-engine","crates/lanpath-mitm","crates/lanpath-script"]
 
 [workspace.package]
-version = "0.1.3-beta.1"
+version = "0.1.4-beta.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Lanpath and ProxyPanel Contributors"]
