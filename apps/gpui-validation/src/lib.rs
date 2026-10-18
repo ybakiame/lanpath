@@ -1,13 +1,17 @@
+mod connection_list;
+mod connections_view;
 mod core_validation;
+mod editor_view;
 mod proxy_list;
 mod proxy_validation;
 mod proxy_view;
 
 use std::sync::Arc;
 
+use connections_view::ConnectionsView;
 use core_validation::CoreValidationService;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, WindowExt as _,
     button::Button,
     input::{Editor, EditorState},
     list::{ListEvent, ListState},
@@ -75,13 +79,22 @@ enum ProxyOperation {
     Select(String),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ValidationPage {
+    Editor,
+    Proxies,
+    Connections,
+}
+
 struct ValidationView {
+    page: ValidationPage,
     active: EditorLanguage,
     read_only: bool,
     yaml: Entity<EditorState>,
     json: Entity<EditorState>,
     javascript: Entity<EditorState>,
     core: Arc<CoreValidationService>,
+    connections: Entity<ConnectionsView>,
     core_running: bool,
     core_busy: Option<CoreOperationKind>,
     core_task: Option<Task<()>>,
@@ -121,6 +134,7 @@ impl ValidationView {
 
         let core = Arc::new(CoreValidationService::from_env());
         let proxies = ProxyValidationService::new(core.api_port());
+        let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
         let proxy_list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
         let _proxy_subscription = cx.subscribe_in(
             &proxy_list,
@@ -136,12 +150,14 @@ impl ValidationView {
         );
 
         Self {
+            page: ValidationPage::Editor,
             active: EditorLanguage::Yaml,
             read_only: false,
             yaml,
             json,
             javascript,
             core,
+            connections,
             core_running: false,
             core_busy: None,
             core_task: None,
@@ -169,6 +185,8 @@ impl ValidationView {
             return;
         }
 
+        self.connections
+            .update(cx, |view, cx| view.set_running(false, cx));
         self.core_busy = Some(kind);
         self.core_error = None;
         self.core_task = None;
@@ -212,6 +230,8 @@ impl ValidationView {
                         this.core_error = Some(error);
                     }
                 }
+                this.connections
+                    .update(cx, |view, cx| view.set_running(this.core_running, cx));
                 if succeeded && matches!(kind, CoreOperationKind::Stop) {
                     this.clear_proxies(cx);
                 }
@@ -247,20 +267,23 @@ impl ValidationView {
             self.core.configuration_error().unwrap_or("不可用")
         )
     }
+
+    fn set_page(&mut self, page: ValidationPage, cx: &mut Context<Self>) {
+        self.page = page;
+        self.connections.update(cx, |view, cx| {
+            view.set_active(page == ValidationPage::Connections, cx)
+        });
+        cx.notify();
+    }
 }
 
 impl Render for ValidationView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let editor = match self.active {
-            EditorLanguage::Yaml => &self.yaml,
-            EditorLanguage::Json => &self.json,
-            EditorLanguage::JavaScript => &self.javascript,
-        };
         let operation_busy = self.core_busy.is_some() || self.proxy_busy.is_some();
-        let mode = if self.read_only {
-            "只读"
-        } else {
-            "可编辑"
+        let content = match self.page {
+            ValidationPage::Editor => self.render_editor_panel(cx).into_any_element(),
+            ValidationPage::Proxies => self.render_proxy_panel(cx).into_any_element(),
+            ValidationPage::Connections => self.connections.clone().into_any_element(),
         };
 
         div()
@@ -291,58 +314,29 @@ impl Render for ValidationView {
                     .items_center()
                     .gap_2()
                     .child(
-                        Button::new("language-yaml")
-                            .label("YAML")
+                        Button::new("page-editor")
+                            .label("编辑器")
+                            .selected(self.page == ValidationPage::Editor)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.active = EditorLanguage::Yaml;
-                                cx.notify();
+                                this.set_page(ValidationPage::Editor, cx);
                             })),
                     )
                     .child(
-                        Button::new("language-json")
-                            .label("JSON")
+                        Button::new("page-proxies")
+                            .label("代理策略")
+                            .selected(self.page == ValidationPage::Proxies)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.active = EditorLanguage::Json;
-                                cx.notify();
+                                this.set_page(ValidationPage::Proxies, cx);
                             })),
                     )
                     .child(
-                        Button::new("language-javascript")
-                            .label("JavaScript")
+                        Button::new("page-connections")
+                            .label("活动连接")
+                            .selected(self.page == ValidationPage::Connections)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.active = EditorLanguage::JavaScript;
-                                cx.notify();
+                                this.set_page(ValidationPage::Connections, cx);
                             })),
-                    )
-                    .child(
-                        Switch::new("editor-read-only")
-                            .checked(self.read_only)
-                            .label("只读")
-                            .on_click(cx.listener(|this, checked, _, cx| {
-                                this.read_only = *checked;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("validation-about")
-                            .label("验证说明…")
-                            .on_click(|_, window, cx| {
-                                window.open_dialog(cx, |dialog, _, _| {
-                                    dialog
-                                        .title("本地验证范围")
-                                        .child("编辑器与核心均为真实实现；核心仅使用隔离数据目录和 loopback mixed inbound，不修改系统代理或 TUN。")
-                                });
-                            }),
                     ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "当前：{} · {mode}；编辑器内 Ctrl-F 搜索，Esc 关闭搜索或 dialog",
-                        self.active.label()
-                    )),
             )
             .child(
                 div()
@@ -353,7 +347,9 @@ impl Render for ValidationView {
                     .child(
                         Button::new("core-start")
                             .label("启动隔离核心")
-                            .disabled(operation_busy || self.core_running || !self.core.is_configured())
+                            .disabled(
+                                operation_busy || self.core_running || !self.core.is_configured(),
+                            )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.run_core_operation(CoreOperationKind::Start, cx);
                             })),
@@ -373,19 +369,7 @@ impl Render for ValidationView {
                     .text_color(cx.theme().muted_foreground)
                     .child(self.core_status()),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(
-                        Editor::new(editor)
-                            .size_full()
-                            .readonly(self.read_only)
-                            .aria_label("Override 编辑器"),
-                    ),
-            )
-            .child(self.render_proxy_panel(cx))
+            .child(content)
     }
 }
 

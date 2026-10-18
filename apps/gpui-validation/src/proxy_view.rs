@@ -132,7 +132,8 @@ impl ValidationView {
             .flex()
             .flex_col()
             .w_full()
-            .h_64()
+            .flex_1()
+            .min_h_0()
             .gap_2()
             .child(
                 div()

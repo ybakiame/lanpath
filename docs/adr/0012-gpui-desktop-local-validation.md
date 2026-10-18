@@ -44,3 +44,41 @@ GPUI Kit 已提供桌面窗口、组件、编辑器和测试能力，但移动�
 
 只有在真实窗口、资源、核心生命周期、数据兼容和所需发布路径均有证据后，才可请求将本 ADR 或后续 ADR 转为 Accepted。
 届时需明确对 ADR-0001 单壳双目标条款的部分取代关系，并同步 AGENTS、架构、开发、运维、验证记录和 CHANGELOG；未获该决策前，现有 Tauri 桌面壳仍是唯一现行实现。
+
+## Connections 切片验证记录
+
+独立验证程序在 `apps/gpui-validation` 内提供编辑器、代理策略、活动连接三个页面，共用隔离核心工具栏。
+`ConnectionsView` 独立拥有连接快照、轮询与请求任务，复用 `lanpath-client::connections` 的真实 API，不初始化 `ClientState`、系统代理或 TUN。
+
+- 可见页面正常每 2 秒发起读取；请求单飞，关闭操作与读取互斥，关闭后立即重新读取；读取失败保留最后成功快照并退避 10 秒。离开页面不再发起轮询，已在途请求可以完成。
+- 选择按连接 ID 保存；快照变化后通过窗口观察回调同步 `ListState` 的选中索引，避免已关闭连接的索引高亮或键盘选择被错误继承给下一条连接。
+- 核心启停使旧请求代数失效并清空快照；旧会话结果不能回写新会话。关闭成功与后续刷新失败分别展示。
+- 交互采用“选中行 + 关闭所选连接”，不是现行 Tauri 页的逐行关闭按钮；尚未迁移已关闭历史、过滤/排序/详情、统计或运行日志，不宣称 Connections 全量等价。
+
+检查命令：
+
+```sh
+nix develop --no-pure-eval --command cargo fmt --manifest-path apps/gpui-validation/Cargo.toml -- --check
+nix develop --no-pure-eval --command cargo clippy --locked --manifest-path apps/gpui-validation/Cargo.toml -- -D warnings
+nix develop --no-pure-eval --command cargo build --locked --manifest-path apps/gpui-validation/Cargo.toml
+```
+
+Windows 在获准的原生 MSVC 环境运行 `cargo build --release --locked --manifest-path apps/gpui-validation/Cargo.toml`。
+运行前将 `LANPATH_GPUI_CORE_BINARY` 指向隔离复制的 sing-box，将 `LANPATH_GPUI_CORE_DATA_DIR` 指向独立临时数据目录；代理/API 分别使用 `17899/19090`，不使用现有实例端口。
+真实连接场景为 Windows 本地慢速 HTTP 服务与通过隔离 HTTP 代理访问它的 curl；以核心 `/connections`、curl 断开结果、原生窗口画面及 UI Automation 选择状态交叉核对，不使用 mock 连接。
+
+Stats 后续需接入真实 tracker 与统计存储；Logs 后续需明确真实日志来源和生命周期。不得用活动连接计数冒充统计历史或用虚构文本补充日志。
+
+本次结果：上述 WSL 格式、clippy 与 build 通过，X11 真实窗口检查了导航和未配置状态；Windows x64 release 构建通过，保留共享 `lanpath-common` 中既有的未使用导入警告，未修改共享 crate。
+原生场景确认自动出现真实连接、流量字节增长、选择关闭后核心列表归零且 curl 报连接重置、新连接不继承旧选择、核心故障时保留快照并独立显示关闭错误、停核清空列表。
+窗口带核心退出后，隔离进程及 `17899/19090` 监听均消失；正常停止删除 PID 文件，但直接退出时仍遗留 PID 文件，沿用 manager 的 stale-PID 恢复机制，不宣称磁盘自动清理完整。
+验证前后现有 Lanpath app/core PID、`7899/7900/9090` 监听及系统代理均未变化。
+
+Windows x64 release、连接页可见、一个真实慢速 HTTP 连接，连续 10 秒采样：
+
+| 进程 | 工作集 MiB | 私有内存 MiB | 线程 | 句柄 | CPU（单核百分比） |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GPUI 验证 UI | 62.7 | 77.9 | 28 | 1214 | 1.405 |
+| 隔离 sing-box | 36.2 | 58.3 | 18 | 274 | 0.156 |
+
+这不是完整客户端的同负载对照，不能据此承诺最终内存或 CPU 收益。此次未新增 Windows ARM64、高 DPI/IME、UAC、TUN、安装升级或 Android 验证；GPUI/Windows ListItem 外层 UIA 名称仍为空，选择验证使用 `SelectionItemPattern`，不宣称读屏覆盖完整。
