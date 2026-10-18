@@ -13,6 +13,9 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 初次构建使用 cache.nixos.org 与 devenv 官方签名缓存；devenv 任务辅助程序有独立的上游锁定构建快照，不替换项目工具链，缓存未命中时可从源码构建。不承诺 Flake 集成具有 devenv CLI 的全部评估缓存和性能特性。见 ADR-0005。
 前端运行 bun run --filter lanpath-app dev 或 dev:android。
 浏览器使用 http://localhost:1420/?browser-debug=1；mock 不能证明真实 IPC/设备行为。
+移动端预览使用 Android mode 的 http://localhost:1430/?browser-debug=1。连接卡片水面仅为装饰，
+不表示流量或质量；触摸仅产生一次涟漪，不捕获手势或改变启停行为。尊重系统减少动态效果，
+离屏/后台暂停水面动画；本版未请求陀螺仪权限或接入传感器，真机耗电与滚动体验需设备验收。
 共享 UI 的 CSS 扫描由 apps/client/src/index.css 的 @source 覆盖。
 桌面壳默认居中创建窗口，常规最小尺寸为 760×560 逻辑像素；启动与最小尺寸按主屏工作区和 DPI 收敛，保留边框空间。宽度低于 1024 时顶部提供主导航按钮，菜单支持键盘关闭与焦点恢复；侧栏直达页面保留标题，其他子页面返回显式 backTo 或路由父级。
 代理启停和重启成功后共用 writeRuntimeStatus 取消旧状态轮询/运行查询，重置策略与活动连接缓存；启动后刷新已挂载查询，停止时不重拉核心数据。缓存回归用 `bun test packages/client-core/scripts/runtime-queries.test.ts`（在本仓 Nix 环境）执行，CI 同步执行；浏览器 mock 不等于真实核心验收。

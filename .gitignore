@@ -16,5 +16,6 @@ apps/client/src-tauri/gen/android/app/libs/*.aar
 apps/client/src-tauri/gen/android/app/libs/*.jar
 .devenv
 .direnv/
+.reference/
 
 **/.kotlin/

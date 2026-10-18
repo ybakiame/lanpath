@@ -1,0 +1,95 @@
+/* The hero owns clipping/isolation; decoration stays behind stable content. */
+.lanpath-water-card::before {
+  display: none;
+}
+.connection-water {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--accent);
+  opacity: 0.32;
+  transition: opacity 1.2s ease;
+}
+.connection-water-surface {
+  position: absolute;
+  inset: 15% 0 -18%;
+  transform: translateY(16%);
+  transition: transform 2.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.connection-water[data-phase="connected"] {
+  opacity: 0.62;
+}
+.connection-water[data-phase="starting"] {
+  opacity: 0.5;
+}
+.connection-water[data-phase="connected"] .connection-water-surface {
+  transform: translateY(0);
+}
+.connection-water[data-phase="starting"] .connection-water-surface {
+  transform: translateY(7%);
+}
+.connection-water[data-phase="error"] {
+  opacity: 0.18;
+}
+.connection-water-layer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 200%;
+  height: 100%;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 0.7;
+  animation: connection-water-drift 16s linear infinite;
+  animation-play-state: paused;
+}
+.connection-water-back {
+  opacity: 0.11;
+  animation-duration: 21s;
+}
+.connection-water-middle {
+  opacity: 0.14;
+  animation-direction: reverse;
+}
+.connection-water-front {
+  opacity: 0.19;
+  animation-duration: 27s;
+}
+.connection-water[data-active="true"]:is([data-phase="starting"], [data-phase="connected"]) .connection-water-layer {
+  animation-play-state: running;
+}
+.connection-water-ripple {
+  position: absolute;
+  width: 32rem;
+  height: 32rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1.5rem color-mix(in srgb, var(--accent) 9%, transparent),
+    0 0 0 3rem color-mix(in srgb, var(--accent) 5%, transparent);
+  opacity: 0;
+}
+html[data-theme-contrast="black"] .connection-water {
+  opacity: 0.2;
+}
+@keyframes connection-water-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-25%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .connection-water,
+  .connection-water-surface {
+    transition: none;
+  }
+  .connection-water-layer {
+    animation: none;
+  }
+  .connection-water-ripple {
+    display: none;
+  }
+}

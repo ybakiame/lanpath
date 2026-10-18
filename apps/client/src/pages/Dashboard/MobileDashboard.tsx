@@ -130,6 +130,8 @@ export default function Dashboard() {
       {/* 2. 运行状态与当前模式 */}
       <StatusCard
         starting={startPending}
+        stopping={stopPending}
+        failed={showActionError || showVpnError || vpnAuthRequired}
         running={running}
         ruleMode={ruleMode}
         missingRuleSets={status?.missing_rule_sets ?? []}
