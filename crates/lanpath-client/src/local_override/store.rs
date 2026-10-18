@@ -77,6 +77,7 @@ impl LocalOverrideStore {
                 return Ok(LocalOverride::default());
             }
         };
+        let text = super::metadata_migration::upgrade(&self.data_dir, text)?;
         let Ok(value) = serde_json::from_str::<Value>(&text) else {
             tracing::warn!(
                 path = %path.display(),
@@ -142,6 +143,7 @@ impl LocalOverrideStore {
     /// existing rule set entries is re-normalized but never re-added.
     pub fn save(&self, ovr: &LocalOverride) -> LanpathResult<()> {
         let mut ovr = ovr.clone();
+        ovr.ruleset_metadata_version = 1;
         normalize_builtin_route_rules(&mut ovr);
         normalize_builtin_rule_sets(&mut ovr);
         let path = self.override_file();
@@ -177,6 +179,8 @@ fn migrate_legacy_builtins(ovr: &mut LocalOverride) -> bool {
         for sub in ovr.rule_set_subscriptions.iter().filter(|s| s.subscribed) {
             let url = sub.singbox_url_template.replace("{tag}", &sub.community_id);
             ovr.custom_rule_sets.push(CustomRuleSet {
+                category: String::new(),
+                remote_state: Default::default(),
                 id: uuid::Uuid::new_v4().to_string(),
                 name: sub.display_name.clone(),
                 tag: sub.community_id.clone(),
@@ -375,6 +379,8 @@ fn seed_builtin_rule_sets(ovr: &mut LocalOverride) -> bool {
             continue;
         }
         ovr.custom_rule_sets.push(CustomRuleSet {
+            category: String::new(),
+            remote_state: Default::default(),
             id: spec.id.to_string(),
             name: spec.name.to_string(),
             tag: spec.tag.to_string(),

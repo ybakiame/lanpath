@@ -10,6 +10,7 @@ import { asArray } from "./localOverrideGuards";
  */
 export interface RuleSetOption {
   /** 写入 `target` 的原始值：规则集 tag。 */
+  category?: string;
   value: string;
   /** 下拉显示名（规则集 tag）。 */
   label: string;
@@ -31,16 +32,16 @@ export function buildRuleSetOptions(overrideData: LocalOverrideView | null | und
   if (!overrideData) return [];
   const options: RuleSetOption[] = [];
   const seen = new Set<string>();
-  const push = (tag: string, name: string, fallbackHint?: string) => {
+  const push = (tag: string, name: string, fallbackHint?: string, category = "") => {
     const value = tag.trim();
     if (value === "" || seen.has(value)) return;
     seen.add(value);
-    options.push({ value, label: value, hint: name.trim() || fallbackHint });
+    options.push({ value, category, label: value, hint: name.trim() || fallbackHint });
   };
 
   // 自定义规则集（remote / manual）优先，纯资源无启停。
   for (const ruleSet of asArray(overrideData.custom_rule_sets)) {
-    push(ruleSet.tag, ruleSet.name);
+    push(ruleSet.tag, ruleSet.name, undefined, ruleSet.category ?? "");
   }
   // 内置规则集引用（remote / bundled / local）：仅启用项会被注入，故仅列启用项。
   for (const ruleSet of asArray(overrideData.singbox.rule_sets)) {

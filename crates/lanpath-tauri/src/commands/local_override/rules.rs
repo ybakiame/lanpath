@@ -42,6 +42,9 @@ pub(crate) fn run_save(
     data_dir: &std::path::Path,
     input: SaveLocalOverrideInput,
 ) -> Result<(), String> {
+    let _write = super::WRITE_LOCK
+        .lock()
+        .map_err(|_| "规则配置写入锁不可用".to_string())?;
     let mut ovr = convert_input_to_model(input)?;
     validate_local_override(&ovr).map_err(|e| format!("validation failed: {e}"))?;
 
@@ -51,14 +54,31 @@ pub(crate) fn run_save(
         .map_err(|e| format!("failed to load local override: {e}"))?;
     // `remote_updated_at` 由后端 HEAD 维护、不在前端 save 契约中：按 id 从磁盘
     // 现值回填，避免整段替换落盘时把已探测到的远端更新时间清零。
-    let existing_remote: std::collections::HashMap<&str, u64> = existing
-        .custom_rule_sets
-        .iter()
-        .map(|rs| (rs.id.as_str(), rs.remote_updated_at))
-        .collect();
     for rs in &mut ovr.custom_rule_sets {
-        if let Some(remote) = existing_remote.get(rs.id.as_str()) {
-            rs.remote_updated_at = *remote;
+        rs.category = rs.category.trim().to_owned();
+        // Never accept client-provided validators; preserve only for the same resource.
+        if let Some(old) = existing
+            .custom_rule_sets
+            .iter()
+            .find(|old| old.id == rs.id && old.source == rs.source)
+        {
+            if matches!(
+                rs.source,
+                lanpath_client::local_override::CustomRuleSetSource::Remote { .. }
+            ) {
+                rs.last_updated = old.last_updated;
+            }
+            rs.remote_updated_at = old.remote_updated_at;
+            rs.remote_state = old.remote_state.clone();
+        } else {
+            if matches!(
+                rs.source,
+                lanpath_client::local_override::CustomRuleSetSource::Remote { .. }
+            ) {
+                rs.last_updated = 0;
+            }
+            rs.remote_updated_at = 0;
+            rs.remote_state = Default::default();
         }
     }
     // The built-in rule set seeding marker is backfilled the same way: a full-segment
@@ -109,10 +129,13 @@ mod tests {
     /// rules), shaped like a post-edit save.
     fn sample_override() -> LocalOverride {
         let mut ovr = LocalOverride {
+            ruleset_metadata_version: 1,
             singbox: Default::default(),
             rule_set_subscriptions: Vec::new(),
             applied_templates: Vec::new(),
             custom_rule_sets: vec![CustomRuleSet {
+                category: String::new(),
+                remote_state: Default::default(),
                 id: "rs-1".to_string(),
                 name: "my block list".to_string(),
                 tag: "my-block".to_string(),
@@ -253,4 +276,45 @@ mod tests {
             migrated.id
         );
     }
+}
+
+/// Category-only organization never rewrites cache files, rules or resource addresses.
+#[tauri::command]
+pub fn local_override_set_rule_set_categories(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    category: String,
+) -> Result<LocalOverrideView, String> {
+    set_categories(&state.data_dir, &ids, &category)
+}
+
+pub(super) fn set_categories(
+    data_dir: &std::path::Path,
+    ids: &[String],
+    category: &str,
+) -> Result<LocalOverrideView, String> {
+    if category.chars().count() > 64 || category.chars().any(char::is_control) {
+        return Err("分类名称最多 64 个字符，不能包含控制字符".into());
+    }
+    let _write = super::WRITE_LOCK
+        .lock()
+        .map_err(|_| "规则配置写入锁不可用".to_string())?;
+    let store = LocalOverrideStore::new(data_dir.to_path_buf());
+    let mut ovr = store.load().map_err(|e| e.to_string())?;
+    if ids
+        .iter()
+        .any(|id| !ovr.custom_rule_sets.iter().any(|rs| &rs.id == id))
+    {
+        return Err("规则集列表已变化，请刷新后重新选择".into());
+    }
+    for entry in &mut ovr.custom_rule_sets {
+        if ids.contains(&entry.id) {
+            entry.category = category.trim().to_owned();
+        }
+    }
+    store.save(&ovr).map_err(|e| e.to_string())?;
+    Ok(LocalOverrideView::from_model(
+        &ovr,
+        &RuleSetManager::new(data_dir.to_path_buf()),
+    ))
 }

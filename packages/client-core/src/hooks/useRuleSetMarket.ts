@@ -3,7 +3,7 @@
  * 一键添加为 Remote 规则集。
  *
  * 市场检索为纯本地行为（`metaCubeCatalog` 静态清单，无运行时 GitHub API 调用）；
- * 添加 = 向 `custom_rule_sets` 追加 Remote 条目（raw 直链 + `binary` 格式），
+ * 添加 = 向 `custom_rule_sets` 追加 Remote 条目（Raw/CDN + 用户分类 + `binary` 格式），
  * 落盘走共享的 `localOverrideSave` 链路，下载由规则集管理页「立即更新」完成。
  * 桌面端（Market 页）与移动端（RuleSetMarket 页）共用本 hook，UI 库零耦合。
  */
@@ -15,14 +15,16 @@ import type { CustomRuleSetInput, LocalOverrideView } from "../api";
 import { buildSaveInput } from "../rules";
 import { LOCAL_OVERRIDE_KEY } from "../api/keys";
 import { asArray, isLocalOverrideView } from "../localOverrideGuards";
-import { searchMetaCubeEntries } from "../metaCubeCatalog";
-import type { MetaCubeCategory, MetaCubeEntry } from "../metaCubeCatalog";
+import { metaCubeDownloadUrl, metaCubeEquivalentUrls, searchMetaCubeEntries } from "../metaCubeCatalog";
+import type { MetaCubeCategory, MetaCubeEntry, MetaCubeDownloadSource } from "../metaCubeCatalog";
+import { ruleSetCategories } from "../ruleSetCategories";
 import { toastError, toastSuccess } from "../toast";
 
 /** 市场分类过滤：`all` 表示不过滤（hook 层归一化为 `undefined` 传给检索）。 */
 export type MarketCategoryFilter = "all" | MetaCubeCategory;
 
 export interface RuleSetMarketView {
+  categories: string[];
   isLoading: boolean;
   error: string | null;
   /** 规则集数据是否可用（结构守卫通过）。 */
@@ -41,7 +43,7 @@ export interface RuleSetMarketView {
   isAdded: (entry: MetaCubeEntry) => boolean;
   /** 正在添加中的条目 id（并发互斥，同时只允许一条添加）。 */
   addingKey: string | null;
-  addEntry: (entry: MetaCubeEntry) => Promise<void>;
+  addEntry: (entry: MetaCubeEntry, category: string, source: MetaCubeDownloadSource) => Promise<void>;
   invalidate: () => void;
 }
 
@@ -72,11 +74,12 @@ export function useRuleSetMarket(): RuleSetMarketView {
 
   // 已添加判定：按 URL 匹配。
   const addedUrls = useMemo(
-    () => new Set(customSets.flatMap((rs) => (rs.source.kind === "remote" ? [rs.source.url] : []))),
+    () =>
+      new Set(customSets.flatMap((rs) => (rs.source.kind === "remote" ? metaCubeEquivalentUrls(rs.source.url) : []))),
     [customSets],
   );
 
-  const addEntry = async (entry: MetaCubeEntry) => {
+  const addEntry = async (entry: MetaCubeEntry, category: string, source: MetaCubeDownloadSource) => {
     if (!overrideData || addingKey !== null || addedUrls.has(entry.url)) {
       return;
     }
@@ -84,8 +87,9 @@ export function useRuleSetMarket(): RuleSetMarketView {
     const input: CustomRuleSetInput = {
       id: crypto.randomUUID(),
       name: entry.name,
+      category: category.trim(),
       tag: entry.id,
-      source: { kind: "remote", url: entry.url, format: entry.format },
+      source: { kind: "remote", url: metaCubeDownloadUrl(entry, source), format: entry.format },
       // 新条目尚未下载，last_updated 归零，待「立即更新」。
       last_updated: 0,
       remote_updated_at: 0,
@@ -105,6 +109,7 @@ export function useRuleSetMarket(): RuleSetMarketView {
   };
 
   return {
+    categories: ruleSetCategories(customSets),
     isLoading,
     error: queryError ? toErrorMessage(queryError) : null,
     ready: overrideData !== null,

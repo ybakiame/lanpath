@@ -1,5 +1,6 @@
+import { RuleSetPicker } from "../RuleSetPicker";
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Trash2 } from "lucide-react";
+import { ChevronDown, Trash2 } from "lucide-react";
 import type { LocalRuleInput, LocalRuleView } from "@lanpath/client-core";
 import {
   RULE_ACTIONS,
@@ -251,35 +252,13 @@ export function RuleEditSheet({
                   当前没有可用规则集，请先在「规则集管理」中添加
                 </span>
               ) : (
-                <div className="flex flex-col gap-1.5">
-                  {effectiveRuleSetOptions.map((opt) => {
-                    const selected = ruleSetTags.includes(opt.value);
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        aria-pressed={selected}
-                        disabled={saving}
-                        onClick={() => toggleRuleSetTag(opt.value)}
-                        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-4 py-2 text-left transition-colors disabled:opacity-60 ${
-                          selected
-                            ? "border-primary/50 bg-primary/5"
-                            : "border-zinc-200 dark:border-zinc-700 active:bg-zinc-100 dark:active:bg-zinc-700"
-                        }`}
-                      >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                            {opt.label}
-                          </span>
-                          {opt.hint && (
-                            <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{opt.hint}</span>
-                          )}
-                        </span>
-                        {selected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
-                </div>
+                <RuleSetPicker
+                  key={key ?? "closed"}
+                  options={effectiveRuleSetOptions}
+                  selected={ruleSetTags}
+                  onToggle={toggleRuleSetTag}
+                  disabled={saving}
+                />
               )}
               {effectiveRuleSetOptions.length === 0 ? null : ruleSetTags.length === 0 ? (
                 <span className="text-xs text-amber-500">请至少选择一个规则集</span>

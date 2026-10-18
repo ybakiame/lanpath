@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { RuleSetCategoryField } from "./RuleSetCategoryField";
+import { SelectField } from "@lanpath/ui";
+import type { MetaCubeDownloadSource } from "@lanpath/client-core";
 import { Search, Sparkles } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
 import { Button, Card, Spinner, inputClassName } from "@lanpath/ui";
@@ -24,13 +28,15 @@ const inputClass = `${inputClassName} pl-10`;
  * 市场为 **MetaCubeX/meta-rules-dat 固定源**（sing 分支 `geo/{geoip,geosite}/*.srs`）：
  * - 内置文件名清单静态硬编码于 `@lanpath/client-core` 的 `metaCubeCatalog`，检索在本地
  *   完成（大小写不敏感 `contains`），**不做运行时 GitHub API 调用**（规避 403 限流）；
- * - 一键添加构建 Remote 规则集（raw 直链 + `binary`），写入 `custom_rule_sets`
+ * - 一键添加构建 Remote 规则集（可选 Raw/CDN、用户分类及 `binary`），写入 `custom_rule_sets`
  *   后需在规则集管理页「立即更新」下载；已添加按 URL 匹配判定；
  * - 自定义需求走规则集管理页的「添加」表单（远程 URL）。
  */
 export default function RuleSetMarket() {
   // 本地检索 / 添加 / 落盘逻辑已单源化至 client-core `useRuleSetMarket`（ADR-0011）。
   const market = useRuleSetMarket();
+  const [targetCategory, setTargetCategory] = useState("");
+  const [downloadSource, setDownloadSource] = useState<MetaCubeDownloadSource>("github");
   const { keyword, setKeyword, category, setCategory, results, addingKey, addedUrls } = market;
 
   const hasKeyword = market.hasKeyword;
@@ -88,6 +94,29 @@ export default function RuleSetMarket() {
             </Card.Content>
           </Card>
 
+          <Card>
+            <Card.Content className="flex flex-col gap-3 p-4">
+              <RuleSetCategoryField
+                value={targetCategory}
+                onChange={setTargetCategory}
+                categories={market.categories}
+                disabled={addingKey !== null}
+              />
+              <SelectField
+                label="规则集下载源"
+                value={downloadSource}
+                onChange={(value) => setDownloadSource(value as MetaCubeDownloadSource)}
+                disabled={addingKey !== null}
+                options={[
+                  { value: "github", label: "GitHub Raw（源站）" },
+                  { value: "jsdelivr", label: "jsDelivr CDN" },
+                ]}
+              />
+              <p className="text-xs text-muted">
+                仅影响新添加的规则集。CDN 可能延迟同步；更新检查不依赖上游提供时间戳。
+              </p>
+            </Card.Content>
+          </Card>
           {/* 检索框 */}
           <div className="relative">
             <Search
@@ -108,7 +137,7 @@ export default function RuleSetMarket() {
 
           {/* 分类过滤：全部 / GeoIP / GeoSite，与文本检索叠加生效 */}
           <fieldset className="flex min-w-0 gap-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 p-1">
-            <legend className="sr-only">规则集分类过滤</legend>
+            <legend className="sr-only">规则集内容类型过滤</legend>
             {CATEGORY_FILTERS.map((item) => (
               <Button
                 key={item.id}
@@ -140,7 +169,7 @@ export default function RuleSetMarket() {
                   entries={results}
                   addedUrls={addedUrls}
                   addingKey={addingKey}
-                  onAdd={(entry) => void market.addEntry(entry)}
+                  onAdd={(entry) => void market.addEntry(entry, targetCategory, downloadSource)}
                 />
               </>
             )

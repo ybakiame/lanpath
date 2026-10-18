@@ -82,14 +82,15 @@ pub struct LocalRuleSetRefView {
 /// serde 忽略，不再出现在视图契约里）。
 #[derive(Debug, Clone, Serialize)]
 pub struct CustomRuleSetView {
+    pub category: String,
+    pub last_checked: u64,
     pub id: String,
     pub name: String,
     pub tag: String,
     pub source: CustomRuleSetSource,
     /// Local cache write time (Unix seconds; 0 = never downloaded).
     pub last_updated: u64,
-    /// Remote `Last-Modified` (Unix seconds; 0 = unknown). `> last_updated`
-    /// means the remote has a newer version (frontend "有更新" chip).
+    /// Remote Last-Modified (0 = not provided); display only, never a content version.
     pub remote_updated_at: u64,
     pub cached: bool,
     /// Whether this entry was materialized from a built-in rule set spec (badge + restore
@@ -99,8 +100,8 @@ pub struct CustomRuleSetView {
 
 /// Aggregated rule set update outcome (single or batch smart update).
 ///
-/// `skipped` = remote `Last-Modified` ≤ local `last_updated` (already latest);
-/// `failed` = HEAD / download error (best-effort per entry).
+/// `skipped` = conditional 304 or identical content;
+/// `failed` = request / download error (best-effort per entry).
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct RuleSetUpdateOutcomeView {
     pub updated: usize,
@@ -203,6 +204,8 @@ impl CustomRuleSetView {
             source: model.source.clone(),
             last_updated: model.last_updated,
             remote_updated_at: model.remote_updated_at,
+            category: model.category.clone(),
+            last_checked: model.remote_state.checked_at,
             cached: manager.has_custom_rule_set_file(model),
             builtin: model.builtin,
         }

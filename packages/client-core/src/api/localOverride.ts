@@ -48,6 +48,8 @@ export type CustomRuleSetSource =
 
 /** User-defined custom rule set view (from `local_override_get`). */
 export interface CustomRuleSetView {
+  category: string;
+  last_checked: number;
   id: string;
   name: string;
   tag: string;
@@ -55,8 +57,7 @@ export interface CustomRuleSetView {
   /** Local cache write time (Unix seconds; 0 = never downloaded). */
   last_updated: number;
   /**
-   * Remote `Last-Modified` (Unix seconds; 0 = unknown). `> last_updated` means
-   * the remote has a newer version (frontend "有更新" chip).
+   * Source-provided Last-Modified (0 = absent); independent of content checks.
    */
   remote_updated_at: number;
   /** Whether the backing file (manual 落盘 / remote cache) exists on disk. */
@@ -73,8 +74,8 @@ export interface CustomRuleSetView {
 /**
  * Aggregated rule set update outcome (single or batch smart update).
  *
- * `skipped` = remote `Last-Modified` ≤ local `last_updated` (already latest);
- * `failed` = HEAD / download error (best-effort per entry).
+ * `skipped` = HTTP 304 or unchanged bytes;
+ * `failed` = request / download error (best-effort per entry).
  */
 export interface RuleSetUpdateOutcome {
   updated: number;
@@ -95,14 +96,14 @@ export interface SaveLocalOverrideInput {
 
 /** Custom rule set save payload (same shape as the view minus `cached`). */
 export interface CustomRuleSetInput {
+  category?: string;
   id: string;
   name: string;
   tag: string;
   source: CustomRuleSetSource;
   last_updated: number;
   /**
-   * Remote modification time (Unix seconds; 0 = unknown). Backend preserves it
-   * for new IDs and backfills existing IDs from disk.
+   * Read-only compatibility field; the backend preserves its own metadata.
    */
   remote_updated_at?: number;
   /** 内置规则集标记透传（后端按 id 归一化；删除后不会被自动重建）。 */
@@ -157,4 +158,8 @@ export function localOverrideUpdateRulesetsNow(): Promise<RuleSetUpdateOutcome> 
 /** 智能更新单个自定义规则集（HEAD 比对跳过未变更项）；返回 1 条计数结果。 */
 export function localOverrideUpdateRuleSet(id: string): Promise<RuleSetUpdateOutcome> {
   return invoke<RuleSetUpdateOutcome>("local_override_update_rule_set", { id });
+}
+
+export function localOverrideSetRuleSetCategories(ids: string[], category: string): Promise<LocalOverrideView> {
+  return invoke<LocalOverrideView>("local_override_set_rule_set_categories", { ids, category });
 }

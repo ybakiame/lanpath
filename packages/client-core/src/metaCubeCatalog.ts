@@ -36,8 +36,8 @@ export interface MetaCubeEntry {
 /** 固定源展示信息（市场说明卡）。 */
 export const META_CUBE_SOURCE = {
   name: "MetaCubeX meta-rules-dat",
-  description: "sing-box 官方兼容规则集（geoip / geosite），上游每日更新",
-  updateFrequency: "每日更新",
+  description: "MetaCubeX 社区维护的 sing-box 规则集（GeoIP / GeoSite）",
+  updateFrequency: "以实际内容检查为准",
 } as const;
 
 /** raw 直链基址（`sing` 分支）。 */
@@ -283,4 +283,18 @@ export function metaCubeCategory(entry: MetaCubeEntry): MetaCubeCategory {
   if (entry.url.includes("/geo/geoip/")) return "geoip";
   if (entry.url.includes("/geo/geosite/")) return "geosite";
   return "other";
+}
+
+export type MetaCubeDownloadSource = "github" | "jsdelivr";
+const META_CUBE_CDN_BASE = "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo";
+export function metaCubeDownloadUrl(entry: MetaCubeEntry, source: MetaCubeDownloadSource): string {
+  return source === "jsdelivr" ? entry.url.replace(META_CUBE_BASE_URL, META_CUBE_CDN_BASE) : entry.url;
+}
+
+/** Recognize only the two explicit upstream paths; unrelated custom URLs stay distinct. */
+export function metaCubeEquivalentUrls(url: string): string[] {
+  const base = [META_CUBE_BASE_URL, META_CUBE_CDN_BASE].find((prefix) => url.startsWith(`${prefix}/`));
+  if (!base || url.includes("?")) return [url];
+  const path = url.slice(base.length);
+  return [`${META_CUBE_BASE_URL}${path}`, `${META_CUBE_CDN_BASE}${path}`];
 }

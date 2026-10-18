@@ -72,3 +72,7 @@ Android 启动先授权再准备配置，跨页 busy 由共享 mutation key 读�
 新导出备份为 v2，包含 rulesets 本地文件；导入兼容 v1/v2，旧备份缺文件时仍需联网。
 启动阶段通过独立 proxy_startup_progress 查询展示，避免被运行状态锁阻塞；只补下载被启用路由/DNS 引用的缺失远程规则集。
 见 ADR-0010 与 testing/2026-10-18-ruleset-backup-startup.md。
+
+规则集分类独立于 GeoIP/GeoSite 内容类型，空值表示未分类；分类批量整理只改分类，不需重启核心。
+规则集更新通过条件 GET 与文件内容判断，时间仅展示；更新检查由用户触发，不逐条调用 GitHub API。
+旧 local_override.json 升级前保存 ruleset-metadata-v1 副本，回退需关闭客户端后替换。见 ADR-0011。

@@ -1,5 +1,6 @@
+import { RuleSetPicker } from "../RuleSetPicker";
 import { useMemo, useState } from "react";
-import { Check, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import type { DnsMatchType, DnsRule, DnsRuleAction } from "@lanpath/client-core";
 import { parseRuleSetTags } from "@lanpath/client-core";
 import { SelectField } from "@lanpath/ui";
@@ -213,36 +214,12 @@ export function DnsRuleFormSheet({
               options={DNS_CLASH_MODE_OPTIONS}
             />
           ) : matchType === "rule_set" ? (
-            <div className="flex flex-col gap-2">
-              {effectiveRuleSetOptions.length === 0
-                ? null
-                : effectiveRuleSetOptions.map((option) => {
-                    const selected = ruleSetTags.includes(option.value);
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => toggleRuleSetTag(option.value)}
-                        className={`flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-4 py-2 text-left transition-colors ${
-                          selected
-                            ? "border-primary/50 bg-primary/5"
-                            : "border-zinc-200 dark:border-zinc-700 active:bg-zinc-100 dark:active:bg-zinc-700"
-                        }`}
-                      >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                            {option.label}
-                          </span>
-                          {option.hint && (
-                            <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{option.hint}</span>
-                          )}
-                        </span>
-                        {selected && <Check className="size-5 shrink-0 text-primary" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
-            </div>
+            <RuleSetPicker
+              key={key ?? "closed"}
+              options={effectiveRuleSetOptions}
+              selected={ruleSetTags}
+              onToggle={toggleRuleSetTag}
+            />
           ) : (
             <input
               id="dns-rule-target"

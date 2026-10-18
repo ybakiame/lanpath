@@ -39,3 +39,6 @@ YAML/JSON/分享链接分别导出 yaml/json/txt，桌面与 Android 均写入�
 
 备份 v2 额外迁移 rulesets 文件并兼容 v1；启动阶段由独立内存状态提供，
 client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。
+
+规则集用户分类随 LocalOverride 持久化，分类命令与运行分流无关；路由/DNS 复用筛选多选器。
+远程更新元数据由后端持有，HTTP 校验器绑定有效地址和缓存指纹；写回只合并检查结果，见 ADR-0011。

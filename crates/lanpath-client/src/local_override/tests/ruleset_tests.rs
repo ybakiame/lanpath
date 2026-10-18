@@ -5,6 +5,8 @@ use super::*;
 
 fn custom(id: &str, tag: &str, source: CustomRuleSetSource) -> CustomRuleSet {
     CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         id: id.to_string(),
         name: String::new(),
         tag: tag.to_string(),
@@ -110,7 +112,13 @@ async fn update_custom_remotes_covers_all_remote_with_smart_skip() {
         // 新内容：HEAD 带 Last-Modified，GET 返回 body。
         .route(
             "/bin",
-            axum::routing::get(|| async { "binary-body" }).head(|| async {
+            axum::routing::get(|| async {
+                (
+                    [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
+                    "binary-body",
+                )
+            })
+            .head(|| async {
                 (
                     [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
                     "",
@@ -120,10 +128,10 @@ async fn update_custom_remotes_covers_all_remote_with_smart_skip() {
         // 旧内容：HEAD 的 Last-Modified 早于本地 last_updated → 跳过下载。
         .route(
             "/stale",
-            axum::routing::head(|| async {
+            axum::routing::get(|| async {
                 (
                     [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
-                    "",
+                    "cached",
                 )
             }),
         )
@@ -251,7 +259,13 @@ async fn update_single_rule_set_smart_skip() {
     let app = axum::Router::new()
         .route(
             "/dated",
-            axum::routing::get(|| async { "body" }).head(|| async {
+            axum::routing::get(|| async {
+                (
+                    [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
+                    "body",
+                )
+            })
+            .head(|| async {
                 (
                     [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
                     "",
@@ -282,7 +296,7 @@ async fn update_single_rule_set_smart_skip() {
     std::fs::create_dir_all(mgr.custom_rule_set_dir()).unwrap();
     std::fs::write(
         mgr.custom_rule_set_file_path("s", RuleSetFormat::Source),
-        "cached",
+        "body",
     )
     .unwrap();
     stale.last_updated = 2_000_000_000;

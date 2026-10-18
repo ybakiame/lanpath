@@ -79,6 +79,9 @@ pub(super) fn validate_custom_rule_sets(ovr: &LocalOverride) -> Result<(), Strin
         if !seen_ids.insert(rs.id.clone()) {
             return Err(format!("duplicate custom rule set id '{}'", rs.id));
         }
+        if rs.category.chars().count() > 64 || rs.category.chars().any(char::is_control) {
+            return Err("分类名称最多 64 个字符，不能包含控制字符".into());
+        }
         let tag = rs.tag.trim();
         if tag.is_empty() {
             return Err(format!("custom rule set '{}' has an empty tag", rs.id));
@@ -111,6 +114,7 @@ pub(super) fn convert_input_to_model(
     input: SaveLocalOverrideInput,
 ) -> Result<LocalOverride, String> {
     Ok(LocalOverride {
+        ruleset_metadata_version: 1,
         singbox: convert_core_input(input.singbox)?,
         // 内置订阅段已废弃：save 恒写空数组（serde 兼容旧字段，空数组无害）。
         rule_set_subscriptions: Vec::new(),

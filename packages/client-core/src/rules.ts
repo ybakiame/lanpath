@@ -158,6 +158,7 @@ export function restoreBuiltinRuleSets(
 ): CustomRuleSetInput[] {
   const next: CustomRuleSetInput[] = view.custom_rule_sets.map((rs) => ({
     id: rs.id,
+    category: rs.category ?? "",
     name: rs.name,
     tag: rs.tag,
     source: rs.source,
@@ -181,6 +182,7 @@ export function restoreBuiltinRuleSets(
       const existing = next[index]!;
       next[index] = {
         ...rebuilt,
+        category: existing.category ?? "",
         // 已下载过的缓存不必重下：保留本地 / 远端时间戳。
         last_updated: existing.last_updated,
         remote_updated_at: existing.remote_updated_at ?? 0,
@@ -266,6 +268,7 @@ export function buildSaveInput(view: LocalOverrideView, patchCore?: CoreLocalOve
     // 自定义规则集整段透传（View/Input 同构，去掉只读的 cached 字段；无 enabled）。
     custom_rule_sets: view.custom_rule_sets.map((rs) => ({
       id: rs.id,
+      category: rs.category ?? "",
       name: rs.name,
       tag: rs.tag,
       source: rs.source,

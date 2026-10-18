@@ -19,12 +19,12 @@ pub const CUSTOM_RULE_SET_SUB_DIR: &str = "custom";
 /// Result of updating a single custom rule set (smart skip).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleSetUpdateStatus {
-    /// Remote had newer content (or no `Last-Modified`): downloaded,
+    /// Remote content changed (or no usable local cache): downloaded,
     /// `last_updated` bumped to the download completion time.
     Updated,
-    /// Remote `Last-Modified` ≤ local `last_updated`: download skipped.
+    /// Conditional 304 or identical content: cache write skipped.
     Skipped,
-    /// HEAD or download failed (best-effort; never fatal to a batch).
+    /// Request or download failed (best-effort; never fatal to a batch).
     Failed,
 }
 
@@ -33,9 +33,9 @@ pub enum RuleSetUpdateStatus {
 pub struct RuleSetUpdateOutcome {
     /// Remote had newer content: downloaded + `last_updated` bumped.
     pub updated: usize,
-    /// Remote `Last-Modified` ≤ local `last_updated`: download skipped.
+    /// Conditional 304 or identical content: cache write skipped.
     pub skipped: usize,
-    /// HEAD / download failed (best-effort, per-entry).
+    /// Request / download failed (best-effort, per-entry).
     pub failed: usize,
 }
 
@@ -158,67 +158,15 @@ impl RuleSetManager {
         self.download_file(url, &path).await
     }
 
-    /// Update a single Remote custom rule set with smart skip.
-    ///
-    /// 先发 HEAD 取 `Last-Modified`：
-    /// - 有且 `≤ last_updated`（且已下载过）→ 跳过下载，仅刷新 `remote_updated_at`；
-    /// - 有且更新 → 下载，`last_updated` 取下载完成时间、`remote_updated_at` 取头值；
-    /// - 无头 → 直接下载，`remote_updated_at` 归 0；
-    /// - HEAD / 下载失败 → [`RuleSetUpdateStatus::Failed`]（告警，不 panic）。
-    ///
-    /// Manual 无远端源，直接 [`RuleSetUpdateStatus::Skipped`]。
+    /// Check with origin-bound ETag/Last-Modified conditional GET; compare bytes on 200.
+    /// A successful unchanged check advances checked_at, not the local write timestamp.
+    /// Errors and empty responses preserve the previous cache and metadata.
     pub async fn update_custom_rule_set(&self, rs: &mut CustomRuleSet) -> RuleSetUpdateStatus {
-        let url = match &rs.source {
-            CustomRuleSetSource::Remote { url, .. } => url.clone(),
-            CustomRuleSetSource::Manual { .. } => return RuleSetUpdateStatus::Skipped,
-        };
-
-        let remote_lm = match crate::fetch_resource_last_modified(
-            &self.data_dir,
-            &url,
-            std::time::Duration::from_secs(60),
-        )
-        .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    id = %rs.id,
-                    tag = %rs.tag,
-                    error = %e,
-                    "custom rule set HEAD failed"
-                );
-                return RuleSetUpdateStatus::Failed;
-            }
-        };
-
-        match remote_lm {
-            Some(lm) => {
-                rs.remote_updated_at = lm;
-                // 已下载过且远端未更新 → 跳过（`last_updated` 为下载完成时间）。
-                if self.has_custom_rule_set_file(rs) && rs.last_updated > 0 && lm <= rs.last_updated
-                {
-                    return RuleSetUpdateStatus::Skipped;
-                }
-            }
-            None => rs.remote_updated_at = 0,
-        }
-
-        match self.download_custom_rule_set(rs).await {
-            Ok(()) => {
-                rs.last_updated = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                RuleSetUpdateStatus::Updated
-            }
-            Err(e) => {
-                tracing::warn!(
-                    id = %rs.id,
-                    tag = %rs.tag,
-                    error = %e,
-                    "custom rule set update failed"
-                );
+        let path = self.custom_rule_set_file_path(&rs.id, rs.file_format());
+        match super::ruleset_update::update(&self.data_dir, &path, rs).await {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::warn!(id = %rs.id, error = %error, "规则集更新失败，保留原缓存和检查信息");
                 RuleSetUpdateStatus::Failed
             }
         }
@@ -226,7 +174,7 @@ impl RuleSetManager {
 
     /// Manually update all Remote custom rule sets now (smart skip).
     ///
-    /// 对每个 custom Remote 走 [`Self::update_custom_rule_set`]（HEAD 智能跳过），
+    /// 对每个 custom Remote 走 [`Self::update_custom_rule_set`]（条件请求及内容校验），
     /// 汇总 updated / skipped / failed。命令层同步 await 全部完成后才返回，保证前端
     /// invalidate 重拉 `local_override_get` 时即可看到 `cached` / `last_updated` /
     /// `remote_updated_at` 变化。Manual 无远端源不计入；单个失败仅告警，不影响整批

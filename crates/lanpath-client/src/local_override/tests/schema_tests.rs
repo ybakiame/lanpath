@@ -6,6 +6,7 @@ use super::*;
 #[test]
 fn local_override_serde_roundtrip() {
     let orig = LocalOverride {
+        ruleset_metadata_version: 1,
         singbox: CoreLocalOverride {
             rules: vec![LocalRule {
                 id: "r1".to_string(),
@@ -51,6 +52,8 @@ fn local_override_serde_roundtrip() {
         applied_templates: Vec::new(),
         custom_rule_sets: vec![
             CustomRuleSet {
+                category: String::new(),
+                remote_state: Default::default(),
                 id: "c1".to_string(),
                 name: "Custom Ads".to_string(),
                 tag: "custom-ads".to_string(),
@@ -63,6 +66,8 @@ fn local_override_serde_roundtrip() {
                 builtin: false,
             },
             CustomRuleSet {
+                category: String::new(),
+                remote_state: Default::default(),
                 id: "c2".to_string(),
                 name: "Manual list".to_string(),
                 tag: "manual-list".to_string(),
@@ -179,6 +184,8 @@ fn custom_rule_sets_default_empty_for_legacy_file() {
     // 显式写入后 roundtrip 完整。
     let mut ovr = parsed;
     ovr.custom_rule_sets.push(CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         id: "c1".to_string(),
         name: String::new(),
         tag: "my-set".to_string(),
@@ -263,6 +270,8 @@ fn legacy_applied_template_records_parse_as_opaque_compat_values() {
 #[test]
 fn custom_rule_set_file_format_matches_source() {
     let remote_bin = CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         id: "c1".to_string(),
         name: String::new(),
         tag: "t".to_string(),
@@ -277,6 +286,8 @@ fn custom_rule_set_file_format_matches_source() {
     assert_eq!(remote_bin.file_format(), RuleSetFormat::Binary);
 
     let remote_src = CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         source: CustomRuleSetSource::Remote {
             url: "https://e/x.json".to_string(),
             format: RuleSetFormat::Source,
@@ -286,6 +297,8 @@ fn custom_rule_set_file_format_matches_source() {
     assert_eq!(remote_src.file_format(), RuleSetFormat::Source);
 
     let manual = CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         source: CustomRuleSetSource::Manual {
             content: "[]".to_string(),
         },

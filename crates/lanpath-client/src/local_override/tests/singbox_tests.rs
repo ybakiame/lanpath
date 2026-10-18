@@ -221,6 +221,8 @@ fn sample_custom_rule_set(
     source: crate::local_override::CustomRuleSetSource,
 ) -> super::CustomRuleSet {
     super::CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         id: id.to_string(),
         name: String::new(),
         tag: tag.to_string(),

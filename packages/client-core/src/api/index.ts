@@ -168,6 +168,7 @@ export type {
 export {
   localOverrideGet,
   localOverrideSave,
+  localOverrideSetRuleSetCategories,
   localOverrideUpdateRulesetsNow,
   localOverrideUpdateRuleSet,
 } from "./localOverride";

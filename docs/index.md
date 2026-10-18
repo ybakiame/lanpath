@@ -33,3 +33,6 @@
 - [Android 启动与备份性能回归](testing/2026-10-17-android-start-backup-performance.md)
 
 - [规则集备份与启动反馈验证](testing/2026-10-18-ruleset-backup-startup.md)
+
+- [规则集来源调研](research/2026-10-18-ruleset-sources.md)
+- [规则集分类与更新验证](testing/2026-10-18-ruleset-categories.md)

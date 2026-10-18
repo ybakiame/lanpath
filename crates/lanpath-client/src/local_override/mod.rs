@@ -12,7 +12,9 @@
 //! - `ruleset` — custom rule set download, cache, and file sync
 //! - `singbox` — sing-box config injection (`apply_singbox_local_override`)
 
+mod metadata_migration;
 pub mod ruleset;
+mod ruleset_update;
 pub mod schema;
 pub mod singbox;
 pub mod store;

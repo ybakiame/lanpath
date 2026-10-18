@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Plus, Sparkles } from "lucide-react";
 import { InlineAlert } from "@lanpath/ui";
-import { Button, Card, Chip, ConfirmDialog, Spinner } from "@lanpath/ui";
+import { BottomSheet, Button, Card, ConfirmDialog, Spinner } from "@lanpath/ui";
 import {
   BASELINE_VIEW_KEY,
   baselineViewGet,
@@ -10,6 +10,7 @@ import {
   LOCAL_OVERRIDE_KEY,
   localOverrideGet,
   localOverrideSave,
+  localOverrideSetRuleSetCategories,
   localOverrideUpdateRuleSet,
   localOverrideUpdateRulesetsNow,
   markRestartRequired,
@@ -23,62 +24,11 @@ import type { BaselineView, CustomRuleSetInput, CustomRuleSetView, LocalOverride
 import { useNavigate } from "react-router-dom";
 import { SubPageShell } from "../../components/PageShell";
 import { asArray, isLocalOverrideView } from "@lanpath/client-core";
-import { CustomRuleSetCard } from "./CustomRuleSetCard";
+import { RuleSetSection } from "./RuleSetSection";
+import { RuleSetFilters } from "./RuleSetFilters";
+import { RuleSetCategoryField } from "./RuleSetCategoryField";
+import { matchesRuleSet, ruleSetCategories } from "@lanpath/client-core";
 import { RuleSetFormSheet } from "./RuleSetFormSheet";
-
-/** 分区渲染描述：社区 = 远程 URL（remote），自定义 = 手动 JSON（manual）。 */
-interface RuleSetSectionSpec {
-  /** 分区标题（按来源类型命名）。 */
-  title: string;
-  /** 空分区引导文案。 */
-  emptyCopy: string;
-  sets: CustomRuleSetView[];
-}
-
-interface RuleSetSectionProps extends RuleSetSectionSpec {
-  /** 正在更新的规则集 id 集合（批量更新时含全部 Remote）。 */
-  updatingIds: Set<string>;
-  onEdit: (ruleSet: CustomRuleSetView) => void;
-  onDelete: (ruleSet: CustomRuleSetView) => void;
-  onUpdate: (ruleSet: CustomRuleSetView) => void;
-}
-
-/**
- * 单来源分区（社区 / 自定义）：区头标题 + 计数，条目为 `CustomRuleSetCard`；
- * 空分区渲染简短引导，引导新用户走顶部「添加」入口。
- */
-function RuleSetSection({ title, emptyCopy, sets, updatingIds, onEdit, onDelete, onUpdate }: RuleSetSectionProps) {
-  return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{title}</span>
-        <Chip color="default" className="shrink-0">
-          {sets.length}
-        </Chip>
-      </div>
-      {sets.length === 0 ? (
-        <Card>
-          <Card.Content className="flex flex-col items-center justify-center px-6 py-8 text-center">
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">{emptyCopy}</span>
-          </Card.Content>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {sets.map((ruleSet) => (
-            <CustomRuleSetCard
-              key={ruleSet.id}
-              ruleSet={ruleSet}
-              updating={updatingIds.has(ruleSet.id)}
-              onEdit={() => onEdit(ruleSet)}
-              onDelete={() => onDelete(ruleSet)}
-              onUpdate={() => onUpdate(ruleSet)}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
 
 /**
  * 规则集管理子页（ADR-0003 M5.4 拆分，路由 `/config/route/rulesets`）。
@@ -89,8 +39,8 @@ function RuleSetSection({ title, emptyCopy, sets, updatingIds, onEdit, onDelete,
  *
  * 自「规则集移除 enabled」起规则集是**纯资源**：
  * - 卡片不再有启停 Switch（名称 / tag / 来源 chip / 缓存状态 / 本地与远程更新时间 / 编辑 / 删除）；
- * - 顶部「立即更新」智能更新**全部** Remote（`localOverrideUpdateRulesetsNow`：先 HEAD
- *   比对 `Last-Modified` 跳过未变更项），toast 汇总「更新 N，已最新 M，失败 K」；
+ * - 顶部「立即更新」智能更新**全部** Remote（`localOverrideUpdateRulesetsNow`：
+ *   进行条件 GET/内容比较跳过未变更项），toast 汇总「更新 N，已最新 M，失败 K」；
  * - 每张 Remote 卡片另有单卡更新按钮（`localOverrideUpdateRuleSet`），同样智能跳过；
  * - 更新进行中由 `updatingIds` 驱动：单卡仅该卡、批量全部 Remote 卡同时显示旋转
  *   更新图标与 indeterminate 进度条；
@@ -123,8 +73,21 @@ export default function RuleSetsPage() {
   const overrideData = isLocalOverrideView(rawOverride) ? rawOverride : null;
   const customSets = asArray(overrideData?.custom_rule_sets);
   // 分区 = 来源类型：remote（社区）与 manual（自定义）。
+  const [keyword, setKeyword] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [organizeOpen, setOrganizeOpen] = useState(false);
+  const [targetCategory, setTargetCategory] = useState("");
+  const categoryNames = ruleSetCategories(customSets);
+  const filteredSets = customSets.filter((rs) => matchesRuleSet(rs, keyword, category));
+  const toggleSelected = (id: string) =>
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const remoteSets = customSets.filter((rs) => rs.source.kind === "remote");
-  const manualSets = customSets.filter((rs) => rs.source.kind === "manual");
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: LOCAL_OVERRIDE_KEY });
 
   // ---- 局部 UI 状态 ----
@@ -153,6 +116,17 @@ export default function RuleSetsPage() {
       return false;
     }
   };
+
+  const organize = useMutation({
+    mutationFn: () => localOverrideSetRuleSetCategories([...selectedIds], targetCategory.trim()),
+    onSuccess: (next) => {
+      queryClient.setQueryData(LOCAL_OVERRIDE_KEY, next);
+      setSelectedIds(new Set());
+      setOrganizeOpen(false);
+      toastSuccess("分类已整理");
+    },
+    onError: (error) => toastError(toErrorMessage(error)),
+  });
 
   // ---- 立即更新（全部 Remote，智能跳过）：返回 updated / skipped / failed 汇总 ----
   const handleUpdateNow = async (): Promise<boolean> => {
@@ -221,14 +195,17 @@ export default function RuleSetsPage() {
 
   const handleSaveCustom = async (input: CustomRuleSetInput): Promise<boolean> => {
     if (!overrideData) return false;
-    const exists = overrideData.custom_rule_sets.some((rs) => rs.id === input.id);
+    const previous = overrideData.custom_rule_sets.find((rs) => rs.id === input.id);
+    const exists = previous !== undefined;
+    const runtimeChanged =
+      !previous || previous.tag !== input.tag || JSON.stringify(previous.source) !== JSON.stringify(input.source);
     const next = exists
       ? overrideData.custom_rule_sets.map((rs) => (rs.id === input.id ? input : rs))
       : [...overrideData.custom_rule_sets, input];
     const ok = await persistCustom(next);
     if (ok) {
       const base = exists ? "规则集已更新" : "规则集已添加";
-      let text = coreRunning ? `${base}，重启代理后生效` : base;
+      let text = coreRunning && runtimeChanged ? `${base}，重启代理后生效` : base;
       if (!exists && input.source.kind === "remote") {
         text += "；点击「立即更新」下载规则集";
       }
@@ -305,22 +282,25 @@ export default function RuleSetsPage() {
         <div className="flex flex-col gap-4">
           {/* 顶部说明 */}
           <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            远程 URL（社区）规则集需「立即更新」下载后才会被注入；手动 JSON（自定义）保存即写入本地文件
+            远程规则集缓存到本地后使用；手动 JSON 保存即写入本地文件。分类仅用于整理，不改变分流规则。
           </span>
 
           {/* 顶部统一操作：添加（单一入口）+ 立即更新 */}
           <div className="flex items-center gap-2">
-            <Button variant="primary" className="h-11 min-w-0 flex-1 px-4" onPress={openAdd}>
+            <Button aria-label="添加规则集" variant="primary" className="h-11 min-w-0 flex-1 px-4" onPress={openAdd}>
               <Plus className="size-4" aria-hidden="true" />
+              添加
             </Button>
             <Button
               variant="secondary"
               className="h-11 min-w-0 flex-1 px-4"
               isDisabled={updating || updatingIds.size > 0}
               isPending={updating}
+              aria-label="检查并更新全部规则集"
               onPress={() => void handleUpdateNow()}
             >
               <RefreshCw className="size-4" aria-hidden="true" />
+              更新
             </Button>
             <Button
               variant="secondary"
@@ -340,11 +320,55 @@ export default function RuleSetsPage() {
             </Button>
           </div>
 
+          <RuleSetFilters
+            keyword={keyword}
+            onKeyword={setKeyword}
+            category={category}
+            onCategory={setCategory}
+            categories={categoryNames}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted">
+              显示 {filteredSets.length} / {customSets.length} 项 · 已选 {selectedIds.size} 项
+            </span>
+            <Button
+              variant="tertiary"
+              size="sm"
+              onPress={() => setSelectedIds(new Set(filteredSets.map((rs) => rs.id)))}
+            >
+              选择当前结果
+            </Button>
+            <Button
+              variant="tertiary"
+              size="sm"
+              onPress={() => setSelectedIds(new Set())}
+              isDisabled={selectedIds.size === 0}
+            >
+              清空选择
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              isDisabled={selectedIds.size === 0 || updatingIds.size > 0}
+              onPress={() => {
+                setTargetCategory("");
+                setOrganizeOpen(true);
+              }}
+            >
+              整理分类
+            </Button>
+          </div>
+          {filteredSets.length === 0 && (
+            <p className="text-sm text-muted">没有匹配的规则集，试试其他名称或全部分类。</p>
+          )}
           {/* 社区规则集：远程 URL（remote） */}
           <RuleSetSection
             title="社区规则集"
             emptyCopy="添加远程 URL 规则集，如 geoip/geosite 社区资源"
-            sets={remoteSets}
+            sets={filteredSets.filter((rs) => rs.source.kind === "remote")}
+            hideEmpty={keyword.trim() !== "" || category !== null}
+            selectedIds={selectedIds}
+            onSelect={toggleSelected}
             updatingIds={updatingIds}
             onEdit={openEdit}
             onDelete={setPendingDelete}
@@ -355,7 +379,10 @@ export default function RuleSetsPage() {
           <RuleSetSection
             title="自定义规则集"
             emptyCopy="手动输入 JSON 规则内容"
-            sets={manualSets}
+            sets={filteredSets.filter((rs) => rs.source.kind === "manual")}
+            hideEmpty={keyword.trim() !== "" || category !== null}
+            selectedIds={selectedIds}
+            onSelect={toggleSelected}
             updatingIds={updatingIds}
             onEdit={openEdit}
             onDelete={setPendingDelete}
@@ -364,7 +391,28 @@ export default function RuleSetsPage() {
         </div>
       )}
 
+      <BottomSheet
+        opened={organizeOpen}
+        onClose={() => {
+          if (!organize.isPending) setOrganizeOpen(false);
+        }}
+        title={`整理 ${selectedIds.size} 个规则集的分类`}
+        footer={
+          <Button isPending={organize.isPending} onPress={() => organize.mutate()}>
+            保存分类
+          </Button>
+        }
+      >
+        <RuleSetCategoryField
+          key={organizeOpen ? "open" : "closed"}
+          value={targetCategory}
+          onChange={setTargetCategory}
+          categories={categoryNames}
+          disabled={organize.isPending}
+        />
+      </BottomSheet>
       <RuleSetFormSheet
+        categories={categoryNames}
         isOpen={formOpen}
         editing={editingSet}
         onClose={() => setFormOpen(false)}

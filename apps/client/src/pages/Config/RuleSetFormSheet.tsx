@@ -1,3 +1,4 @@
+import { RuleSetCategoryField } from "./RuleSetCategoryField";
 import { useState } from "react";
 import { Radio, RadioGroup } from "@lanpath/ui";
 import type { CustomRuleSetInput, CustomRuleSetSource, CustomRuleSetView } from "@lanpath/client-core";
@@ -16,6 +17,7 @@ function detectRemoteFormat(url: string): RemoteFormat {
 }
 
 interface RuleSetFormSheetProps {
+  categories: string[];
   isOpen: boolean;
   /** `null` = 新建；非空 = 编辑该自定义规则集（表单预填）。 */
   editing: CustomRuleSetView | null;
@@ -52,9 +54,10 @@ function RadioOption({ value, label, disabled }: { value: string; label: string;
  * - 手动：JSON 内容多行等宽编辑器（必填，placeholder 为 sing-box source 骨架）；
  * - 保存构建 `CustomRuleSetInput`（custom 段整段替换落盘由父层执行）。
  */
-export function RuleSetFormSheet({ isOpen, editing, onClose, onSave }: RuleSetFormSheetProps) {
+export function RuleSetFormSheet({ isOpen, editing, onClose, onSave, categories }: RuleSetFormSheetProps) {
   const [kind, setKind] = useState<SourceKind>("remote");
   const [remoteFormat, setRemoteFormat] = useState<RemoteFormat>("binary");
+  const [category, setCategory] = useState("");
   const [name, setName] = useState("");
   const [tag, setTag] = useState("");
   const [url, setUrl] = useState("");
@@ -70,6 +73,7 @@ export function RuleSetFormSheet({ isOpen, editing, onClose, onSave }: RuleSetFo
     setKind(source?.kind === "manual" ? "manual" : "remote");
     setRemoteFormat(source?.kind === "remote" ? source.format : "binary");
     setName(editing?.name ?? "");
+    setCategory(editing?.category ?? "");
     setTag(editing?.tag ?? "");
     setUrl(source?.kind === "remote" ? source.url : "");
     setContent(source?.kind === "manual" ? source.content : "");
@@ -90,6 +94,7 @@ export function RuleSetFormSheet({ isOpen, editing, onClose, onSave }: RuleSetFo
     const input: CustomRuleSetInput = {
       id: editing?.id ?? crypto.randomUUID(),
       name: name.trim(),
+      category: category.trim(),
       tag: tag.trim(),
       source,
       // 规则集是纯资源（无 enabled）：是否注入由引用它的规则决定。
@@ -139,6 +144,13 @@ export function RuleSetFormSheet({ isOpen, editing, onClose, onSave }: RuleSetFo
           </RadioGroup>
         </div>
 
+        <RuleSetCategoryField
+          key={key ?? "closed"}
+          value={category}
+          onChange={setCategory}
+          categories={categories}
+          disabled={saving}
+        />
         {/* 公共字段 */}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="rs-name" className="text-sm font-medium text-zinc-900 dark:text-zinc-100">

@@ -8,7 +8,7 @@
 //! - 自「规则集移除 enabled」起 `local_override_update_rulesets_now` 语义收敛为
 //!   「同步更新**全部** custom Remote」（纯资源刷新语义）：**await 全部下载完成
 //!   后**保存并返回，确保 UI invalidate 重拉即见 cached / last_updated 变化。
-//! - 自「规则集更新增强」起更新前先 HEAD 取 `Last-Modified` 做**智能跳过**（远端
+//! - 自「规则集更新增强」起更新前通过条件 GET 与内容比较做**智能跳过**（远端
 //!   未更新则不下载），并新增 `local_override_update_rule_set` 单条更新；两者
 //!   均返回 `{ updated, skipped, failed }` 汇总。
 
@@ -19,6 +19,9 @@ use tauri::State;
 
 use super::views::RuleSetUpdateOutcomeView;
 use crate::state::AppState;
+
+// Serialize checks without blocking category edits; never order versions by device clocks.
+static CHECK_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// 将单条更新状态折叠为 1 条计数结果。
 fn single_outcome(status: RuleSetUpdateStatus) -> RuleSetUpdateOutcome {
@@ -43,6 +46,7 @@ fn single_outcome(status: RuleSetUpdateStatus) -> RuleSetUpdateOutcome {
 pub(crate) async fn run_update_rulesets_now(
     data_dir: &std::path::Path,
 ) -> Result<RuleSetUpdateOutcomeView, String> {
+    let _check = CHECK_LOCK.lock().await;
     let store = LocalOverrideStore::new(data_dir.to_path_buf());
     let mut ovr = store
         .load()
@@ -54,9 +58,7 @@ pub(crate) async fn run_update_rulesets_now(
         .await
         .map_err(|e| format!("failed to update rule sets: {e}"))?;
 
-    store
-        .save(&ovr)
-        .map_err(|e| format!("failed to save after update: {e}"))?;
+    save_checked_metadata(data_dir, &ovr)?;
 
     Ok(outcome.into())
 }
@@ -66,6 +68,7 @@ pub(crate) async fn run_update_rule_set(
     data_dir: &std::path::Path,
     id: &str,
 ) -> Result<RuleSetUpdateOutcomeView, String> {
+    let _check = CHECK_LOCK.lock().await;
     let store = LocalOverrideStore::new(data_dir.to_path_buf());
     let mut ovr = store
         .load()
@@ -77,17 +80,39 @@ pub(crate) async fn run_update_rule_set(
     };
     let outcome = single_outcome(manager.update_custom_rule_set(rs).await);
 
-    store
-        .save(&ovr)
-        .map_err(|e| format!("failed to save after update: {e}"))?;
+    save_checked_metadata(data_dir, &ovr)?;
 
     Ok(outcome.into())
+}
+
+/// A slow check must not overwrite category/rule edits made while its network request ran.
+fn save_checked_metadata(
+    data_dir: &std::path::Path,
+    checked: &lanpath_client::LocalOverride,
+) -> Result<(), String> {
+    let _write = super::WRITE_LOCK
+        .lock()
+        .map_err(|_| "规则配置写入锁不可用".to_string())?;
+    let store = LocalOverrideStore::new(data_dir.to_path_buf());
+    let mut current = store.load().map_err(|e| e.to_string())?;
+    for entry in &mut current.custom_rule_sets {
+        if let Some(result) = checked
+            .custom_rule_sets
+            .iter()
+            .find(|result| result.id == entry.id && result.source == entry.source)
+        {
+            entry.last_updated = result.last_updated;
+            entry.remote_updated_at = result.remote_updated_at;
+            entry.remote_state = result.remote_state.clone();
+        }
+    }
+    store.save(&current).map_err(|e| e.to_string())
 }
 
 /// Manually update all Remote custom rule sets now (smart skip).
 ///
 /// 同步 await 智能更新并刷新 `last_updated` / `remote_updated_at` 后落盘；单条
-/// HEAD / 下载失败 best-effort（仅告警，不中断整批），返回 updated / skipped /
+/// 请求 / 下载失败 best-effort（仅告警，不中断整批），返回 updated / skipped /
 /// failed 汇总。
 #[tauri::command]
 pub async fn local_override_update_rulesets_now(
@@ -118,7 +143,13 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let app = axum::Router::new().route(
             "/ok.srs",
-            axum::routing::get(|| async { "binary-remote-body" }).head(|| async {
+            axum::routing::get(|| async {
+                (
+                    [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
+                    "binary-remote-body",
+                )
+            })
+            .head(|| async {
                 (
                     [(header::LAST_MODIFIED, "Sun, 06 Nov 1994 08:49:37 GMT")],
                     "",
@@ -137,6 +168,8 @@ mod tests {
         last_updated: u64,
     ) -> lanpath_client::local_override::CustomRuleSet {
         lanpath_client::local_override::CustomRuleSet {
+            category: String::new(),
+            remote_state: Default::default(),
             id: id.to_string(),
             name: "GeoIP CN".to_string(),
             tag: "geoip-cn".to_string(),
@@ -207,7 +240,7 @@ mod tests {
                 "c-1",
                 lanpath_client::local_override::RuleSetFormat::Binary,
             ),
-            "cached-body",
+            "binary-remote-body",
         )
         .unwrap();
 
@@ -222,5 +255,29 @@ mod tests {
 
         // 未知 id 报错。
         assert!(run_update_rule_set(dir.path(), "nope").await.is_err());
+    }
+    #[test]
+    fn checking_merges_current_categories_without_clock_ordering_or_resurrecting_deleted_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalOverrideStore::new(dir.path().into());
+        let mut checked = lanpath_client::LocalOverride {
+            builtins_seeded: true,
+            ..Default::default()
+        };
+        let mut item = sample_set("demo", "https://example.invalid/rules.srs".into(), 1);
+        item.remote_state.checked_at = 10;
+        checked.custom_rule_sets.push(item);
+        let mut current = checked.clone();
+        current.custom_rule_sets[0].category = "期间编辑的分类".into();
+        current.custom_rule_sets[0].remote_state.checked_at = 99_999_999_999;
+        store.save(&current).unwrap();
+        save_checked_metadata(dir.path(), &checked).unwrap();
+        let result = store.load().unwrap();
+        assert_eq!(result.custom_rule_sets[0].category, "期间编辑的分类");
+        assert_eq!(result.custom_rule_sets[0].remote_state.checked_at, 10);
+        current.custom_rule_sets.clear();
+        store.save(&current).unwrap();
+        save_checked_metadata(dir.path(), &checked).unwrap();
+        assert!(store.load().unwrap().custom_rule_sets.is_empty());
     }
 }

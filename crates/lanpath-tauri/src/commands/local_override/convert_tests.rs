@@ -9,6 +9,8 @@ use lanpath_client::local_override::{
 
 fn custom_set(id: &str, tag: &str) -> CustomRuleSet {
     CustomRuleSet {
+        category: String::new(),
+        remote_state: Default::default(),
         id: id.to_string(),
         name: String::new(),
         tag: tag.to_string(),
@@ -38,6 +40,7 @@ fn rule_set_rule(id: &str, target: &str) -> LocalRule {
 }
 fn override_with(sets: Vec<CustomRuleSet>, rules: Vec<LocalRule>) -> LocalOverride {
     LocalOverride {
+        ruleset_metadata_version: 1,
         singbox: CoreLocalOverride {
             rules,
             rule_sets: Vec::new(),

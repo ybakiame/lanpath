@@ -182,6 +182,7 @@ pub fn run() {
             lanpath_tauri::commands::run_task,
             lanpath_tauri::commands::local_override_get,
             lanpath_tauri::commands::local_override_save,
+            lanpath_tauri::commands::local_override_set_rule_set_categories,
             lanpath_tauri::commands::local_override_update_rulesets_now,
             lanpath_tauri::commands::local_override_update_rule_set,
             lanpath_tauri::commands::config_slices_get,

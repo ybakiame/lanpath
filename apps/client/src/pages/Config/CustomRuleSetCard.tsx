@@ -4,6 +4,8 @@ import type { CustomRuleSetView } from "@lanpath/client-core";
 
 interface CustomRuleSetCardProps {
   ruleSet: CustomRuleSetView;
+  selected: boolean;
+  onSelect: () => void;
   /** 更新进行中（按钮旋转禁用 + 底部 indeterminate 进度条；批量更新时全部 Remote 卡）。 */
   updating: boolean;
   onEdit: () => void;
@@ -18,33 +20,47 @@ function sourceLabel(ruleSet: CustomRuleSetView): string {
 }
 
 function formatUpdated(lastUpdated: number): string {
-  if (lastUpdated <= 0) return "从未更新";
+  if (lastUpdated <= 0) return "未记录";
   return new Date(lastUpdated * 1000).toLocaleString();
 }
 
 /** 远程 `Last-Modified` 展示（0 = 未知）。 */
 function formatRemote(remoteUpdatedAt: number): string {
-  if (remoteUpdatedAt <= 0) return "未知";
+  if (remoteUpdatedAt <= 0) return "上游未提供";
   return new Date(remoteUpdatedAt * 1000).toLocaleString();
 }
 
-/**
- * 自定义规则集卡（ADR-0003 M5.4 规则集管理子页）。
- *
- * 自「规则集移除 enabled」起规则集是纯资源：卡片不再有启停 Switch，展示
- * 名称 / tag / 来源类型 chip / 缓存状态 chip / 更新时间，底部「编辑 / 删除」入口。
- * 自「规则集更新增强」起额外展示**远程最新更新时间**（`remote_updated_at`，0 =
- * 未知）并在远端更新于本地缓存时显示「有更新」warning chip；Remote 卡片提供单卡
- * 更新图标按钮（HEAD 智能跳过）。更新进行中（`updating`）时更新图标旋转禁用，
- * 时间行下方显示 indeterminate 线性进度条；批量更新时父层令全部 Remote 卡同时进入
- * 该状态。删除经父层 AlertDialog 确认。
+/** User category, local availability and independent write/check/source timestamps.
+ * Missing source dates are explicit; content freshness comes from conditional requests.
  */
-export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdate }: CustomRuleSetCardProps) {
+export function CustomRuleSetCard({
+  ruleSet,
+  selected,
+  onSelect,
+  updating,
+  onEdit,
+  onDelete,
+  onUpdate,
+}: CustomRuleSetCardProps) {
   const { name, tag, cached, remote_updated_at: remoteUpdatedAt, last_updated: lastUpdated } = ruleSet;
   const isRemote = ruleSet.source.kind === "remote";
-  const hasUpdate = isRemote && remoteUpdatedAt > lastUpdated;
   return (
     <Card className="p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2">
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            aria-label={`选择规则集 ${name.trim() || tag}`}
+            className="size-4 accent-primary"
+          />
+          选择整理
+        </label>
+        <Chip className="max-w-full">
+          <span className="truncate">{ruleSet.category || "未分类"}</span>
+        </Chip>
+      </div>
       <div className="flex items-center gap-1 px-2 py-1 pl-0">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-2 pl-1">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -68,11 +84,6 @@ export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdat
                 内置
               </Chip>
             )}
-            {hasUpdate && (
-              <Chip color="warning" className="shrink-0">
-                有更新
-              </Chip>
-            )}
           </span>
           <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
             规则集引用名：<span className="font-mono text-zinc-700 dark:text-zinc-300">{tag}</span>
@@ -82,7 +93,12 @@ export function CustomRuleSetCard({ ruleSet, updating, onEdit, onDelete, onUpdat
           </span>
           {isRemote && (
             <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">
-              远程更新于 <span className="text-zinc-700 dark:text-zinc-300">{formatRemote(remoteUpdatedAt)}</span>
+              上游声明时间：<span className="text-zinc-700 dark:text-zinc-300">{formatRemote(remoteUpdatedAt)}</span>
+            </span>
+          )}
+          {isRemote && (
+            <span className="text-xs text-muted">
+              最近检查：{ruleSet.last_checked > 0 ? formatUpdated(ruleSet.last_checked) : "尚未检查"}
             </span>
           )}
           {updating && (
