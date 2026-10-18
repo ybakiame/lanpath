@@ -2,10 +2,16 @@ mod connection_list;
 mod connections_view;
 mod core_validation;
 mod editor_view;
+mod log_buffer;
+mod log_capture;
+mod log_list;
+mod log_stream;
+mod logs_view;
 mod observation;
 mod proxy_list;
 mod proxy_validation;
 mod proxy_view;
+mod shutdown_view;
 mod stats_list;
 mod stats_view;
 
@@ -24,6 +30,7 @@ use gpui_kit::{
     AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
     Subscription, Task, TitlebarOptions, Window, WindowOptions, div,
 };
+use logs_view::LogsView;
 use proxy_list::ProxyListDelegate;
 use proxy_validation::ProxyValidationService;
 use stats_view::StatsView;
@@ -89,6 +96,7 @@ enum ValidationPage {
     Proxies,
     Connections,
     Stats,
+    Logs,
 }
 
 struct ValidationView {
@@ -101,6 +109,7 @@ struct ValidationView {
     core: Arc<CoreValidationService>,
     connections: Entity<ConnectionsView>,
     stats: Entity<StatsView>,
+    logs: Entity<LogsView>,
     closing: bool,
     close_task: Option<Task<()>>,
     core_running: bool,
@@ -117,7 +126,7 @@ struct ValidationView {
 }
 
 impl ValidationView {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(core: Arc<CoreValidationService>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let yaml = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("yaml")
@@ -140,10 +149,10 @@ impl ValidationView {
                 .default_value(JAVASCRIPT_SAMPLE)
         });
 
-        let core = Arc::new(CoreValidationService::from_env());
         let proxies = ProxyValidationService::new(core.api_port());
         let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
         let stats = cx.new(|cx| StatsView::new(core.clone(), window, cx));
+        let logs = cx.new(|cx| LogsView::new(core.clone(), window, cx));
         let proxy_list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
         let _proxy_subscription = cx.subscribe_in(
             &proxy_list,
@@ -173,6 +182,7 @@ impl ValidationView {
             core,
             connections,
             stats,
+            logs,
             closing: false,
             close_task: None,
             core_running: false,
@@ -254,6 +264,7 @@ impl ValidationView {
                 this.stats.update(cx, |view, cx| {
                     view.set_running(this.core_running && !this.closing, cx)
                 });
+                this.logs.update(cx, |view, cx| view.refresh(cx));
                 if succeeded && matches!(kind, CoreOperationKind::Stop) {
                     this.clear_proxies(cx);
                 }
@@ -301,60 +312,9 @@ impl ValidationView {
         self.stats.update(cx, |view, cx| {
             view.set_active(page == ValidationPage::Stats, cx)
         });
-        cx.notify();
-    }
-
-    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
-            return;
-        }
-        self.closing = true;
-        self.connections
-            .update(cx, |view, cx| view.set_running(false, cx));
-        self.stats
-            .update(cx, |view, cx| view.set_running(false, cx));
-        let core = self.core.clone();
-        self.close_task = Some(cx.spawn_in(window, async move |this, cx| {
-            // Finish already accepted commands before stopping their shared
-            // tracker/runtime. New commands are disabled while closing.
-            loop {
-                let Ok(busy) = this.update(cx, |this, _| {
-                    this.core_busy.is_some() || this.proxy_busy.is_some()
-                }) else {
-                    return;
-                };
-                if !busy {
-                    break;
-                }
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(20))
-                    .await;
-            }
-            let result = cx
-                .background_spawn(async move {
-                    if core.is_configured() {
-                        core.stop()
-                    } else {
-                        Ok(())
-                    }
-                })
-                .await;
-            let _ = cx.update(|window, cx| {
-                this.update(cx, |this, cx| match result {
-                    Ok(()) => window.remove_window(),
-                    Err(error) => {
-                        this.closing = false;
-                        this.core_error = Some(error);
-                        this.connections
-                            .update(cx, |view, cx| view.set_running(this.core_running, cx));
-                        this.stats
-                            .update(cx, |view, cx| view.set_running(this.core_running, cx));
-                        cx.notify();
-                    }
-                })
-                .ok();
-            });
-        }));
+        self.logs.update(cx, |view, cx| {
+            view.set_active(page == ValidationPage::Logs, cx)
+        });
         cx.notify();
     }
 }
@@ -367,6 +327,7 @@ impl Render for ValidationView {
             ValidationPage::Proxies => self.render_proxy_panel(cx).into_any_element(),
             ValidationPage::Connections => self.connections.clone().into_any_element(),
             ValidationPage::Stats => self.stats.clone().into_any_element(),
+            ValidationPage::Logs => self.logs.clone().into_any_element(),
         };
 
         div()
@@ -427,6 +388,14 @@ impl Render for ValidationView {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_page(ValidationPage::Stats, cx);
                             })),
+                    )
+                    .child(
+                        Button::new("page-logs")
+                            .label("日志")
+                            .selected(self.page == ValidationPage::Logs)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(ValidationPage::Logs, cx);
+                            })),
                     ),
             )
             .child(
@@ -469,6 +438,10 @@ pub fn run() {
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
+            let core = Arc::new(CoreValidationService::from_env());
+            log_capture::install(core.logs().buffer().clone())
+                .expect("failed to initialize validation log capture");
+            tracing::info!("GPUI validation application initialized");
             gpui_kit::open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {
@@ -478,7 +451,7 @@ pub fn run() {
                     ..Default::default()
                 },
                 cx,
-                |window, cx| cx.new(|cx| ValidationView::new(window, cx)),
+                |window, cx| cx.new(|cx| ValidationView::new(core, window, cx)),
             )
             .expect("failed to open GPUI validation window");
         });

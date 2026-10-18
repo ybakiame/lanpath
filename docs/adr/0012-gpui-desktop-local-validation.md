@@ -47,7 +47,7 @@ GPUI Kit 已提供桌面窗口、组件、编辑器和测试能力，但移动�
 
 ## Connections 切片验证记录
 
-独立验证程序在 `apps/gpui-validation` 内提供编辑器、代理策略、连接与统计四个页面，共用隔离核心工具栏。
+独立验证程序在 `apps/gpui-validation` 内提供编辑器、代理策略、连接、统计与运行日志五个页面，共用隔离核心工具栏。
 `ConnectionsView` 独立拥有连接快照、轮询与请求任务，复用 `lanpath-client::connections` 的真实 API，不初始化 `ClientState`、系统代理或 TUN。
 
 - 可见连接页正常每 2 秒发起读取；请求单飞，关闭操作与读取互斥，关闭后立即重新读取；读取失败保留最后成功快照并退避 10 秒。离开连接页暂停页面刷新，已在途请求可以完成；统计切片新增的 tracker 采集不随切页暂停。
@@ -67,7 +67,7 @@ Windows 在获准的原生 MSVC 环境运行 `cargo build --release --locked --m
 运行前将 `LANPATH_GPUI_CORE_BINARY` 指向隔离复制的 sing-box，将 `LANPATH_GPUI_CORE_DATA_DIR` 指向独立临时数据目录；代理/API 分别使用 `17899/19090`，不使用现有实例端口。
 真实连接场景为 Windows 本地慢速 HTTP 服务与通过隔离 HTTP 代理访问它的 curl；以核心 `/connections`、curl 断开结果、原生窗口画面及 UI Automation 选择状态交叉核对，不使用 mock 连接。
 
-Stats 已接入真实 tracker 与统计存储，见下文；Logs 后续需明确真实日志来源和生命周期。不得用活动连接计数冒充统计历史或用虚构文本补充日志。
+Stats 已接入真实 tracker 与统计存储，Logs 已接入应用 tracing 与真实核心订阅，见下文。不得用活动连接计数冒充统计历史或用虚构文本补充日志。
 
 本次结果：上述 WSL 格式、clippy 与 build 通过，X11 真实窗口检查了导航和未配置状态；Windows x64 release 构建通过，保留共享 `lanpath-common` 中既有的未使用导入警告，未修改共享 crate。
 原生场景确认自动出现真实连接、流量字节增长、选择关闭后核心列表归零且 curl 报连接重置、新连接不继承旧选择、核心故障时保留快照并独立显示关闭错误、停核清空列表。
@@ -86,7 +86,7 @@ Windows x64 release、连接页可见、一个真实慢速 HTTP 连接，连续 
 ## Tracker 与持久统计切片验证记录
 
 `CoreValidationService` 唯一持有 `ObservationService`：在隔离目录准备 `StatsStore`，启动真实核心后创建带 SQLite sink 的 `ConnectionTrackerHandle`。
-停止时消费 handle 并等待其取消，然后停止核心；存储实例保留给离线查询，下一次启动创建新 tracker，禁止用 drop handle 或第二个页面 tracker 代替显式停止。
+停止时先取消日志订阅并等待任务退出，再消费 tracker handle 并等待其取消，然后停止核心；存储实例保留给离线查询，下一次启动创建新 tracker，禁止用 drop handle 或第二个页面 tracker 代替显式停止。
 连接页仍使用 HTTP 验证核心可达性，避免把 tracker 无错误回执的旧快照误报为实时数据；“会话已关闭”显示当前 tracker 的最多 500 条内存缓冲，停核或新会话清空。
 
 统计页独立拥有请求、分段选择和展示快照，SQLite 查询全部在 GPUI 后台执行：
@@ -100,7 +100,7 @@ Windows x64 release、连接页可见、一个真实慢速 HTTP 连接，连续 
 持久化保证仅限共享实现已成功提交的 SQLite 事务。tracker 的 `stop()` 是任务取消，不是最终快照、drain、flush 或 WAL checkpoint。
 快照间消失的短连接、最后采样后的尾流量，以及取消时尚未提交的批次均可能漏记；跟踪器的采样/写入错误只有 tracing 记录，没有公开健康回执或丢批重试。本轮不修改共享 crate 来宣称更强保证。
 
-窗口关闭通过 `on_window_should_close` 延迟：禁用新核心/代理操作，等待已接受命令完成，在后台显式停止 tracker 与核心，成功后移除窗口；失败则保留窗口并展示错误。
+窗口关闭通过 `on_window_should_close` 延迟：禁用新核心/代理操作，等待已接受命令完成，在后台显式停止日志订阅、tracker 与核心，成功后移除窗口；失败则保留窗口并展示错误。
 不依赖 GPUI 仅 200ms 的应用退出回调窗口完成该序列，也不在窗口线程执行数据库或核心等待。
 
 本轮验证：
@@ -113,4 +113,37 @@ Windows x64 release、连接页可见、一个真实慢速 HTTP 连接，连续 
 - 正常带核心关窗后，进程、监听及 PID 文件均回收；重新打开应用且不配置核心二进制时，界面仍显示上述汇总与两条明细。使用统一 UTF-8 的原生检视命令比对退出前后完整查询结果相同；最初 CP936/UTF-8 混用造成的箭头文本比对差异已确认属于验证脚本解码问题。
 - 点击启动后 6ms 内请求关闭窗口，仍正常退出，隔离核心、监听和 PID 文件均未残留。
 
-未更改 Tauri、Android、共享 tracker 或统计存储契约；未新增 ARM64、高 DPI/IME、UAC、TUN、安装更新验证。Stats 的筛选、日期选择和清空流程尚未迁移；Logs 仍未接入。上述数据库检视命令与 HTTP 服务均为本地临时验证工具，不进入源码或 CI。
+未更改 Tauri、Android、共享 tracker 或统计存储契约；未新增 ARM64、高 DPI/IME、UAC、TUN、安装更新验证。Stats 的筛选、日期选择和清空流程尚未迁移；Logs 的磁盘日志与导出尚未迁移。上述数据库检视命令与 HTTP 服务均为本地临时验证工具，不进入源码或 CI。
+
+## Runtime Logs 切片验证记录
+
+2026-10-19，本地验证程序新增真实运行日志，不依赖 Tauri 日志模块或生产实例日志目录：
+
+- 应用来源：进程启动时安装 tracing layer，仅捕获 `lanpath_` 前缀目标，保留事件级别、目标及结构化字段；不把 UI 提示文本伪装为核心输出。
+- 核心来源：订阅隔离 Clash API 的 `ws://127.0.0.1:19090/logs?level=trace`，按真实 JSON `type`、`payload` 解析。协议依据为 [sing-box 的 `getLogs` 实现](https://github.com/SagerNet/sing-box/blob/testing/experimental/clashapi/server.go)，并以本机真实 sing-box 1.14.2 验证；不声称转发全部 stdout/stderr。普通输出配置为 INFO，本次 API 订阅实际也收到 DEBUG，展示以真实帧级别为准。
+- 时间使用本地接收时刻的 RFC3339，按进程内入队序号倒序展示，不冒充核心原始事件时刻。订阅前及断流期间不回放，不保证完整启动日志或无丢失。
+
+`CoreValidationService` 唯一拥有日志任务。核心启动后开启订阅；停止或正常关窗时，先取消并等待该任务，再停止 tracker 与核心。订阅只持有缓冲，不反向持有 service。
+连接超时为 5 秒，断开后每 2 秒重连并显式展示连接中/断开状态；HTTP 4xx 或 204 显示不可用，重新启动核心后重试，不以空列表伪装健康。
+
+缓冲与展示契约：
+
+- 环缓冲最多 1000 条，满时淘汰最旧条目并累计计数；清空只影响本次内存及淘汰计数，不停止采集、不删除文件，序号不复用。
+- 单条消息最多 8 KiB，按 UTF-8 字符边界截断并标记；tracing 字段格式化也有界，截断后不继续拼接后续字段。WebSocket 单帧与单消息上限均为 64 KiB。
+- 视图最多另持 1000 条 `Arc` 快照；暂停刷新可能保留已被环缓冲淘汰的旧快照，直到下一次刷新。8 KiB 是消息内容上限，不是整行或进程内存上限。
+- 提供全部级别、DEBUG+/INFO+/WARN+/ERROR 最低级别过滤，默认 INFO+；显示最新 200/500/1000 条，默认 500。页面可见且自动刷新开启时每 2 秒同步；暂停只冻结展示，离页不停止采集。切页进入、改变筛选、手动刷新、清空和核心操作完成时可以主动同步。
+- 列表使用固定单行预览，避免虚拟行高与长消息换行冲突；选中后在只读编辑器查看保留的完整文本。按日志序号维持选择；所选日志不再处于当前结果集时清除详情，不将旧选择套到新条目。
+
+本轮已执行：
+
+- WSL：`nix develop --no-pure-eval` 内执行独立应用格式化、`cargo clippy --manifest-path apps/gpui-validation/Cargo.toml --locked --all-targets -- -D warnings`、`cargo test --manifest-path apps/gpui-validation/Cargo.toml --locked --lib`、`cargo build --manifest-path apps/gpui-validation/Cargo.toml --locked`，全部通过。5 个回归用例覆盖容量/过滤/清空身份、UTF-8 内容边界、跨字段截断、真实帧格式校验及选择随插入/淘汰的转移；跨字段边界先复现失败，再修正通过。
+- 仓库回归：同一 Nix 环境内 `cargo build --workspace`、`bun run verify:rust` 全部通过，覆盖根 fmt/clippy/test、现行客户端壳 host clippy 和 `aarch64-linux-android` Rust check；保留既有 ignored 用例，未执行 Kotlin/AAR 构建或 Android 实机验证。
+- Windows x64：原生 MSVC `cargo build --release --manifest-path apps/gpui-validation/Cargo.toml --locked` 通过，仍保留共享 `lanpath-common` 的既有未使用导入警告。真实窗口同时显示应用启动/核心生命周期 tracing 和核心代理请求日志。
+- 3 次真实 HTTP 代理请求指向本地未监听目标；暂停期间视图保持 0 条，手动刷新得到缓冲 15 条，INFO+ 显示 12 条，ERROR 显示 3 条；没有通过暂停停止后台订阅。
+- 停留编辑器页发送 400 次真实请求，返回日志页后缓冲及显示均为 1000 条、已淘汰 1015 条；切为 200 条只改变展示，不改变缓冲。截图发现并修正了首轮长行重叠，最终真实窗口的千条列表与 ERROR 过滤均无该重叠。
+- 结束本轮隔离核心后，日志页保留历史并显示断开及原生 socket 错误；显式停核后显示已停止，重新启动后恢复连接，新请求产生新日志。
+- 通过原生 UIA 读取选中详情，确认完整保留目标与错误尾部；新请求插入后详情文本保持不变，清空后移除。另发送 250 次真实请求达到 1000 条缓冲、淘汰 255 条，所选旧事件被淘汰后详情移除。
+- 原生点击详情后键入，以及 UIA `SetValue` 均未修改详情文本；但 UIA `IsReadOnly` 仍报告 `false`、焦点暴露为 Window，不能宣称无障碍语义完整。既有 ListItem 外层名称为空的限制也未解决；未读取或修改系统剪贴板来验证复制。
+- 带实时订阅正常关窗后，验证 UI、隔离核心、监听及 PID 文件均回收。原生产 app/core PID、`7899/7900/9090` 监听与系统代理保持原值。
+
+本轮仍为 Proposed 的本地功能切片，不构成完整 Logs 文件管理、完整桌面迁移、发布就绪或性能收益结论；不改变 Android、现行 Tauri、系统代理、TUN、更新或安装契约。原生场景脚本、截图和数据仅用于本地验证，不进入源码或 CI。

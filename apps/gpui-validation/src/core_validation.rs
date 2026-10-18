@@ -4,7 +4,7 @@ use lanpath_engine::{CoreManager, SingBoxProcessManager};
 use serde_json::{Value, json};
 use tokio::runtime::{Builder, Runtime};
 
-use crate::observation::ObservationService;
+use crate::{log_stream::LogService, observation::ObservationService};
 
 const DEFAULT_CORE_PORT: u16 = 17899;
 const CLASH_API_PORT: u16 = 19090;
@@ -18,6 +18,7 @@ pub(crate) struct CoreValidationService {
     // readers retain a live runtime during teardown.
     manager: Option<Arc<SingBoxProcessManager>>,
     observations: ObservationService,
+    logs: LogService,
     runtime: Option<Runtime>,
     config: Value,
     data_dir: PathBuf,
@@ -70,7 +71,7 @@ impl CoreValidationService {
         };
         let configuration_error = (!errors.is_empty()).then(|| errors.join("；"));
         let config = json!({
-            "log": { "level": "warn", "timestamp": true },
+            "log": { "level": "info", "timestamp": true },
             "inbounds": [{
                 "type": "mixed",
                 "tag": "gpui-validation",
@@ -103,6 +104,7 @@ impl CoreValidationService {
         Self {
             manager,
             observations: ObservationService::new(data_dir.clone()),
+            logs: LogService::new(),
             runtime,
             config,
             data_dir,
@@ -132,6 +134,10 @@ impl CoreValidationService {
         &self.observations
     }
 
+    pub(crate) fn logs(&self) -> &LogService {
+        &self.logs
+    }
+
     /// Synchronous entry point for GPUI's background executor. Never call this
     /// on the window thread: process wait and lifecycle cleanup are blocking.
     pub(crate) fn start(&self) -> Result<(), String> {
@@ -154,7 +160,14 @@ impl CoreValidationService {
                 .start(&self.config)
                 .await
                 .map_err(|error| error.to_string())?;
-            if let Err(error) = self.observations.start(self.api_port).await {
+            let result = async {
+                self.observations.start(self.api_port).await?;
+                self.logs.start(self.api_port).await
+            }
+            .await;
+            if let Err(error) = result {
+                self.logs.stop().await;
+                self.observations.stop().await;
                 return match manager.stop().await {
                     Ok(()) => Err(error),
                     Err(stop_error) => Err(format!("{error}；核心回收失败：{stop_error}")),
@@ -168,6 +181,7 @@ impl CoreValidationService {
     pub(crate) fn stop(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
         runtime.block_on(async {
+            self.logs.stop().await;
             self.observations.stop().await;
             manager.stop().await.map_err(|error| error.to_string())
         })
