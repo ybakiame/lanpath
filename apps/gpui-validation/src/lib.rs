@@ -1,11 +1,16 @@
+mod core_validation;
+
+use std::sync::Arc;
+
+use core_validation::CoreValidationService;
 use gpui_kit::component::{
-    ActiveTheme as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, WindowExt as _,
     button::Button,
     input::{Editor, EditorState},
     switch::Switch,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Task,
     TitlebarOptions, Window, WindowOptions, div,
 };
 
@@ -53,12 +58,23 @@ impl EditorLanguage {
     }
 }
 
+#[derive(Clone, Copy)]
+enum CoreOperationKind {
+    Start,
+    Stop,
+}
+
 struct ValidationView {
     active: EditorLanguage,
     read_only: bool,
     yaml: Entity<EditorState>,
     json: Entity<EditorState>,
     javascript: Entity<EditorState>,
+    core: Arc<CoreValidationService>,
+    core_running: bool,
+    core_busy: Option<CoreOperationKind>,
+    core_task: Option<Task<()>>,
+    core_error: Option<String>,
 }
 
 impl ValidationView {
@@ -91,7 +107,73 @@ impl ValidationView {
             yaml,
             json,
             javascript,
+            core: Arc::new(CoreValidationService::from_env()),
+            core_running: false,
+            core_busy: None,
+            core_task: None,
+            core_error: None,
         }
+    }
+
+    fn run_core_operation(&mut self, kind: CoreOperationKind, cx: &mut Context<Self>) {
+        let invalid_state = match kind {
+            CoreOperationKind::Start => self.core_running,
+            CoreOperationKind::Stop => !self.core_running,
+        };
+        if self.core_busy.is_some() || !self.core.is_configured() || invalid_state {
+            return;
+        }
+
+        self.core_busy = Some(kind);
+        self.core_error = None;
+        self.core_task = None;
+        let service = self.core.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    match kind {
+                        CoreOperationKind::Start => service.start(),
+                        CoreOperationKind::Stop => service.stop(),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.core_running = matches!(kind, CoreOperationKind::Start);
+                    }
+                    Err(error) => {
+                        this.core_error = Some(error);
+                    }
+                }
+                this.core_busy = None;
+                cx.notify();
+            });
+        });
+        self.core_task = Some(task);
+        cx.notify();
+    }
+
+    fn core_status(&self) -> String {
+        if let Some(kind) = self.core_busy {
+            return match kind {
+                CoreOperationKind::Start => "正在启动隔离核心…".to_string(),
+                CoreOperationKind::Stop => "正在停止核心…".to_string(),
+            };
+        }
+        if let Some(error) = &self.core_error {
+            return format!("核心错误：{error}");
+        }
+        if self.core_running {
+            return format!("核心运行中 · 127.0.0.1:{}", self.core.port());
+        }
+        if self.core.is_configured() {
+            return format!("核心已停止 · 隔离端口 {}", self.core.port());
+        }
+        format!(
+            "核心未配置 · {}",
+            self.core.configuration_error().unwrap_or("不可用")
+        )
     }
 }
 
@@ -102,6 +184,7 @@ impl Render for ValidationView {
             EditorLanguage::Json => &self.json,
             EditorLanguage::JavaScript => &self.javascript,
         };
+        let core_busy = self.core_busy.is_some();
         let mode = if self.read_only {
             "只读"
         } else {
@@ -175,7 +258,7 @@ impl Render for ValidationView {
                                 window.open_dialog(cx, |dialog, _, _| {
                                     dialog
                                         .title("本地验证范围")
-                                        .child("编辑器使用真实 GPUI Kit 组件；未连接配置、sing-box、系统代理或 TUN。")
+                                        .child("编辑器与核心均为真实实现；核心仅使用隔离数据目录和 loopback mixed inbound，不修改系统代理或 TUN。")
                                 });
                             }),
                     ),
@@ -188,6 +271,35 @@ impl Render for ValidationView {
                         "当前：{} · {mode}；编辑器内 Ctrl-F 搜索，Esc 关闭搜索或 dialog",
                         self.active.label()
                     )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("core-start")
+                            .label("启动隔离核心")
+                            .disabled(core_busy || self.core_running || !self.core.is_configured())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.run_core_operation(CoreOperationKind::Start, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("core-stop")
+                            .label("停止核心")
+                            .disabled(core_busy || !self.core_running)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.run_core_operation(CoreOperationKind::Stop, cx);
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.core_status()),
             )
             .child(
                 div()

@@ -10,6 +10,9 @@ publish = false
 
 [dependencies]
 gpui-kit = { version = "0.7.3", features = ["tree-sitter-javascript", "tree-sitter-yaml"] }
+lanpath-engine = { path = "../../crates/lanpath-engine" }
+serde_json = "1"
+tokio = { version = "1.45", features = ["full"] }
 
 # 独立本地验证应用：不进入根 workspace、Android target 或现有 CI 门禁。
 [workspace]
