@@ -1,5 +1,5 @@
 [package]
-name = "lanpath-gpui-validation"
+name = "lanpath-desktop-experimental"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
@@ -11,16 +11,19 @@ publish = false
 [dependencies]
 chrono = "0.4"
 futures = "0.3"
-gpui-kit = { version = "0.7.3", features = ["tree-sitter-javascript", "tree-sitter-yaml"] }
-lanpath-engine = { path = "../../crates/lanpath-engine" }
+gpui-kit = "0.7.3"
 lanpath-client = { path = "../../crates/lanpath-client", default-features = false, features = ["scripts"] }
+lanpath-common = { path = "../../crates/lanpath-common" }
+lanpath-engine = { path = "../../crates/lanpath-engine" }
+serde = "1"
 serde_json = "1"
+tempfile = "3"
 tokio = { version = "1.45", features = ["full"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 
-# 独立本地验证应用：不进入根 workspace、Android target 或现有 CI 门禁。
+# Windows 实验性并行目标；不进入根 workspace、Android 或现行发布/CI 门禁。
 [workspace]
 
 [profile.dev.package]

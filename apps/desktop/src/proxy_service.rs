@@ -6,11 +6,11 @@ use lanpath_client::{
 };
 
 #[derive(Clone)]
-pub(crate) struct ProxyValidationService {
+pub(crate) struct ProxyService {
     port: u16,
 }
 
-impl ProxyValidationService {
+impl ProxyService {
     pub(crate) fn new(port: u16) -> Self {
         Self { port }
     }

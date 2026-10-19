@@ -1,7 +1,7 @@
 # 岚径 · Lanpath
 
 跨平台代理客户端：订阅、代理策略、DNS/规则、流量与日志诊断；桌面额外提供 MITM 和脚本。
-桌面及 Android 共用 Tauri 2 + React UI，当前仅使用 sing-box 运行核心。
+现行发行桌面及 Android 共用 Tauri 2 + React UI，当前仅使用 sing-box 运行核心。
 
 公开仓库：[ybakiame/lanpath](https://github.com/ybakiame/lanpath) ·
 首次测试版：[v0.1.1-beta.1](https://github.com/ybakiame/lanpath/releases/tag/v0.1.1-beta.1)。
@@ -32,6 +32,15 @@ Windows/Linux 的 WebView 偏好和缓存使用该目录的 `webview` 子目录�
 
 Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，保留旁边的 `lanpath.portable` 标记，所有应用数据使用程序目录下的 `data`。启动目录不影响数据位置；需要系统已安装 WebView2 Runtime。更新时退出应用、替换程序与 `seed`，保留 `data`。详见 [便携版说明](docs/operations.md)。
 迁移与发布限制见 [运维与发布](docs/operations.md)。
+
+## Windows GPUI 实验版
+
+`apps/desktop` 已进入实验性并行迁移，独立程序名为 `lanpath-desktop-experimental`；
+现行 Tauri 桌面与 Android 保持不变，尚未批准生产替换或发行。
+实验版使用独立持久数据根与 loopback 核心/API，不接管系统代理或 TUN，不自动导入生产数据。
+当前配置入口编辑真实 sing-box JSON 文档；业务迁移覆盖与缺口见
+[ADR-0013](docs/adr/0013-gpui-experimental-parallel-migration.md)，
+启动及校验命令见[开发指南](docs/development.md#windows-gpui-实验性并行)。
 
 本仓可独立构建，不需要 ProxyPanel 检出，不作为其 submodule。
 [文档索引](docs/index.md) · [代理指南](AGENTS.md) · [来源记录](docs/source-provenance.json)。

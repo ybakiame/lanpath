@@ -6,7 +6,7 @@ Skills 只组织既有流程；命令以 nix/commands.nix、包脚本和构建�
 
 先 git submodule update --init --recursive，再 nix develop --no-pure-eval；根目录运行 lanpath-install。
 协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
-本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 的明确例外见 ADR。
+本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 例外见 ADR，GPUI 本机实验例外见下节。
 主 nixpkgs 使用 nixos-26.05 并由 flake.lock 固定提交；Bun 1.4.2 通过官方归档与 SHA256 固定，避免稳定源自带版本与 Windows CI 不一致。Rust 仍由 rust-toolchain.toml 固定；Android SDK 输入保持独立锁定，此阶段不更新其传递 nixpkgs。更新主源使用 `nix flake update nixpkgs`，随后执行双端完整验证，见 ADR-0004。
 devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不维护 devenv.yaml/devenv.lock。配置入口为 devenv.nix，工具、桌面、Android 和共用命令位于 nix/；可用 direnv allow 启用已提交的 .envrc。进入 shell 仅初始化环境，不安装依赖、不构建 AAR、不启动代理。
 本地及 CI 共用 lanpath-install、lanpath-rust-targets、lanpath-verify-frontend、lanpath-verify-rust、lanpath-test-tools、lanpath-build-aar 和 lanpath-build-android-debug/release；这些命令可从仓库子目录调用，失败立即退出。仍可在 shell 中直接使用原 Bun/Cargo 命令。发布签名只由既有 release 工作流显式注入，Husky 继续作为唯一提交检查入口。
@@ -19,6 +19,60 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 共享 UI 的 CSS 扫描由 apps/client/src/index.css 的 @source 覆盖。
 桌面壳默认居中创建窗口，常规最小尺寸为 760×560 逻辑像素；启动与最小尺寸按主屏工作区和 DPI 收敛，保留边框空间。宽度低于 1024 时顶部提供主导航按钮，菜单支持键盘关闭与焦点恢复；侧栏直达页面保留标题，其他子页面返回显式 backTo 或路由父级。
 代理启停和重启成功后共用 writeRuntimeStatus 取消旧状态轮询/运行查询，重置策略与活动连接缓存；启动后刷新已挂载查询，停止时不重拉核心数据。缓存回归用 `bun test packages/client-core/scripts/runtime-queries.test.ts`（在本仓 Nix 环境）执行，CI 同步执行；浏览器 mock 不等于真实核心验收。
+
+## Windows GPUI 实验性并行
+
+入口为独立 Cargo 项目 `apps/desktop`，程序名 `lanpath-desktop-experimental`、窗口名
+“Lanpath 实验版（GPUI）”。这是 [ADR-0013](adr/0013-gpui-experimental-parallel-migration.md)
+批准的并行开发目标，不替换现行应用，也不改变安装器、updater、签名或 Android 入口。
+旧 `apps/gpui-validation` 及 `LANPATH_GPUI_*` 变量已移除；ADR-0012 中旧命令仅为历史验证记录。
+
+从仓库根在 Nix 环境分别执行独立项目检查；根 `verify:rust` 不覆盖此项目：
+
+```sh
+nix develop --no-pure-eval -c cargo fmt --manifest-path apps/desktop/Cargo.toml --check
+nix develop --no-pure-eval -c cargo clippy --manifest-path apps/desktop/Cargo.toml --locked --all-targets -- -D warnings
+nix develop --no-pure-eval -c cargo test --manifest-path apps/desktop/Cargo.toml --locked --lib
+nix develop --no-pure-eval -c cargo build --manifest-path apps/desktop/Cargo.toml --locked
+```
+
+本机 Windows 原生验证使用已授权的 Rust 1.98.0/MSVC/Windows SDK/CMake，不授权安装或升级组件。
+在具备这些工具的 x64 开发终端、Windows 本地源码副本中运行；先在下面位置准备单独复制的
+sing-box，不指向现行应用正在使用的核心文件：
+
+```powershell
+$env:LANPATH_DESKTOP_CORE_BINARY = Join-Path $env:LOCALAPPDATA 'LanpathExperimentalCore\sing-box.exe'
+cargo run --release --manifest-path apps/desktop/Cargo.toml --locked
+```
+
+`LANPATH_DESKTOP_DATA_DIR` 可显式指定实验数据根；未设置时 Windows 使用
+`%LOCALAPPDATA%\LanpathExperimental`，非 Windows 使用
+`$XDG_DATA_HOME/lanpath-experimental` 或 `$HOME/.local/share/lanpath-experimental`，不回退临时目录。
+首次只接受空目录或新目录，后续要求有效实验标记和独占 OS 文件锁；拒绝生产/Portable 祖先、
+未知非空目录、符号链接/junction 和硬链接文件。不要手动伪造标记或删除锁文件；同时运行的第二实例
+不会读取该根的配置或离线统计。这不是抵抗同用户恶意运行期文件替换的 OS 沙箱。
+
+配置原文为 `configuration.json`，派生运行配置 `sing-box.json` 不作为编辑源。首次显示未保存的
+直连新文档；缺失文档不会自动保存，损坏的 UTF-8 JSON 原文保留以供编辑，不回退演示配置。
+校验调用选定核心的真实 `check`；保存通过后原子替换原文，保留文本排版；启动重新加载并校验
+已保存值，绝不以草稿或固定样例启动。校验不会保存/启动；保存不热生效；运行和操作期间编辑器只读。
+在正文编辑器内 Ctrl+S 保存、Ctrl+Enter 校验、Ctrl+R 重新载入；校验快捷键不插入换行。
+丢弃修改或关闭未保存草稿需确认。
+
+本阶段接收完整 JSON 文档，但不是全部 sing-box 能力的开放入口：固定 mixed 为
+`127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，占用则失败，不接管占用进程。
+拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须显式位于实验根内，不接受
+环境变量展开、系统 hosts 默认路径或外部 UI/自动证书资源。文件日志和缓存输出分别限于根下
+`logs/`、`cache/`。能力边界先检查，具体配置 schema 仍由同一真实核心负责。
+
+可用 `LANPATH_TEST_SING_BOX` 显式选择真实核心，单独执行被普通套件跳过的服务回归：
+
+```powershell
+$env:LANPATH_TEST_SING_BOX = $env:LANPATH_DESKTOP_CORE_BINARY
+cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib -- --ignored --exact configuration::tests::real_core_checks_exact_saved_source_and_rechecks_before_start
+```
+
+Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。
 
 ## Android
 

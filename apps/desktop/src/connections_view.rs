@@ -14,10 +14,10 @@ use gpui_kit::{
 };
 use lanpath_client::connections::{ConnectionView, clash_close_connection, clash_get_connections};
 
-use crate::{connection_list::ConnectionListDelegate, core_validation::CoreValidationService};
+use crate::{connection_list::ConnectionListDelegate, runtime::DesktopRuntime};
 
 pub(crate) struct ConnectionsView {
-    core: Arc<CoreValidationService>,
+    core: Arc<DesktopRuntime>,
     list: Entity<ListState<ConnectionListDelegate>>,
     running: bool,
     active: bool,
@@ -37,7 +37,7 @@ pub(crate) struct ConnectionsView {
 
 impl ConnectionsView {
     pub(crate) fn new(
-        core: Arc<CoreValidationService>,
+        core: Arc<DesktopRuntime>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -162,7 +162,10 @@ impl ConnectionsView {
                         // Retain the HTTP health/error contract; tracker.closed()
                         // alone cannot distinguish a stale snapshot from a live one.
                         let result = match clash_get_connections(core.api_port(), "").await {
-                            Ok(_) if show_closed => Ok(core.observations().closed().await),
+                            Ok(_) if show_closed => match core.observations() {
+                                Ok(observations) => Ok(observations.closed().await),
+                                Err(error) => Err(error),
+                            },
                             Ok(rows) => Ok(rows),
                             Err(error) => Err(error.to_string()),
                         };

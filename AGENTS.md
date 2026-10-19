@@ -8,11 +8,16 @@
 
 ## 结构与边界
 
-apps/client 为 Tauri 单壳双目标应用；页面共用 @lanpath/ui，平台为编译期事实。
+现行发行目标 apps/client 为 Tauri 单壳双目标应用；页面共用 @lanpath/ui，平台为编译期事实。
 packages/client-core 封装 API/hooks/atoms；UI 禁止直接 invoke。
 根 Cargo workspace 为 crates/lanpath-*；apps/client/src-tauri 仍是独立 Cargo 项目。
 Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；桌面为 sing-box 进程。
 保持单核心，不依赖 ProxyPanel 源码，不把协议框架写成产品实现。
+
+apps/desktop 为 ADR-0013 授权的 Windows GPUI 实验性并行目标，保持独立 Cargo 项目；
+现行 Tauri 与 Android 不被替换。GPUI 复用共享 Rust 业务，UI 状态由对应 feature/entity 持有。
+实验身份、数据根、核心进程与端口独立，不自动读取或迁移生产数据，不接管系统代理/TUN，
+不改变现行安装、更新和签名身份。后续生产切换或全局网络控制须单独取得决策。
 
 ## 环境和验证
 
@@ -25,14 +30,18 @@ Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；桌面
 Skills 为操作指引，不替代本文件、docs 或实际脚本；不增加门禁或扩大任务授权。
 
 本地编译/运行一律先进入本仓 nix develop --no-pure-eval（devenv Flake 集成）；Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
-Gradle 使用项目 wrapper，不使用宿主 Gradle。唯一环境例外：用户已授权 Windows CI
+Gradle 使用项目 wrapper，不使用宿主 Gradle。现行应用的环境例外：用户已授权 Windows CI
 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 Nix。
+ADR-0012/0013 另授权上述 GPUI 实验目标在本机使用现有原生 Windows Rust/MSVC/CMake；
+该例外不授权安装或升级宿主组件，不扩展到其他应用或发布路径。
 代理可在 Nix 链接失败时设置 http_proxy/https_proxy 为 http://127.0.0.1:7899 后重试。
 
 前端改动执行受影响包 verify：lanpath-app、@lanpath/client-core、@lanpath/ui。
 前端无单元测试运行器，verify 为 build+lint+format；交互验证注明 mock/设备边界。
 Rust 执行 cargo build --workspace 和 bun run verify:rust，含根 fmt/clippy/test、
 桌面壳 host clippy 与有 SDK/target 时 Android target check；根 workspace 不覆盖壳。
+根门禁不覆盖 apps/desktop；其改动另执行独立项目 fmt/clippy/test/build 及 Windows 原生场景，
+不据此新增强制 CI 门禁。
 Go 桥调整还需构建 lanpathcore.aar，并编译 Android Kotlin/资源；不得沿用旧品牌 AAR。
 
 ## 编码与提交

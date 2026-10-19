@@ -1,5 +1,7 @@
 # Lanpath 架构
 
+## 当前发行实现
+
 apps/client/src/pages 与 @lanpath/ui 共用双端页面。@lanpath/client-core 是命令、状态与 hooks 入口。
 apps/client/src-tauri 为独立 Cargo 壳，经 target 依赖门控区分桌面/Android。
 lanpath-tauri 实现共享命令；lanpath-client 管理订阅、配置、策略、流量与本地 SQLite。
@@ -42,3 +44,14 @@ client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。
 
 规则集用户分类随 LocalOverride 持久化，分类命令与运行分流无关；路由/DNS 复用筛选多选器。
 远程更新元数据由后端持有，HTTP 校验器绑定有效地址和缓存指纹；写回只合并检查结果，见 ADR-0011。
+
+## Windows GPUI 实验性并行目标
+
+用户已批准 [ADR-0013](adr/0013-gpui-experimental-parallel-migration.md) 的实验性完整业务迁移开发。
+`apps/desktop` 是独立 Cargo 应用，不加入 Android 目标或替换 `apps/client`。
+Tauri 与 GPUI 共享适用的 Rust 业务能力，各自持有 UI 状态及平台适配；React 状态规范仍只约束现行 React 页面。
+
+实验应用使用独立身份、持久数据根、核心进程和 loopback 端口，不读取/迁移生产数据，不设置系统代理或启用 TUN。
+完整功能接入与正式替换是不同决策；数据兼容、系统集成、目标架构、安装更新、回退和资源收益仍需实际验收。
+根 workspace 不包含该应用，独立检查及原生 Windows 验收不由现行 Tauri 构建结果替代。
+已有技术验证证据保留在 [ADR-0012](adr/0012-gpui-desktop-local-validation.md)，不将其切片覆盖当作完整客户端对等证明。

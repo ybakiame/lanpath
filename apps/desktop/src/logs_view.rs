@@ -12,12 +12,10 @@ use gpui_kit::{
     Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
 };
 
-use crate::{
-    core_validation::CoreValidationService, log_buffer::CoreLogState, log_list::LogListDelegate,
-};
+use crate::{log_buffer::CoreLogState, log_list::LogListDelegate, runtime::DesktopRuntime};
 
 pub(crate) struct LogsView {
-    core: Arc<CoreValidationService>,
+    core: Arc<DesktopRuntime>,
     list: Entity<ListState<LogListDelegate>>,
     details: Entity<EditorState>,
     detail_id: Option<u64>,
@@ -36,7 +34,7 @@ pub(crate) struct LogsView {
 
 impl LogsView {
     pub(crate) fn new(
-        core: Arc<CoreValidationService>,
+        core: Arc<DesktopRuntime>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {

@@ -2,7 +2,7 @@ use super::*;
 use gpui_kit::component::list::List;
 use lanpath_client::proxies::ProxyList;
 
-impl ValidationView {
+impl DesktopView {
     pub(crate) fn clear_proxies(&mut self, cx: &mut Context<Self>) {
         self.proxy_list.update(cx, |state, cx| {
             state.delegate_mut().set_group(None);

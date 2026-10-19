@@ -1,7 +1,8 @@
+mod config_view;
+mod configuration;
 mod connection_list;
 mod connections_view;
-mod core_validation;
-mod editor_view;
+mod data_root;
 mod log_buffer;
 mod log_capture;
 mod log_list;
@@ -9,75 +10,34 @@ mod log_stream;
 mod logs_view;
 mod observation;
 mod proxy_list;
-mod proxy_validation;
+mod proxy_service;
 mod proxy_view;
+mod runtime;
 mod shutdown_view;
 mod stats_list;
 mod stats_view;
+#[cfg(windows)]
+mod windows_file;
 
 use std::sync::Arc;
 
+use config_view::{ConfigEvent, ConfigView};
 use connections_view::ConnectionsView;
-use core_validation::CoreValidationService;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, WindowExt as _,
     button::Button,
-    input::{Editor, EditorState},
     list::{ListEvent, ListState},
-    switch::Switch,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-    Subscription, Task, TitlebarOptions, Window, WindowOptions, div,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
+    TitlebarOptions, Window, WindowOptions, div,
 };
 use logs_view::LogsView;
 use proxy_list::ProxyListDelegate;
-use proxy_validation::ProxyValidationService;
+use proxy_service::ProxyService;
+use runtime::DesktopRuntime;
 use stats_view::StatsView;
-
-const YAML_SAMPLE: &str = r#"dns:
-  servers:
-    - tag: cloudflare
-      address: 8.8.8.8
-  rules:
-    - domain: example.com
-      server: cloudflare
-"#;
-
-const JSON_SAMPLE: &str = r#"{
-  "mode": "rule",
-  "log": {
-    "level": "info",
-    "timestamp": true
-  }
-}
-"#;
-
-const JAVASCRIPT_SAMPLE: &str = r#"export function selectOutbound(outbounds, name) {
-  const selected = outbounds.find((outbound) => outbound.tag === name);
-  if (!selected) {
-    throw new Error(`Unknown outbound: ${name}`);
-  }
-  return selected;
-}
-"#;
-
-#[derive(Clone, Copy, PartialEq)]
-enum EditorLanguage {
-    Yaml,
-    Json,
-    JavaScript,
-}
-
-impl EditorLanguage {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Yaml => "YAML",
-            Self::Json => "JSON",
-            Self::JavaScript => "JavaScript",
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 enum CoreOperationKind {
@@ -91,22 +51,18 @@ enum ProxyOperation {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum ValidationPage {
-    Editor,
+enum Page {
+    Configuration,
     Proxies,
     Connections,
     Stats,
     Logs,
 }
 
-struct ValidationView {
-    page: ValidationPage,
-    active: EditorLanguage,
-    read_only: bool,
-    yaml: Entity<EditorState>,
-    json: Entity<EditorState>,
-    javascript: Entity<EditorState>,
-    core: Arc<CoreValidationService>,
+struct DesktopView {
+    page: Page,
+    configuration: Entity<ConfigView>,
+    core: Arc<DesktopRuntime>,
     connections: Entity<ConnectionsView>,
     stats: Entity<StatsView>,
     logs: Entity<LogsView>,
@@ -116,40 +72,22 @@ struct ValidationView {
     core_busy: Option<CoreOperationKind>,
     core_task: Option<Task<()>>,
     core_error: Option<String>,
-    proxies: ProxyValidationService,
+    proxies: ProxyService,
     proxy_list: Entity<ListState<ProxyListDelegate>>,
     proxy_busy: Option<ProxyOperation>,
     proxy_task: Option<Task<()>>,
     proxy_load_error: Option<String>,
     proxy_action_error: Option<String>,
     _proxy_subscription: Subscription,
+    _configuration_subscription: Subscription,
 }
 
-impl ValidationView {
-    fn new(core: Arc<CoreValidationService>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let yaml = cx.new(|cx| {
-            EditorState::new(window, cx)
-                .language("yaml")
-                .line_number(true)
-                .folding(true)
-                .default_value(YAML_SAMPLE)
-        });
-        let json = cx.new(|cx| {
-            EditorState::new(window, cx)
-                .language("json")
-                .line_number(true)
-                .folding(true)
-                .default_value(JSON_SAMPLE)
-        });
-        let javascript = cx.new(|cx| {
-            EditorState::new(window, cx)
-                .language("javascript")
-                .line_number(true)
-                .folding(true)
-                .default_value(JAVASCRIPT_SAMPLE)
-        });
-
-        let proxies = ProxyValidationService::new(core.api_port());
+impl DesktopView {
+    fn new(core: Arc<DesktopRuntime>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let configuration = cx.new(|cx| ConfigView::new(core.clone(), window, cx));
+        let _configuration_subscription =
+            cx.subscribe(&configuration, |_, _, _: &ConfigEvent, cx| cx.notify());
+        let proxies = ProxyService::new(core.api_port());
         let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
         let stats = cx.new(|cx| StatsView::new(core.clone(), window, cx));
         let logs = cx.new(|cx| LogsView::new(core.clone(), window, cx));
@@ -173,12 +111,8 @@ impl ValidationView {
         });
 
         Self {
-            page: ValidationPage::Editor,
-            active: EditorLanguage::Yaml,
-            read_only: false,
-            yaml,
-            json,
-            javascript,
+            page: Page::Configuration,
+            configuration,
             core,
             connections,
             stats,
@@ -196,17 +130,21 @@ impl ValidationView {
             proxy_load_error: None,
             proxy_action_error: None,
             _proxy_subscription,
+            _configuration_subscription,
         }
     }
 
     fn run_core_operation(&mut self, kind: CoreOperationKind, cx: &mut Context<Self>) {
         let invalid_state = match kind {
-            CoreOperationKind::Start => self.core_running,
+            CoreOperationKind::Start => {
+                self.core_running || !self.configuration.read(cx).ready_for_start()
+            }
             CoreOperationKind::Stop => !self.core_running,
         };
         if self.core_busy.is_some()
             || self.closing
             || self.proxy_busy.is_some()
+            || self.configuration.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -216,6 +154,8 @@ impl ValidationView {
         self.connections
             .update(cx, |view, cx| view.set_running(false, cx));
         self.core_busy = Some(kind);
+        self.configuration
+            .update(cx, |view, cx| view.set_locked(true, cx));
         self.core_error = None;
         self.core_task = None;
         if matches!(kind, CoreOperationKind::Start) {
@@ -272,6 +212,9 @@ impl ValidationView {
                     this.apply_proxy_result(proxy_result, true, cx);
                 }
                 this.core_busy = None;
+                this.configuration.update(cx, |view, cx| {
+                    view.set_locked(this.core_running || this.closing, cx)
+                });
                 cx.notify();
             });
         });
@@ -281,11 +224,11 @@ impl ValidationView {
 
     fn core_status(&self) -> String {
         if self.closing {
-            return "正在停止隔离核心与连接跟踪…".to_string();
+            return "正在停止日志、连接跟踪与实验核心…".to_string();
         }
         if let Some(kind) = self.core_busy {
             return match kind {
-                CoreOperationKind::Start => "正在启动隔离核心…".to_string(),
+                CoreOperationKind::Start => "正在加载保存配置并启动实验核心…".to_string(),
                 CoreOperationKind::Stop => "正在停止核心…".to_string(),
             };
         }
@@ -304,30 +247,32 @@ impl ValidationView {
         )
     }
 
-    fn set_page(&mut self, page: ValidationPage, cx: &mut Context<Self>) {
+    fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         self.connections.update(cx, |view, cx| {
-            view.set_active(page == ValidationPage::Connections, cx)
+            view.set_active(page == Page::Connections, cx)
         });
-        self.stats.update(cx, |view, cx| {
-            view.set_active(page == ValidationPage::Stats, cx)
-        });
-        self.logs.update(cx, |view, cx| {
-            view.set_active(page == ValidationPage::Logs, cx)
-        });
+        self.stats
+            .update(cx, |view, cx| view.set_active(page == Page::Stats, cx));
+        self.logs
+            .update(cx, |view, cx| view.set_active(page == Page::Logs, cx));
         cx.notify();
     }
 }
 
-impl Render for ValidationView {
+impl Render for DesktopView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation_busy = self.closing || self.core_busy.is_some() || self.proxy_busy.is_some();
+        let operation_busy = self.closing
+            || self.core_busy.is_some()
+            || self.proxy_busy.is_some()
+            || self.configuration.read(cx).busy();
+        let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
-            ValidationPage::Editor => self.render_editor_panel(cx).into_any_element(),
-            ValidationPage::Proxies => self.render_proxy_panel(cx).into_any_element(),
-            ValidationPage::Connections => self.connections.clone().into_any_element(),
-            ValidationPage::Stats => self.stats.clone().into_any_element(),
-            ValidationPage::Logs => self.logs.clone().into_any_element(),
+            Page::Configuration => self.configuration.clone().into_any_element(),
+            Page::Proxies => self.render_proxy_panel(cx).into_any_element(),
+            Page::Connections => self.connections.clone().into_any_element(),
+            Page::Stats => self.stats.clone().into_any_element(),
+            Page::Logs => self.logs.clone().into_any_element(),
         };
 
         div()
@@ -343,12 +288,12 @@ impl Render for ValidationView {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child("Lanpath GPUI 本地验证")
+                    .child("Lanpath 实验版（GPUI）")
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("验证编辑器、键盘焦点与 overlay；不读取现有 Lanpath 数据"),
+                            .child("Windows 实验性并行版本；独立数据，不接管系统代理/TUN"),
                     ),
             )
             .child(
@@ -358,43 +303,43 @@ impl Render for ValidationView {
                     .items_center()
                     .gap_2()
                     .child(
-                        Button::new("page-editor")
-                            .label("编辑器")
-                            .selected(self.page == ValidationPage::Editor)
+                        Button::new("page-configuration")
+                            .label("配置")
+                            .selected(self.page == Page::Configuration)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(ValidationPage::Editor, cx);
+                                this.set_page(Page::Configuration, cx);
                             })),
                     )
                     .child(
                         Button::new("page-proxies")
                             .label("代理策略")
-                            .selected(self.page == ValidationPage::Proxies)
+                            .selected(self.page == Page::Proxies)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(ValidationPage::Proxies, cx);
+                                this.set_page(Page::Proxies, cx);
                             })),
                     )
                     .child(
                         Button::new("page-connections")
                             .label("连接")
-                            .selected(self.page == ValidationPage::Connections)
+                            .selected(self.page == Page::Connections)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(ValidationPage::Connections, cx);
+                                this.set_page(Page::Connections, cx);
                             })),
                     )
                     .child(
                         Button::new("page-stats")
                             .label("统计")
-                            .selected(self.page == ValidationPage::Stats)
+                            .selected(self.page == Page::Stats)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(ValidationPage::Stats, cx);
+                                this.set_page(Page::Stats, cx);
                             })),
                     )
                     .child(
                         Button::new("page-logs")
                             .label("日志")
-                            .selected(self.page == ValidationPage::Logs)
+                            .selected(self.page == Page::Logs)
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(ValidationPage::Logs, cx);
+                                this.set_page(Page::Logs, cx);
                             })),
                     ),
             )
@@ -406,9 +351,12 @@ impl Render for ValidationView {
                     .gap_2()
                     .child(
                         Button::new("core-start")
-                            .label("启动隔离核心")
+                            .label("启动实验核心")
                             .disabled(
-                                operation_busy || self.core_running || !self.core.is_configured(),
+                                operation_busy
+                                    || self.core_running
+                                    || !self.core.is_configured()
+                                    || !self.configuration.read(cx).ready_for_start(),
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.run_core_operation(CoreOperationKind::Start, cx);
@@ -425,34 +373,38 @@ impl Render for ValidationView {
             )
             .child(
                 div()
+                    .id("core-status")
+                    .role(Role::Status)
+                    .aria_label(core_status.clone())
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(self.core_status()),
+                    .child(core_status),
             )
             .child(content)
     }
 }
 
 pub fn run() {
+    let core = Arc::new(DesktopRuntime::from_env());
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
-        .run(|cx| {
+        .run(move |cx| {
             gpui_kit::init(cx);
-            let core = Arc::new(CoreValidationService::from_env());
+            config_view::init(cx);
             log_capture::install(core.logs().buffer().clone())
-                .expect("failed to initialize validation log capture");
-            tracing::info!("GPUI validation application initialized");
+                .expect("failed to initialize experimental log capture");
+            tracing::info!("GPUI experimental desktop initialized");
             gpui_kit::open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {
-                        title: Some("Lanpath GPUI 本地验证".into()),
+                        title: Some("Lanpath 实验版（GPUI）".into()),
                         ..Default::default()
                     }),
                     ..Default::default()
                 },
                 cx,
-                |window, cx| cx.new(|cx| ValidationView::new(core, window, cx)),
+                |window, cx| cx.new(|cx| DesktopView::new(core, window, cx)),
             )
-            .expect("failed to open GPUI validation window");
+            .expect("failed to open experimental desktop window");
         });
 }

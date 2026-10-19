@@ -11,12 +11,10 @@ use gpui_kit::{
 };
 use lanpath_client::stats::TodaySummary;
 
-use crate::{
-    core_validation::CoreValidationService, observation::StatsKind, stats_list::StatsListDelegate,
-};
+use crate::{observation::StatsKind, runtime::DesktopRuntime, stats_list::StatsListDelegate};
 
 pub(crate) struct StatsView {
-    core: Arc<CoreValidationService>,
+    core: Arc<DesktopRuntime>,
     list: Entity<ListState<StatsListDelegate>>,
     summary: Option<TodaySummary>,
     error: Option<String>,
@@ -31,7 +29,7 @@ pub(crate) struct StatsView {
 
 impl StatsView {
     pub(crate) fn new(
-        core: Arc<CoreValidationService>,
+        core: Arc<DesktopRuntime>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -110,8 +108,10 @@ impl StatsView {
         self.request_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    core.block_on(core.observations().stats(kind))
-                        .and_then(|result| result)
+                    core.observations().and_then(|observations| {
+                        core.block_on(observations.stats(kind))
+                            .and_then(|result| result)
+                    })
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
