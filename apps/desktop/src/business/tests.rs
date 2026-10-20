@@ -123,6 +123,8 @@ async fn selected_subscription_and_linked_profile_generate_safe_runtime_config()
         reopened.active_subscription_id().unwrap(),
         Some(subscription.id)
     );
+    reopened.set_rule_mode("global").unwrap();
+    assert_eq!(reopened.rule_mode().unwrap(), "global");
     let generated = reopened.build_config(false).await.unwrap();
     assert_eq!(generated.pointer("/log/level"), Some(&json!("debug")));
     assert_eq!(
@@ -136,6 +138,10 @@ async fn selected_subscription_and_linked_profile_generate_safe_runtime_config()
     assert_eq!(
         generated.pointer("/experimental/clash_api/external_controller"),
         Some(&json!("127.0.0.1:19090"))
+    );
+    assert_eq!(
+        generated.pointer("/experimental/clash_api/default_mode"),
+        Some(&json!("global"))
     );
     assert_eq!(
         generated.pointer("/experimental/cache_file/path"),
@@ -312,6 +318,11 @@ fn stale_refresh_result_cannot_restore_an_edited_subscription() {
 #[tokio::test]
 #[ignore = "requires LANPATH_TEST_SING_BOX pointing to a real sing-box executable"]
 async fn generated_subscription_pipeline_starts_real_core() {
+    use lanpath_client::{
+        clash_get_proxies, clash_select_proxy, clash_test_delay, clash_test_group,
+        core_config::{push_clash_mode, wait_clash_api_ready},
+        persist_group_selection, replay_group_selections,
+    };
     use lanpath_engine::{CoreManager, SingBoxProcessManager};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -328,7 +339,7 @@ async fn generated_subscription_pipeline_starts_real_core() {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let body = r#"{"outbounds":[{"type":"shadowsocks","tag":"fixture-node","server":"127.0.0.1","server_port":8388,"method":"aes-128-gcm","password":"fixture"}]}"#;
+    let body = r#"{"outbounds":[{"type":"shadowsocks","tag":"fixture-node-a","server":"127.0.0.1","server_port":8388,"method":"aes-128-gcm","password":"fixture"},{"type":"shadowsocks","tag":"fixture-node-b","server":"127.0.0.1","server_port":8389,"method":"aes-128-gcm","password":"fixture"}]}"#;
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -349,12 +360,17 @@ async fn generated_subscription_pipeline_starts_real_core() {
         .await
         .unwrap();
     server.await.unwrap();
-    assert_eq!(subscription.node_count, 1);
+    assert_eq!(subscription.node_count, 2);
     service
         .set_active_subscription(Some(subscription.id))
         .unwrap();
+    service.set_rule_mode("global").unwrap();
 
     let generated = service.build_config(false).await.unwrap();
+    assert_eq!(
+        generated.pointer("/experimental/clash_api/default_mode"),
+        Some(&json!("global"))
+    );
     service
         .validator()
         .validate_value(&generated)
@@ -362,7 +378,70 @@ async fn generated_subscription_pipeline_starts_real_core() {
         .unwrap();
     let manager = SingBoxProcessManager::new(&binary, &root_path).unwrap();
     manager.start(&generated).await.unwrap();
+    wait_clash_api_ready(19090, "", std::time::Duration::from_secs(15))
+        .await
+        .unwrap();
     assert!(manager.is_running().await);
+    let list = clash_get_proxies(19090, "").await.unwrap();
+    let group = list
+        .groups
+        .iter()
+        .find(|group| group.name == "proxy")
+        .unwrap();
+    assert_eq!(
+        group.members,
+        vec![
+            "auto".to_string(),
+            "fixture-node-a".to_string(),
+            "fixture-node-b".to_string()
+        ]
+    );
+    clash_select_proxy(19090, "", "proxy", "fixture-node-b")
+        .await
+        .unwrap();
+    persist_group_selection(&root_path, "proxy", "fixture-node-b").unwrap();
+    push_clash_mode(19090, "", "direct").await.unwrap();
+
+    let delay = clash_test_delay(
+        19090,
+        "",
+        "fixture-node-a",
+        Some("http://127.0.0.1:1/unreachable"),
+        1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(delay, None);
+    let group_delays = clash_test_group(19090, "", "proxy").await.unwrap();
+    assert_eq!(
+        group_delays
+            .iter()
+            .map(|result| result.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["auto", "fixture-node-a", "fixture-node-b"]
+    );
+    assert!(
+        group_delays
+            .iter()
+            .filter(|result| result.name.starts_with("fixture-node"))
+            .all(|result| result.delay_ms.is_none())
+    );
+
+    manager.stop().await.unwrap();
+    manager.start(&generated).await.unwrap();
+    wait_clash_api_ready(19090, "", std::time::Duration::from_secs(15))
+        .await
+        .unwrap();
+    replay_group_selections(19090, "", &root_path).await;
+    let restored = clash_get_proxies(19090, "").await.unwrap();
+    assert_eq!(
+        restored
+            .groups
+            .iter()
+            .find(|group| group.name == "proxy")
+            .map(|group| group.now.as_str()),
+        Some("fixture-node-b")
+    );
     manager.stop().await.unwrap();
     assert!(!manager.is_running().await);
 }

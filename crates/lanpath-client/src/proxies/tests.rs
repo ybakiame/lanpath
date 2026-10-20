@@ -245,6 +245,57 @@ async fn clash_test_delay_returns_none_on_non_2xx() {
 }
 
 #[tokio::test]
+async fn clash_test_group_resolves_members_and_preserves_result_order() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route(
+            "/proxies",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({
+                    "proxies": {
+                        "Proxy": {
+                            "name": "Proxy",
+                            "type": "Selector",
+                            "now": "Node2",
+                            "all": ["Node2", "Node1"]
+                        },
+                        "Node1": {"name": "Node1", "type": "Vmess"},
+                        "Node2": {"name": "Node2", "type": "Trojan"}
+                    }
+                }))
+            }),
+        )
+        .route(
+            "/proxies/{name}/delay",
+            axum::routing::get(
+                |axum::extract::Path(name): axum::extract::Path<String>| async move {
+                    let delay = if name == "Node1" { 111 } else { 222 };
+                    axum::Json(serde_json::json!({ "delay": delay }))
+                },
+            ),
+        );
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let results = clash_test_group(addr.port(), "", "Proxy").await.unwrap();
+    assert_eq!(
+        results,
+        vec![
+            DelayResult {
+                name: "Node2".into(),
+                delay_ms: Some(222),
+            },
+            DelayResult {
+                name: "Node1".into(),
+                delay_ms: Some(111),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
 async fn clash_api_uses_bearer_auth_when_secret_set() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

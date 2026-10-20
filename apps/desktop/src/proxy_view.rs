@@ -1,91 +1,199 @@
-use super::*;
-use gpui_kit::component::list::List;
-use lanpath_client::proxies::ProxyList;
+mod render;
 
-impl DesktopView {
-    pub(crate) fn clear_proxies(&mut self, cx: &mut Context<Self>) {
-        self.proxy_list.update(cx, |state, cx| {
-            state.delegate_mut().set_group(None);
-            cx.notify();
-        });
-        self.proxy_load_error = None;
-        self.proxy_action_error = None;
-    }
+use std::sync::Arc;
 
-    pub(crate) fn apply_proxy_result(
-        &mut self,
-        result: Result<ProxyList, String>,
-        is_load: bool,
+use gpui_kit::component::list::{ListEvent, ListState};
+use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task, Window};
+use lanpath_client::proxies::{GroupView, ProxyList};
+
+use crate::{
+    proxy_list::ProxyListDelegate,
+    proxy_service::{ModeChange, ProxyService},
+    runtime::DesktopRuntime,
+};
+
+#[derive(Clone, Copy)]
+enum Operation {
+    Refresh,
+    Select,
+    TestNode,
+    TestGroup,
+    SetMode,
+}
+
+pub(crate) struct ProxyConfigurationChanged;
+
+pub(crate) struct ProxyView {
+    core: Arc<DesktopRuntime>,
+    service: ProxyService,
+    list: Entity<ListState<ProxyListDelegate>>,
+    groups: Vec<GroupView>,
+    active_group: Option<String>,
+    mode: String,
+    running: bool,
+    closing: bool,
+    loaded: bool,
+    generation: u64,
+    operation: Option<Operation>,
+    load_error: Option<String>,
+    action_error: Option<String>,
+    notice: Option<String>,
+    task: Option<Task<()>>,
+    _list_subscription: Subscription,
+}
+
+impl EventEmitter<ProxyConfigurationChanged> for ProxyView {}
+
+impl ProxyView {
+    pub(crate) fn new(
+        core: Arc<DesktopRuntime>,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        match result {
-            Ok(list) => {
-                let group = list.groups.into_iter().find(|group| group.name == "proxy");
-                self.proxy_list.update(cx, |state, cx| {
-                    state.delegate_mut().set_group(group);
-                    cx.notify();
-                });
-                if is_load {
-                    self.proxy_load_error = None;
-                } else {
-                    self.proxy_action_error = None;
+    ) -> Self {
+        let service = ProxyService::new(core.api_port(), core.business().ok().cloned());
+        let mode = service.rule_mode().unwrap_or_else(|_| "rule".into());
+        let list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
+        let subscription =
+            cx.subscribe_in(&list, window, |this, state, event: &ListEvent, _, cx| {
+                if let ListEvent::Confirm(ix) = event {
+                    let Some(name) = state.read(cx).delegate().member(ix.row) else {
+                        return;
+                    };
+                    this.select_proxy(name, cx);
                 }
-            }
-            Err(error) => {
-                if is_load {
-                    self.proxy_load_error = Some(error);
-                } else {
-                    self.proxy_action_error = Some(error);
-                    self.proxy_list.update(cx, |state, cx| {
-                        state.delegate_mut().reset_selection();
-                        cx.notify();
-                    });
-                }
-            }
+            });
+        Self {
+            core,
+            service,
+            list,
+            groups: Vec::new(),
+            active_group: None,
+            mode,
+            running: false,
+            closing: false,
+            loaded: false,
+            generation: 0,
+            operation: None,
+            load_error: None,
+            action_error: None,
+            notice: None,
+            task: None,
+            _list_subscription: subscription,
         }
     }
 
-    fn refresh_proxies(&mut self, cx: &mut Context<Self>) {
-        if self.closing
-            || !self.core_running
-            || self.core_busy.is_some()
-            || self.proxy_busy.is_some()
-        {
-            return;
-        }
-        self.proxy_busy = Some(ProxyOperation::Refresh);
-        self.proxy_load_error = None;
-        self.proxy_task = None;
-        let service = self.core.clone();
-        let proxies = self.proxies.clone();
-        let task = cx.spawn(async move |this, cx| {
-            let result = service
-                .block_on(async { proxies.list().await })
-                .and_then(|result| result);
-            let _ = this.update(cx, |this, cx| {
-                this.apply_proxy_result(result, true, cx);
-                this.proxy_busy = None;
-                cx.notify();
-            });
-        });
-        self.proxy_task = Some(task);
+    pub(crate) fn busy(&self) -> bool {
+        self.operation.is_some()
+    }
+
+    pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        self.closing = closing;
         cx.notify();
     }
 
-    pub(crate) fn select_proxy(&mut self, name: String, cx: &mut Context<Self>) {
-        if self.closing
-            || !self.core_running
-            || self.core_busy.is_some()
-            || self.proxy_busy.is_some()
-        {
-            self.proxy_list.update(cx, |state, cx| {
-                state.delegate_mut().reset_selection();
+    pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self.running = running;
+        self.loaded = false;
+        self.load_error = None;
+        self.action_error = None;
+        self.notice = None;
+        self.groups.clear();
+        self.active_group = None;
+        self.list.update(cx, |list, cx| {
+            list.delegate_mut().clear();
+            cx.notify();
+        });
+        if running {
+            self.refresh(cx);
+        }
+        cx.notify();
+    }
+
+    fn apply_list(&mut self, list: ProxyList, cx: &mut Context<Self>) {
+        let active_group = self
+            .active_group
+            .as_ref()
+            .filter(|name| list.groups.iter().any(|group| &group.name == *name))
+            .cloned()
+            .or_else(|| {
+                list.groups
+                    .iter()
+                    .find(|group| group.name == "proxy")
+                    .or_else(|| list.groups.first())
+                    .map(|group| group.name.clone())
+            });
+        let selected = active_group
+            .as_ref()
+            .and_then(|name| list.groups.iter().find(|group| &group.name == name))
+            .cloned();
+        self.active_group = active_group;
+        self.groups = list.groups;
+        self.list.update(cx, |state, cx| {
+            state.delegate_mut().set_nodes(list.nodes);
+            state.delegate_mut().set_group(selected);
+            cx.notify();
+        });
+        self.loaded = true;
+        self.load_error = None;
+    }
+
+    fn select_group(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.operation.is_some() {
+            return;
+        }
+        let group = self.groups.iter().find(|group| group.name == name).cloned();
+        if group.is_none() {
+            return;
+        }
+        self.active_group = Some(name);
+        self.action_error = None;
+        self.notice = None;
+        self.list.update(cx, |state, cx| {
+            state.delegate_mut().set_group(group);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        if !self.running || self.closing || self.operation.is_some() {
+            return;
+        }
+        self.operation = Some(Operation::Refresh);
+        self.load_error = None;
+        self.task = None;
+        let generation = self.generation;
+        let core = self.core.clone();
+        let service = self.service.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    core.block_on(async { service.list().await })
+                        .and_then(|result| result)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.operation = None;
+                if generation == this.generation && this.running {
+                    match result {
+                        Ok(list) => this.apply_list(list, cx),
+                        Err(error) => this.load_error = Some(error),
+                    }
+                }
                 cx.notify();
             });
+        }));
+        cx.notify();
+    }
+
+    fn select_proxy(&mut self, name: String, cx: &mut Context<Self>) {
+        if !self.running || self.closing || self.operation.is_some() {
+            self.reset_list_selection(cx);
             return;
         }
         let (group, is_selector) = {
-            let state = self.proxy_list.read(cx);
+            let state = self.list.read(cx);
             (
                 state.delegate().group_name(),
                 state.delegate().is_selector(),
@@ -94,77 +202,210 @@ impl DesktopView {
         let Some(group) = group.filter(|_| is_selector) else {
             return;
         };
-
-        self.proxy_busy = Some(ProxyOperation::Select(name.clone()));
-        self.proxy_action_error = None;
-        self.proxy_task = None;
-        let service = self.core.clone();
-        let proxies = self.proxies.clone();
-        let task = cx.spawn(async move |this, cx| {
-            let result = service
-                .block_on(async move { proxies.select(&group, &name).await })
-                .and_then(|result| result);
+        self.operation = Some(Operation::Select);
+        self.action_error = None;
+        self.notice = None;
+        let generation = self.generation;
+        let core = self.core.clone();
+        let service = self.service.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let (name, result) = cx
+                .background_spawn(async move {
+                    let result = core
+                        .block_on(async { service.select(&group, &name).await })
+                        .and_then(|result| result);
+                    (name, result)
+                })
+                .await;
             let _ = this.update(cx, |this, cx| {
-                this.apply_proxy_result(result, false, cx);
-                this.proxy_busy = None;
+                this.operation = None;
+                if generation == this.generation && this.running {
+                    match result {
+                        Ok(list) => {
+                            this.apply_list(list, cx);
+                            this.notice = Some(format!("已切换并保存：{name}"));
+                        }
+                        Err(error) => {
+                            this.action_error = Some(error);
+                            this.reset_list_selection(cx);
+                        }
+                    }
+                }
                 cx.notify();
             });
-        });
-        self.proxy_task = Some(task);
+        }));
         cx.notify();
     }
 
-    fn proxy_status(&self) -> String {
-        if let Some(operation) = &self.proxy_busy {
-            return match operation {
-                ProxyOperation::Refresh => "正在读取代理策略…".to_string(),
-                ProxyOperation::Select(name) => format!("正在切换至 {name}…"),
-            };
+    fn test_selected(&mut self, cx: &mut Context<Self>) {
+        if !self.running || self.closing || self.operation.is_some() {
+            return;
         }
-        if let Some(error) = &self.proxy_load_error {
-            return format!("代理正在运行，但策略读取失败：{error}");
-        }
-        if let Some(error) = &self.proxy_action_error {
-            return format!("操作失败：{error}");
-        }
-        if self.core_running {
-            "点击节点切换出口；仅当前核心会话生效".to_string()
-        } else {
-            "启动代理后可用".to_string()
-        }
+        let Some(name) = self.list.read(cx).delegate().selected_member() else {
+            return;
+        };
+        self.operation = Some(Operation::TestNode);
+        self.action_error = None;
+        self.notice = None;
+        self.list.update(cx, |state, cx| {
+            state.delegate_mut().set_testing(Some(name.clone()));
+            cx.notify();
+        });
+        let generation = self.generation;
+        let core = self.core.clone();
+        let service = self.service.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let (name, result) = cx
+                .background_spawn(async move {
+                    let result = core
+                        .block_on(async { service.test_delay(&name).await })
+                        .and_then(|result| result);
+                    (name, result)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.operation = None;
+                this.list.update(cx, |state, cx| {
+                    state.delegate_mut().set_testing(None);
+                    if generation == this.generation
+                        && this.running
+                        && let Ok(delay) = result.as_ref()
+                    {
+                        state.delegate_mut().apply_delay(&name, *delay);
+                    }
+                    cx.notify();
+                });
+                if generation == this.generation && this.running {
+                    match result {
+                        Ok(Some(delay)) => this.notice = Some(format!("{name}：{delay}ms")),
+                        Ok(None) => this.notice = Some(format!("{name}：超时")),
+                        Err(error) => this.action_error = Some(error),
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
-    pub(crate) fn render_proxy_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation_busy = self.closing || self.core_busy.is_some() || self.proxy_busy.is_some();
-        div()
-            .flex()
-            .flex_col()
-            .w_full()
-            .flex_1()
-            .min_h_0()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .child("代理策略")
-                    .child(
-                        Button::new("proxy-refresh")
-                            .label("重新读取")
-                            .disabled(operation_busy || !self.core_running)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.refresh_proxies(cx);
-                            })),
-                    ),
+    fn test_group(&mut self, cx: &mut Context<Self>) {
+        if !self.running || self.closing || self.operation.is_some() {
+            return;
+        }
+        let Some(group) = self.list.read(cx).delegate().group_name() else {
+            return;
+        };
+        self.operation = Some(Operation::TestGroup);
+        self.action_error = None;
+        self.notice = None;
+        let generation = self.generation;
+        let core = self.core.clone();
+        let service = self.service.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let (group, result) = cx
+                .background_spawn(async move {
+                    let result = core
+                        .block_on(async { service.test_group(&group).await })
+                        .and_then(|result| result);
+                    (group, result)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.operation = None;
+                if generation == this.generation && this.running {
+                    match result {
+                        Ok(delays) => {
+                            this.list.update(cx, |state, cx| {
+                                state.delegate_mut().apply_delays(&delays);
+                                cx.notify();
+                            });
+                            let responsive = delays
+                                .iter()
+                                .filter(|result| result.delay_ms.is_some())
+                                .count();
+                            this.notice = Some(format!(
+                                "{group} 测速完成：{responsive}/{} 个节点响应",
+                                delays.len()
+                            ));
+                        }
+                        Err(error) => this.action_error = Some(error),
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn set_mode(&mut self, mode: &'static str, cx: &mut Context<Self>) {
+        if self.closing || self.operation.is_some() || self.mode == mode {
+            return;
+        }
+        self.operation = Some(Operation::SetMode);
+        self.action_error = None;
+        self.notice = None;
+        let running = self.running;
+        let service = self.service.clone();
+        let core = self.core.clone();
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    core.block_on(async { service.set_rule_mode(mode, running).await })
+                        .and_then(|result| result)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.operation = None;
+                match result {
+                    Ok(change) => this.apply_mode_change(change, cx),
+                    Err(error) => this.action_error = Some(error),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn apply_mode_change(&mut self, change: ModeChange, cx: &mut Context<Self>) {
+        self.mode = change.mode;
+        self.notice = Some(match change.runtime_warning {
+            Some(warning) => format!("模式已保存；运行核心同步失败：{warning}"),
+            None if self.running => "模式已保存并同步到运行核心".into(),
+            None => "模式已保存，将在下次启动时生效".into(),
+        });
+        cx.emit(ProxyConfigurationChanged);
+    }
+
+    fn reset_list_selection(&mut self, cx: &mut Context<Self>) {
+        self.list.update(cx, |state, cx| {
+            state.delegate_mut().reset_selection();
+            cx.notify();
+        });
+    }
+
+    fn status(&self) -> String {
+        if let Some(operation) = self.operation {
+            return match operation {
+                Operation::Refresh => "正在读取代理策略…".into(),
+                Operation::Select => "正在切换并保存节点…".into(),
+                Operation::TestNode => "正在测试所选节点…".into(),
+                Operation::TestGroup => "正在并行测试当前策略组…".into(),
+                Operation::SetMode => "正在保存并同步路由模式…".into(),
+            };
+        }
+        if !self.running {
+            return "模式可离线保存；启动隔离核心后可读取策略组、选择节点和测速".into();
+        }
+        if let Some(error) = &self.load_error {
+            return format!("策略读取失败，保留最后成功快照：{error}");
+        }
+        if self.loaded {
+            format!(
+                "{} 个策略组；节点选择会持久化并在启动时恢复",
+                self.groups.len()
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.proxy_status()),
-            )
-            .child(List::new(&self.proxy_list).size_full())
+        } else {
+            "正在读取代理策略…".into()
+        }
     }
 }

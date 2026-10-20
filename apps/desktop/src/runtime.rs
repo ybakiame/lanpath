@@ -1,5 +1,9 @@
-use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc};
+use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
+use lanpath_client::{
+    core_config::{push_clash_mode, wait_clash_api_ready},
+    replay_group_selections,
+};
 use lanpath_engine::{CoreManager, SingBoxProcessManager};
 use tokio::runtime::{Builder, Runtime};
 
@@ -166,6 +170,16 @@ impl DesktopRuntime {
                 .await
                 .map_err(|error| error.to_string())?;
             let result = async {
+                wait_clash_api_ready(CLASH_API_PORT, "", Duration::from_secs(15))
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mode = business.rule_mode().map_err(|error| error.to_string())?;
+                push_clash_mode(CLASH_API_PORT, "", &mode)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                // Stale persisted members must not prevent startup; valid groups are
+                // restored independently and the live snapshot remains authoritative.
+                replay_group_selections(CLASH_API_PORT, "", business.data_dir()).await;
                 observations.start(CLASH_API_PORT).await?;
                 self.logs.start(CLASH_API_PORT).await
             }

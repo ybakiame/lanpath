@@ -63,7 +63,10 @@ impl BusinessService {
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
         let mut value = compose_singbox_config(&profile_config, self.bindings.mixed_port(), None)?;
         inject_local_override_warn_only(&self.root, &mut value);
-        apply_panel_features(&mut value, &safe_features(self, &slices));
+        apply_panel_features(
+            &mut value,
+            &safe_features(self, &slices, config.normalized_rule_mode()),
+        );
         remove_dashboard_download(&mut value);
 
         let available = if download_rule_sets {
@@ -97,7 +100,11 @@ fn load_slices(root: &std::path::Path) -> ConfigSlices {
     }
 }
 
-fn safe_features(service: &BusinessService, slices: &ConfigSlices) -> PanelFeatures {
+fn safe_features(
+    service: &BusinessService,
+    slices: &ConfigSlices,
+    rule_mode: &str,
+) -> PanelFeatures {
     PanelFeatures {
         tun_enabled: false,
         tun_stack: "mixed".into(),
@@ -106,7 +113,7 @@ fn safe_features(service: &BusinessService, slices: &ConfigSlices) -> PanelFeatu
         clash_api_port: service.bindings.api_port(),
         clash_api_secret: String::new(),
         clash_api_ui: "zashboard".into(),
-        rule_mode: "rule".into(),
+        rule_mode: rule_mode.to_string(),
         ipv6_enabled: false,
         dns_fakeip_enabled: false,
         data_dir: service.root.join("cache").to_string_lossy().into_owned(),

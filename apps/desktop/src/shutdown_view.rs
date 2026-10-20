@@ -36,6 +36,7 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.profiles
             .update(cx, |view, cx| view.set_locked(true, cx));
+        self.proxy.update(cx, |view, cx| view.set_closing(true, cx));
         self.connections
             .update(cx, |view, cx| view.set_running(false, cx));
         self.stats
@@ -47,7 +48,7 @@ impl DesktopView {
             loop {
                 let Ok(busy) = this.update(cx, |this, cx| {
                     this.core_busy.is_some()
-                        || this.proxy_busy.is_some()
+                        || this.proxy.read(cx).busy()
                         || this.configuration.read(cx).busy()
                         || this.subscriptions.read(cx).busy()
                         || this.profiles.read(cx).busy()
@@ -76,6 +77,8 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.proxy
+                            .update(cx, |view, cx| view.set_closing(false, cx));
                         this.connections
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
                         this.stats
@@ -108,6 +111,8 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.proxy
+                            .update(cx, |view, cx| view.set_closing(false, cx));
                         this.connections
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
                         this.stats

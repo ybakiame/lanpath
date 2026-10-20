@@ -1,7 +1,7 @@
 //! Proxy group / node views and Clash API operations.
 //!
-//! Provides [`clash_get_proxies`], [`clash_select_proxy`], [`clash_test_delay`] and
-//! [`replay_group_selections`] for runtime group selection persistence.
+//! Provides [`clash_get_proxies`], [`clash_select_proxy`], [`clash_test_delay`],
+//! [`clash_test_group`] and [`replay_group_selections`] for runtime group selection persistence.
 
 use lanpath_common::{LanpathError, LanpathResult};
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,14 @@ pub struct ProxyList {
     pub groups: Vec<GroupView>,
     /// All individual nodes (excluding built-in pseudo-nodes such as DIRECT / REJECT).
     pub nodes: Vec<NodeView>,
+}
+
+/// Delay-test result for one group member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelayResult {
+    pub name: String,
+    /// `None` means timeout, probe failure, or a non-2xx core response.
+    pub delay_ms: Option<u16>,
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +325,42 @@ pub async fn clash_test_delay(
         .and_then(|d| u16::try_from(d).ok());
 
     Ok(delay)
+}
+
+/// Test every member of a proxy group concurrently, with at most eight probes in flight.
+pub async fn clash_test_group(
+    port: u16,
+    secret: &str,
+    group: &str,
+) -> LanpathResult<Vec<DelayResult>> {
+    let list = clash_get_proxies(port, secret).await?;
+    let members = list
+        .groups
+        .into_iter()
+        .find(|candidate| candidate.name == group)
+        .ok_or_else(|| LanpathError::Client(format!("group '{group}' not found")))?
+        .members;
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+    let mut handles = Vec::with_capacity(members.len());
+    for name in members {
+        let semaphore = std::sync::Arc::clone(&semaphore);
+        let secret = secret.to_string();
+        handles.push(tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.ok()?;
+            let delay_ms = clash_test_delay(port, &secret, &name, None, 5000)
+                .await
+                .ok()
+                .flatten();
+            Some(DelayResult { name, delay_ms })
+        }));
+    }
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        if let Ok(Some(result)) = handle.await {
+            results.push(result);
+        }
+    }
+    Ok(results)
 }
 
 // ---------------------------------------------------------------------------

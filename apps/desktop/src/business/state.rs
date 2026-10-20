@@ -48,6 +48,15 @@ impl BusinessService {
     pub(crate) fn active_subscription_id(&self) -> LanpathResult<Option<uuid::Uuid>> {
         Ok(self.client_config()?.active_subscription_id)
     }
+
+    pub(crate) fn rule_mode(&self) -> LanpathResult<String> {
+        Ok(self.client_config()?.normalized_rule_mode().to_string())
+    }
+
+    pub(crate) fn set_rule_mode(&self, mode: &str) -> LanpathResult<()> {
+        self.client_config()?;
+        lanpath_client::set_rule_mode_persist(&self.root, mode).map_err(LanpathError::Client)
+    }
 }
 
 fn normalize(config: &mut ClientConfig, service: &BusinessService) {
@@ -66,7 +75,6 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) {
     config.github_proxy_prefix.clear();
     config.request_proxy_mode = RequestProxyMode::None;
     config.request_proxy_url.clear();
-    config.rule_mode = "rule".into();
 }
 
 fn persist(path: &Path, config: &ClientConfig) -> LanpathResult<()> {
