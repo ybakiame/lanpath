@@ -18,7 +18,8 @@ use std::collections::HashMap;
 
 #[cfg(feature = "mitm")]
 use lanpath_mitm::{RewriteRule, ScriptRule};
-use lanpath_script::{ScriptDialect, TaskScript};
+pub use lanpath_script::ScriptDialect;
+use lanpath_script::TaskScript;
 use serde::{Deserialize, Serialize};
 
 use crate::import::{ArgSpec, ConfigMeta};
@@ -26,6 +27,9 @@ use crate::import::{ArgSpec, ConfigMeta};
 mod cache;
 mod manager;
 mod notify;
+mod service;
+#[cfg(feature = "scripts")]
+mod task_session;
 
 #[cfg(all(test, feature = "mitm"))]
 mod tests;
@@ -33,6 +37,9 @@ mod tests;
 pub use cache::*;
 pub use manager::*;
 pub use notify::*;
+pub use service::*;
+#[cfg(feature = "scripts")]
+pub use task_session::*;
 
 /// A single remote subscription resource.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

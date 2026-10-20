@@ -1,0 +1,377 @@
+mod editing;
+mod inputs;
+mod operations;
+mod render;
+mod render_import;
+mod render_remotes;
+mod render_tasks;
+
+use std::{sync::Arc, time::Duration};
+
+use crate::{business::BusinessService, runtime::DesktopRuntime, scripts_view::inputs::FormInputs};
+use gpui_kit::{AppContext as _, Context, Subscription, Task, Window};
+use lanpath_client::{
+    ArgSpec,
+    remote::{
+        FetchReport, ImportSummary, RemoteKind, RemoteResource, RemoteTaskView, ScriptDialect,
+    },
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Section {
+    Remotes,
+    Tasks,
+    Import,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Operation {
+    Save,
+    Delete,
+    Toggle,
+    Detect,
+    Fetch,
+    Import,
+    LoadTasks,
+    RunTask,
+}
+
+pub(crate) struct ScriptsView {
+    core: Arc<DesktopRuntime>,
+    service: Option<BusinessService>,
+    resources: Vec<RemoteResource>,
+    selected: Option<String>,
+    creating: bool,
+    kind: RemoteKind,
+    dialect: ScriptDialect,
+    import_dialect: ScriptDialect,
+    arguments: Vec<ArgSpec>,
+    icon: Option<String>,
+    enabled: bool,
+    section: Section,
+    inputs: FormInputs,
+    syncing: bool,
+    resource_dirty: bool,
+    import_dirty: bool,
+    locked: bool,
+    running: bool,
+    active: bool,
+    operation: Option<Operation>,
+    error: Option<String>,
+    notice: Option<String>,
+    fetch_report: Option<FetchReport>,
+    import_summary: Option<ImportSummary>,
+    tasks: Vec<RemoteTaskView>,
+    task_output: Option<(String, String)>,
+    generation: u64,
+    task: Option<Task<()>>,
+    _poll_task: Task<()>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl ScriptsView {
+    pub(crate) fn new(
+        core: Arc<DesktopRuntime>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let service = core.business().ok().cloned();
+        let resources = service
+            .as_ref()
+            .and_then(|service| service.remote_resources().ok())
+            .unwrap_or_default();
+        let load_error = if service.is_none() {
+            Some("实验数据目录不可用".to_string())
+        } else {
+            None
+        };
+        let (inputs, subscriptions) = FormInputs::new(window, cx);
+        let poll_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(5)).await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.active && this.running && this.operation.is_none() {
+                            this.load_tasks(cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let selected = resources.first().map(|resource| resource.name.clone());
+        let mut view = Self {
+            core,
+            service,
+            resources,
+            selected,
+            creating: false,
+            import_dialect: ScriptDialect::Loon,
+            kind: RemoteKind::Script,
+            dialect: ScriptDialect::Surge,
+            arguments: Vec::new(),
+            icon: None,
+            enabled: true,
+            section: Section::Remotes,
+            inputs,
+            syncing: false,
+            resource_dirty: false,
+            import_dirty: false,
+            locked: false,
+            running: false,
+            active: false,
+            operation: None,
+            error: load_error,
+            notice: None,
+            fetch_report: None,
+            import_summary: None,
+            tasks: Vec::new(),
+            task_output: None,
+            generation: 0,
+            task: None,
+            _poll_task: poll_task,
+            _subscriptions: subscriptions,
+        };
+        if view.selected.is_none() && view.service.is_some() {
+            view.creating = true;
+        }
+        view.sync_resource(window, cx);
+        view
+    }
+
+    pub(crate) fn dirty(&self) -> bool {
+        self.resource_dirty || self.import_dirty
+    }
+
+    pub(crate) fn busy(&self) -> bool {
+        self.operation.is_some()
+    }
+
+    pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        self.locked = locked;
+        self.inputs
+            .set_locked(locked, self.selected.is_some() && !self.creating, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        self.generation = self.generation.wrapping_add(1);
+        self.running = running;
+        self.tasks.clear();
+        self.task_output = None;
+        if running {
+            self.load_tasks(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        self.active = active;
+        if active && self.running && self.operation.is_none() {
+            self.load_tasks(cx);
+        }
+        cx.notify();
+    }
+
+    fn set_section(&mut self, section: Section, cx: &mut Context<Self>) {
+        self.section = section;
+        if section == Section::Tasks && self.running && self.operation.is_none() {
+            self.load_tasks(cx);
+        }
+        cx.notify();
+    }
+
+    fn selected_resource(&self) -> Option<&RemoteResource> {
+        let selected = self.selected.as_deref()?;
+        self.resources
+            .iter()
+            .find(|resource| resource.name == selected)
+    }
+
+    fn sync_resource(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selected_resource().cloned();
+        self.syncing = true;
+        set_input(
+            &self.inputs.name,
+            selected
+                .as_ref()
+                .map(|resource| resource.name.as_str())
+                .unwrap_or(""),
+            window,
+            cx,
+        );
+        set_input(
+            &self.inputs.description,
+            selected
+                .as_ref()
+                .and_then(|resource| resource.description.as_deref())
+                .unwrap_or(""),
+            window,
+            cx,
+        );
+        set_input(
+            &self.inputs.url,
+            selected
+                .as_ref()
+                .map(|resource| resource.url.as_str())
+                .unwrap_or(""),
+            window,
+            cx,
+        );
+        set_input(
+            &self.inputs.interval,
+            &selected
+                .as_ref()
+                .map(|resource| resource.update_interval_secs)
+                .unwrap_or(86_400)
+                .to_string(),
+            window,
+            cx,
+        );
+        let argument_values = selected
+            .as_ref()
+            .map(|resource| {
+                resource
+                    .argument_values
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        self.inputs
+            .arguments
+            .update(cx, |state, cx| state.set_value(argument_values, window, cx));
+        self.kind = selected
+            .as_ref()
+            .map(|resource| resource.kind)
+            .unwrap_or(RemoteKind::Script);
+        self.dialect = selected
+            .as_ref()
+            .map(|resource| normalize_dialect(resource.dialect))
+            .unwrap_or(ScriptDialect::Surge);
+        self.arguments = selected
+            .as_ref()
+            .map(|resource| resource.arguments.clone())
+            .unwrap_or_default();
+        self.icon = selected.as_ref().and_then(|resource| resource.icon.clone());
+        self.enabled = selected
+            .as_ref()
+            .map(|resource| resource.enabled)
+            .unwrap_or(true);
+        self.syncing = false;
+        self.resource_dirty = false;
+        self.inputs
+            .set_locked(self.locked, self.selected.is_some() && !self.creating, cx);
+        cx.notify();
+    }
+
+    fn reload_resources(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let result = self
+            .service
+            .as_ref()
+            .ok_or_else(|| "实验数据目录不可用".to_string())
+            .and_then(|service| {
+                service
+                    .remote_resources()
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(resources) => {
+                self.resources = resources;
+                self.selected = self
+                    .selected
+                    .take()
+                    .filter(|name| self.resources.iter().any(|resource| &resource.name == name));
+                if self.selected.is_none() {
+                    self.selected = self.resources.first().map(|resource| resource.name.clone());
+                }
+                self.creating = self.resources.is_empty();
+                self.sync_resource(window, cx);
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error),
+        }
+        cx.notify();
+    }
+
+    fn resource_changed(&mut self, cx: &mut Context<Self>) {
+        self.resource_dirty = true;
+        self.error = None;
+        self.notice = None;
+        self.fetch_report = None;
+        cx.notify();
+    }
+
+    fn import_changed(&mut self, cx: &mut Context<Self>) {
+        self.import_dirty = !self
+            .inputs
+            .import_content
+            .read(cx)
+            .text()
+            .to_string()
+            .trim()
+            .is_empty();
+        self.error = None;
+        self.notice = None;
+        self.import_summary = None;
+        cx.notify();
+    }
+
+    fn load_tasks(&mut self, cx: &mut Context<Self>) {
+        if !self.running || self.operation.is_some() {
+            return;
+        }
+        self.operation = Some(Operation::LoadTasks);
+        let core = self.core.clone();
+        let generation = self.generation;
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { core.script_tasks() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                this.operation = None;
+                match result {
+                    Ok(tasks) => {
+                        this.tasks = tasks;
+                        if this
+                            .error
+                            .as_deref()
+                            .is_some_and(|error| error.starts_with("读取定时任务失败"))
+                        {
+                            this.error = None;
+                        }
+                    }
+                    Err(error) => {
+                        this.error = Some(format!("读取定时任务失败：{error}"));
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
+
+fn set_input(
+    input: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    value: &str,
+    window: &mut Window,
+    cx: &mut Context<ScriptsView>,
+) {
+    input.update(cx, |state, cx| {
+        state.set_value(value.to_string(), window, cx)
+    });
+}
+
+fn normalize_dialect(dialect: ScriptDialect) -> ScriptDialect {
+    match dialect {
+        ScriptDialect::QuantumultX => ScriptDialect::Loon,
+        other => other,
+    }
+}

@@ -17,6 +17,8 @@ mod proxy_service;
 mod proxy_view;
 mod rules_view;
 mod runtime;
+mod scripts_view;
+mod shell_view;
 mod shutdown_view;
 mod stats_list;
 mod stats_view;
@@ -29,19 +31,16 @@ use std::sync::Arc;
 use config_slices_view::{ConfigSlicesChanged, ConfigSlicesView};
 use config_view::{ConfigEvent, ConfigView};
 use connections_view::ConnectionsView;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, WindowExt as _, button::Button,
-};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
-    TitlebarOptions, Window, WindowOptions, div,
+    AppContext as _, Context, Entity, Subscription, Task, TitlebarOptions, Window, WindowOptions,
 };
 use logs_view::LogsView;
 use profiles_view::{ProfilesChanged, ProfilesView};
 use proxy_view::{ProxyConfigurationChanged, ProxyView};
 use rules_view::{RulesChanged, RulesView};
 use runtime::DesktopRuntime;
+use scripts_view::ScriptsView;
 use stats_view::StatsView;
 use subscriptions_view::{SubscriptionsChanged, SubscriptionsView};
 
@@ -58,6 +57,7 @@ enum Page {
     Structured,
     Rules,
     Configuration,
+    Scripts,
     Proxies,
     Connections,
     Stats,
@@ -71,6 +71,7 @@ struct DesktopView {
     profiles: Entity<ProfilesView>,
     structured: Entity<ConfigSlicesView>,
     rules: Entity<RulesView>,
+    scripts: Entity<ScriptsView>,
     core: Arc<DesktopRuntime>,
     proxy: Entity<ProxyView>,
     connections: Entity<ConnectionsView>,
@@ -96,6 +97,7 @@ impl DesktopView {
         let structured = cx.new(|cx| ConfigSlicesView::new(core.clone(), window, cx));
         let rules = cx.new(|cx| RulesView::new(core.clone(), window, cx));
         let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
+        let scripts = cx.new(|cx| ScriptsView::new(core.clone(), window, cx));
         let _business_subscriptions = vec![
             cx.subscribe_in(
                 &subscriptions,
@@ -158,6 +160,7 @@ impl DesktopView {
             structured,
             rules,
             profiles,
+            scripts,
             core,
             proxy,
             connections,
@@ -187,6 +190,7 @@ impl DesktopView {
                     || !self.configuration.read(cx).ready_for_start()
                     || self.structured.read(cx).dirty()
                     || self.rules.read(cx).dirty()
+                    || self.scripts.read(cx).dirty()
             }
             CoreOperationKind::Stop => !self.core_running,
         };
@@ -198,6 +202,7 @@ impl DesktopView {
             || self.profiles.read(cx).busy()
             || self.structured.read(cx).busy()
             || self.rules.read(cx).busy()
+            || self.scripts.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -218,6 +223,10 @@ impl DesktopView {
         self.structured
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.rules.update(cx, |view, cx| view.set_locked(true, cx));
+        self.scripts
+            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.scripts
+            .update(cx, |view, cx| view.set_running(false, cx));
         self.core_error = None;
         self.core_task = None;
         let service = self.core.clone();
@@ -249,6 +258,10 @@ impl DesktopView {
                     this.stats
                         .update(cx, |view, cx| view.set_running(children_running, cx));
                     this.logs.update(cx, |view, cx| view.refresh(cx));
+                    this.scripts.update(cx, |view, cx| {
+                        view.set_running(children_running, cx);
+                        view.set_locked(this.core_running || this.closing, cx);
+                    });
                     this.core_busy = None;
                     this.configuration.update(cx, |view, cx| {
                         view.set_locked(this.core_running || this.closing, cx);
@@ -311,173 +324,9 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_active(page == Page::Stats, cx));
         self.logs
             .update(cx, |view, cx| view.set_active(page == Page::Logs, cx));
+        self.scripts
+            .update(cx, |view, cx| view.set_active(page == Page::Scripts, cx));
         cx.notify();
-    }
-}
-
-impl Render for DesktopView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let operation_busy = self.closing
-            || self.core_busy.is_some()
-            || self.proxy.read(cx).busy()
-            || self.configuration.read(cx).busy()
-            || self.subscriptions.read(cx).busy()
-            || self.profiles.read(cx).busy()
-            || self.structured.read(cx).busy()
-            || self.rules.read(cx).busy();
-        let core_status: gpui_kit::SharedString = self.core_status().into();
-        let content = match self.page {
-            Page::Subscriptions => self.subscriptions.clone().into_any_element(),
-            Page::Profiles => self.profiles.clone().into_any_element(),
-            Page::Structured => self.structured.clone().into_any_element(),
-            Page::Rules => self.rules.clone().into_any_element(),
-            Page::Configuration => self.configuration.clone().into_any_element(),
-            Page::Proxies => self.proxy.clone().into_any_element(),
-            Page::Connections => self.connections.clone().into_any_element(),
-            Page::Stats => self.stats.clone().into_any_element(),
-            Page::Logs => self.logs.clone().into_any_element(),
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .p_4()
-            .gap_3()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child("Lanpath 实验版（GPUI）")
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Windows 实验性并行版本；独立数据，不接管系统代理/TUN"),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("page-subscriptions")
-                            .label("订阅")
-                            .selected(self.page == Page::Subscriptions)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Subscriptions, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-profiles")
-                            .label("覆写")
-                            .selected(self.page == Page::Profiles)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Profiles, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-structured")
-                            .label("结构化配置")
-                            .selected(self.page == Page::Structured)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Structured, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-rules")
-                            .label("规则")
-                            .selected(self.page == Page::Rules)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Rules, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-configuration")
-                            .label("预览")
-                            .selected(self.page == Page::Configuration)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Configuration, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-proxies")
-                            .label("代理策略")
-                            .selected(self.page == Page::Proxies)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Proxies, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-connections")
-                            .label("连接")
-                            .selected(self.page == Page::Connections)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Connections, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-stats")
-                            .label("统计")
-                            .selected(self.page == Page::Stats)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Stats, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-logs")
-                            .label("日志")
-                            .selected(self.page == Page::Logs)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Logs, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("core-start")
-                            .label("启动实验核心")
-                            .disabled(
-                                operation_busy
-                                    || self.core_running
-                                    || !self.core.is_configured()
-                                    || !self.configuration.read(cx).ready_for_start()
-                                    || self.structured.read(cx).dirty()
-                                    || self.rules.read(cx).dirty(),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_core_operation(CoreOperationKind::Start, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("core-stop")
-                            .label("停止核心")
-                            .disabled(operation_busy || !self.core_running)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_core_operation(CoreOperationKind::Stop, window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .id("core-status")
-                    .role(Role::Status)
-                    .aria_label(core_status.clone())
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(core_status),
-            )
-            .child(content)
     }
 }
 

@@ -2,6 +2,7 @@ use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duratio
 
 use lanpath_client::{
     core_config::{push_clash_mode, wait_clash_api_ready},
+    remote::{RemoteTaskView, ScriptTaskSession, TracingNotifier},
     replay_group_selections,
 };
 use lanpath_engine::{CoreManager, SingBoxProcessManager};
@@ -27,6 +28,7 @@ pub(crate) struct DesktopRuntime {
     observations: Option<ObservationService>,
     business: Option<BusinessService>,
     logs: LogService,
+    script_tasks: tokio::sync::Mutex<Option<ScriptTaskSession>>,
     runtime: Option<Runtime>,
     configuration_error: Option<String>,
     _data_root: Option<DataRoot>,
@@ -101,6 +103,7 @@ impl DesktopRuntime {
             observations,
             business,
             logs: LogService::new(),
+            script_tasks: tokio::sync::Mutex::new(None),
             runtime,
             configuration_error: (!errors.is_empty()).then(|| errors.join("；")),
             _data_root: data_root,
@@ -140,6 +143,39 @@ impl DesktopRuntime {
         &self.logs
     }
 
+    pub(crate) fn script_tasks(&self) -> Result<Vec<RemoteTaskView>, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| self.unavailable_data_error())?;
+        runtime.block_on(async {
+            Ok(self
+                .script_tasks
+                .lock()
+                .await
+                .as_ref()
+                .map(ScriptTaskSession::list_tasks)
+                .unwrap_or_default())
+        })
+    }
+
+    pub(crate) fn run_script_task(&self, name: &str) -> Result<String, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| self.unavailable_data_error())?;
+        runtime.block_on(async {
+            let session = self.script_tasks.lock().await;
+            let session = session
+                .as_ref()
+                .ok_or_else(|| "任务调度器未就绪；请先更新资源并启动核心".to_string())?;
+            session
+                .run_now(name)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
     /// Blocking lifecycle entry points are called only by GPUI's background executor.
     pub(crate) fn start(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
@@ -165,10 +201,13 @@ impl DesktopRuntime {
                 .map_err(|error| format!("Clash API 端口 {CLASH_API_PORT} 不可用：{error}"))?;
             drop(api_listener);
             drop(listener);
-            manager
-                .start(&config)
-                .await
-                .map_err(|error| error.to_string())?;
+            if let Err(error) = self.start_script_tasks().await {
+                tracing::warn!(%error, "定时任务调度器启动失败（不影响核心启动）");
+            }
+            if let Err(error) = manager.start(&config).await {
+                self.stop_script_tasks().await;
+                return Err(error.to_string());
+            }
             let result = async {
                 wait_clash_api_ready(CLASH_API_PORT, "", Duration::from_secs(15))
                     .await
@@ -187,6 +226,7 @@ impl DesktopRuntime {
             if let Err(error) = result {
                 self.logs.stop().await;
                 observations.stop().await;
+                self.stop_script_tasks().await;
                 return match manager.stop().await {
                     Ok(()) => Err(error),
                     Err(stop_error) => Err(format!("{error}；核心回收失败：{stop_error}")),
@@ -201,6 +241,7 @@ impl DesktopRuntime {
         runtime.block_on(async {
             self.logs.stop().await;
             self.observations()?.stop().await;
+            self.stop_script_tasks().await;
             manager.stop().await.map_err(|error| error.to_string())
         })
     }
@@ -211,6 +252,25 @@ impl DesktopRuntime {
             .as_ref()
             .ok_or_else(|| "Tokio runtime 不可用".to_string())?;
         Ok(runtime.block_on(future))
+    }
+
+    async fn start_script_tasks(&self) -> Result<(), String> {
+        self.stop_script_tasks().await;
+        let business = self.business()?;
+        let session = ScriptTaskSession::start(
+            business.data_dir().to_path_buf(),
+            Arc::new(TracingNotifier::new()),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        *self.script_tasks.lock().await = session;
+        Ok(())
+    }
+
+    async fn stop_script_tasks(&self) {
+        if let Some(session) = self.script_tasks.lock().await.take() {
+            session.stop().await;
+        }
     }
 
     fn unavailable_data_error(&self) -> String {

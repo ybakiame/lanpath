@@ -70,8 +70,7 @@ export default function RemotesTab({ remotes, iconCache, isLoading, error }: Rem
     setBusy(true);
     setActionError(null);
     try {
-      await removeRemote(remote.name);
-      await addRemote(next);
+      await updateRemote(next);
       invalidateRemotes();
     } catch (err) {
       setActionError(toErrorMessage(err));
@@ -95,7 +94,7 @@ export default function RemotesTab({ remotes, iconCache, isLoading, error }: Rem
       <Card>
         <Card.Header>
           <Card.Title>远程资源</Card.Title>
-          <Card.Description>脚本 / 配置片段订阅，按间隔拉取并落盘缓存</Card.Description>
+          <Card.Description>脚本 / 配置片段订阅；更新间隔随清单保存，当前由“立即更新全部”手动拉取</Card.Description>
         </Card.Header>
         <Card.Content>
           {isLoading && remotes.length === 0 ? (

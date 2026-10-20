@@ -2,6 +2,7 @@ mod config;
 mod config_slices;
 mod profiles;
 mod rules;
+mod scripts;
 mod state;
 
 pub(crate) use config_slices::ConfigSlicesDocument;
@@ -37,5 +38,7 @@ impl BusinessService {
     }
 }
 
+#[cfg(test)]
+mod scripts_tests;
 #[cfg(test)]
 mod tests;

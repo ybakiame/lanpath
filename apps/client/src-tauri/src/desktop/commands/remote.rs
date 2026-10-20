@@ -1,8 +1,6 @@
 //! Remote resource commands: script / snippet subscription management.
 
-use lanpath_client::{
-    detect_resource_from_url, parse_config_meta, ConfigMeta, RemoteManager, RemoteResource,
-};
+use lanpath_client::{RemoteManager, RemoteResource, RemoteResourceService};
 use lanpath_script::ScriptDialect;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -194,8 +192,7 @@ pub struct DetectRemoteView {
 /// List all remote resources (`remotes.json`).
 #[tauri::command]
 pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteResourceView>, String> {
-    let manager = RemoteManager::new(state.data_dir.clone());
-    let remotes = manager
+    let remotes = RemoteResourceService::new(state.data_dir.clone())
         .load()
         .map_err(|e| format!("读取远程资源失败: {e}"))?;
     Ok(remotes
@@ -210,50 +207,20 @@ pub async fn add_remote(
     state: State<'_, AppState>,
     remote: RemoteResourceView,
 ) -> Result<(), String> {
-    if remote.name.trim().is_empty() {
-        return Err("资源名不能为空".to_string());
-    }
-    if remote.url.trim().is_empty() {
-        return Err("URL 不能为空".to_string());
-    }
-    let mut remote = remote.into_remote()?;
-    remote.url = lanpath_client::normalize_resource_url(&remote.url);
-    lanpath_client::prefill_argument_values(&mut remote);
-    let manager = RemoteManager::new(state.data_dir.clone());
-    let mut remotes = manager
-        .load()
-        .map_err(|e| format!("读取远程资源失败: {e}"))?;
-    if remotes.iter().any(|r| r.name == remote.name) {
-        return Err(format!("远程资源 '{}' 已存在", remote.name));
-    }
-    let name = remote.name.clone();
-    let icon = remote.icon.clone();
-    remotes.push(remote);
-    manager
-        .save(&remotes)
+    let remote = remote.into_remote()?;
+    RemoteResourceService::new(state.data_dir.clone())
+        .add(remote)
+        .await
         .map_err(|e| format!("保存远程资源失败: {e}"))?;
-    if let Some(icon_url) = icon {
-        if let Err(e) = manager.cache_icon(&name, &icon_url).await {
-            tracing::warn!(name = %name, error = %e, "icon cache warmup failed");
-        }
-    }
     Ok(())
 }
 
 /// Remove a remote resource; errors if not found.
 #[tauri::command]
 pub async fn remove_remote(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let manager = RemoteManager::new(state.data_dir.clone());
-    let mut remotes = manager
-        .load()
-        .map_err(|e| format!("读取远程资源失败: {e}"))?;
-    let before = remotes.len();
-    remotes.retain(|r| r.name != name);
-    if remotes.len() == before {
-        return Err(format!("远程资源 '{}' 不存在", name));
-    }
-    manager
-        .save(&remotes)
+    RemoteResourceService::new(state.data_dir.clone())
+        .remove(&name)
+        .await
         .map_err(|e| format!("保存远程资源失败: {e}"))
 }
 
@@ -263,26 +230,12 @@ pub async fn update_remote(
     state: State<'_, AppState>,
     resource: RemoteResourceView,
 ) -> Result<(), String> {
-    if resource.name.trim().is_empty() {
-        return Err("资源名不能为空".to_string());
-    }
-    if resource.url.trim().is_empty() {
-        return Err("URL 不能为空".to_string());
-    }
-    let mut remote = resource.into_remote()?;
-    remote.url = lanpath_client::normalize_resource_url(&remote.url);
-    lanpath_client::prefill_argument_values(&mut remote);
-    let name = remote.name.clone();
-    let icon = remote.icon.clone();
-    let manager = RemoteManager::new(state.data_dir.clone());
-    manager
-        .update_resource(&name, remote)
+    let name = resource.name.clone();
+    let remote = resource.into_remote()?;
+    RemoteResourceService::new(state.data_dir.clone())
+        .update(&name, remote)
+        .await
         .map_err(|e| format!("更新远程资源失败: {e}"))?;
-    if let Some(icon_url) = icon {
-        if let Err(e) = manager.cache_icon(&name, &icon_url).await {
-            tracing::warn!(name = %name, error = %e, "icon cache warmup failed");
-        }
-    }
     Ok(())
 }
 
@@ -323,55 +276,28 @@ pub async fn detect_remote(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<DetectRemoteView, String> {
-    let url = lanpath_client::normalize_resource_url(url.trim());
-    let (kind, dialect) = match detect_resource_from_url(&url) {
-        Some((kind, dialect)) => (
-            Some(remote_kind_str(kind).to_string()),
-            Some(script_dialect_str(dialect).to_string()),
-        ),
-        None => (None, None),
-    };
-
-    let meta = if kind.as_deref() == Some("Snippet")
-        && (url.starts_with("http://") || url.starts_with("https://"))
-    {
-        fetch_detect_text(&state.data_dir, &url)
-            .await
-            .map(|text| {
-                let parsed = parse_config_meta(&text);
-                if parsed != ConfigMeta::default() {
-                    Some(ConfigMetaView::from_meta(&parsed))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(None)
-    } else {
-        None
-    };
-
+    let detected = RemoteResourceService::new(state.data_dir.clone())
+        .detect(&url)
+        .await
+        .map_err(|e| format!("嗅探远程资源失败: {e}"))?;
     Ok(DetectRemoteView {
-        kind,
-        dialect,
-        meta,
+        kind: detected.kind.map(|kind| remote_kind_str(kind).to_string()),
+        dialect: detected
+            .dialect
+            .map(|dialect| script_dialect_str(dialect).to_string()),
+        meta: detected.meta.as_ref().map(ConfigMetaView::from_meta),
     })
 }
 
-/// Fetch text content for metadata sniffing (15s timeout).
-async fn fetch_detect_text(data_dir: &std::path::Path, url: &str) -> Option<String> {
-    lanpath_client::fetch_resource_text(data_dir, url, std::time::Duration::from_secs(15))
-        .await
-        .ok()
-}
 
 /// Fetch all enabled remote resources (no system proxy, 30s timeout).
 #[tauri::command]
 pub async fn fetch_remotes(state: State<'_, AppState>) -> Result<FetchReportView, String> {
-    let manager = RemoteManager::new(state.data_dir.clone());
-    let remotes = manager
-        .load()
+    let mut report = RemoteResourceService::new(state.data_dir.clone())
+        .fetch_all()
+        .await
         .map_err(|e| format!("读取远程资源失败: {e}"))?;
-    let report = manager.fetch_all(&remotes).await;
+    reload_running_scheduler(&state, &mut report.warnings).await;
     Ok(FetchReportView {
         fetched: report.fetched,
         scripts: report.scripts,
@@ -407,11 +333,11 @@ pub async fn import_config(
             return Err(format!("未知方言 '{other}'（可选: surge / loon）"));
         }
     };
-    let manager = RemoteManager::new(state.data_dir.clone());
-    let summary = manager
+    let mut summary = RemoteResourceService::new(state.data_dir.clone())
         .import_content(&content, script_dialect)
         .await
         .map_err(|e| format!("导入配置失败: {e}"))?;
+    reload_running_scheduler(&state, &mut summary.warnings).await;
     Ok(ImportSummaryView {
         rewrites: summary.rewrites,
         scripts: summary.scripts,
@@ -420,4 +346,13 @@ pub async fn import_config(
         warnings: summary.warnings,
         meta: ConfigMetaView::from_meta(&summary.meta),
     })
+}
+
+async fn reload_running_scheduler(state: &State<'_, AppState>, warnings: &mut Vec<String>) {
+    let mut client = state.client.lock().await;
+    if let Some(client) = client.as_mut() {
+        if let Err(error) = client.reload_scheduler_from_cache().await {
+            warnings.push(format!("任务调度器重新载入失败: {error}"));
+        }
+    }
 }

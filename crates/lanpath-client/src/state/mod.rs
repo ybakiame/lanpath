@@ -15,13 +15,12 @@ use lanpath_common::{LanpathError, LanpathResult};
 #[cfg(feature = "mitm")]
 use lanpath_mitm::{MemoryRecorder, RunningProxy};
 use lanpath_script::{Notifier, ScriptScheduler};
-use tokio::task::JoinHandle;
 
 use crate::config::ClientConfig;
 use crate::core_config;
 use crate::privilege::{TunAuthStatus, tun_auth_status};
 use crate::profile;
-use crate::remote::TracingNotifier;
+use crate::remote::{ScriptTaskSession, TracingNotifier};
 use crate::runner::CoreRunner;
 use crate::subscription;
 use crate::sysproxy::{PlatformSystemProxy, SystemProxy};
@@ -39,12 +38,6 @@ mod tests;
 mod types;
 
 pub use types::ClientStatus;
-
-/// Scheduled task scheduler running handle.
-struct SchedulerHandle {
-    scheduler: Arc<ScriptScheduler>,
-    handle: JoinHandle<()>,
-}
 
 /// Connection tracker running handle.
 struct ConnectionTrackerHandle {
@@ -64,8 +57,8 @@ pub struct ClientState {
     /// Packet capture recorder (in-memory ring buffer, capacity 2048; injected when MITM proxy starts).
     #[cfg(feature = "mitm")]
     recorder: Arc<MemoryRecorder>,
-    /// Remote subscription task script scheduler (starts after MITM ready, stops on stop).
-    scheduler: Option<SchedulerHandle>,
+    /// Remote subscription task script scheduler (starts before core, stops on stop).
+    scheduler: Option<ScriptTaskSession>,
     /// Background connection tracker (started after core startup when Clash API is enabled, stopped on stop).
     connection_tracker: Option<ConnectionTrackerHandle>,
     /// 流量统计存储（SQLite；由壳层注入，未注入时 tracker 仅维护内存环形缓冲）。
@@ -156,12 +149,14 @@ impl ClientState {
     /// Scheduled task scheduler (remote subscription task scripts); `None` when not started or no tasks.
     /// After phase ③ decoupling: no longer depends on MITM, reads task scripts from remote cache independently.
     pub fn scheduler(&self) -> Option<&ScriptScheduler> {
-        self.scheduler.as_ref().map(|h| h.scheduler.as_ref())
+        self.scheduler.as_ref().map(ScriptTaskSession::scheduler)
     }
 
     /// `Arc` handle of the scheduled task scheduler (for external driving in a separate thread; `None` when not ready).
     pub fn scheduler_handle(&self) -> Option<Arc<ScriptScheduler>> {
-        self.scheduler.as_ref().map(|h| Arc::clone(&h.scheduler))
+        self.scheduler
+            .as_ref()
+            .map(ScriptTaskSession::scheduler_handle)
     }
 
     /// Start: subscription selection (active_subscription_id) → override parsing (subscription-linked template) → MITM →

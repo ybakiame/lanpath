@@ -41,23 +41,23 @@
 
 基线为批准本阶段时的 `0e87b89`，按完整用户任务统计，而不是按能打开的页面统计。以下缺口不因应用改名而视为完成。
 
-| 用户任务 | 既有复用边界 | 阶段开始时 GPUI 覆盖 | 当前 GPUI 覆盖（2026-10-20） |
-| --- | --- | --- | --- |
-| 添加/编辑订阅、刷新节点与用量、选用、查看/导出原文 | `lanpath-client::subscription`、`SubscriptionStore` | 未接入 | 已接入；刷新失败保留上次成功缓存 |
-| 创建覆写、校验 YAML/JS/远程 URL、保存、绑定订阅并重启生效 | `ProfileStoreV2`、`validation`、`profile::overrides` | 仅编辑器技术验证，无业务闭环 | 已接入保存、绑定、关联删除保护与重开恢复 |
-| 预览最终配置、启动所选订阅、启动阶段与失败反馈、重开使用已保存值 | `profile::build_core_config_v2`、`core_config`、`state/start`、engine | 仅固定配置的隔离启停和正常退出 | 已接入 v2 生成、真实核心预检、启动重新生成和持久选择；细分启动阶段仍缺 |
-| 全部策略组、节点选择持久化、测速、规则/全局/直连模式 | `proxies`、`persist_group_selection`、`set_rule_mode_persist` | 仅固定 `proxy` 组的即时选择 | 已接入全部组、持久选择/启动恢复、节点/整组测速和模式持久化/热同步 |
-| 活动连接、会话关闭记录、流量与路由、关闭连接 | `connections`、`ConnectionTrackerHandle` | 已接真实服务，尚非完整业务会话集成 | 未变 |
-| 今日/历史统计、日期/关键字/排序、清空、离线重开 | `StatsStore` | 已有真实汇总/默认查询，缺完整查询及清空交互 | 未变 |
-| 运行日志、暂停/过滤/全文、磁盘日志尾读及导出 | 应用 tracing、核心日志 API、现行 Tauri 日志适配 | 已有真实内存流，磁盘/导出未接入 | 未变 |
-| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 | 已接入共享完整 slices 草稿、跨切片校验/原子保存、DNS 探测、重开恢复与配置重新生成；路由规则/规则集 CRUD 仍属下一行 |
-| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`LocalOverrideService`、`RuleSetManager`、`ruleset_update` | 未接入 | 已接入共享完整草稿、规则 CRUD/排序/引用/最终路由、规则集 CRUD/分类/市场/单项与批量更新、缺失资源补齐、重开恢复和配置重新生成 |
-| 远程脚本/片段、导入、参数、刷新、调度与任务结果 | `RemoteManager`、`import`、scheduler、`lanpath-script` | 未接入，样例 JS 不等于执行/管理 | 覆写模板 JS 已进入合成；脚本管理和调度仍未接入 |
-| MITM 白名单、CA、信任和抓包记录 | `state/mitm`、`lanpath-mitm`、平台证书适配 | 未接入；CA 系统变更另行授权 | 未变 |
-| 请求代理、GitHub 镜像、外观及重开恢复 | `ClientConfig`、`request_network`、现行主题偏好 | 未接入，不以 GPUI 默认主题冒充迁移 | 仅持久选择重开；实验网络请求强制 `none`，设置 UI 未接入 |
-| age 备份、解密预览、确认恢复、停止、重启事务与外观恢复 | `lanpath-client::backup`、平台文件适配 | 未接入，不能以普通 JSON 保存代替 | 未变 |
-| 核心版本管理、端口/IPv6/面板、系统代理/TUN 授权与回滚 | `cores`、`privilege`、`sysproxy`、engine | 仅显式指定独立核心；全局系统控制未授权 | 固定实验端口与核心仍不构成管理功能；全局系统控制未授权 |
-| 安装/Portable、种子/许可资产、通知/opener、单实例、更新和回退 | 现行桌面 storage、平台适配、updater、发布工作流 | 未接入，现行身份与发布契约不变 | 未变 |
+| 用户任务                                                         | 既有复用边界                                                                              | 阶段开始时 GPUI 覆盖                        | 当前 GPUI 覆盖（2026-10-20）                                                                                                     |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 添加/编辑订阅、刷新节点与用量、选用、查看/导出原文               | `lanpath-client::subscription`、`SubscriptionStore`                                       | 未接入                                      | 已接入；刷新失败保留上次成功缓存                                                                                                 |
+| 创建覆写、校验 YAML/JS/远程 URL、保存、绑定订阅并重启生效        | `ProfileStoreV2`、`validation`、`profile::overrides`                                      | 仅编辑器技术验证，无业务闭环                | 已接入保存、绑定、关联删除保护与重开恢复                                                                                         |
+| 预览最终配置、启动所选订阅、启动阶段与失败反馈、重开使用已保存值 | `profile::build_core_config_v2`、`core_config`、`state/start`、engine                     | 仅固定配置的隔离启停和正常退出              | 已接入 v2 生成、真实核心预检、启动重新生成和持久选择；细分启动阶段仍缺                                                           |
+| 全部策略组、节点选择持久化、测速、规则/全局/直连模式             | `proxies`、`persist_group_selection`、`set_rule_mode_persist`                             | 仅固定 `proxy` 组的即时选择                 | 已接入全部组、持久选择/启动恢复、节点/整组测速和模式持久化/热同步                                                                |
+| 活动连接、会话关闭记录、流量与路由、关闭连接                     | `connections`、`ConnectionTrackerHandle`                                                  | 已接真实服务，尚非完整业务会话集成          | 未变                                                                                                                             |
+| 今日/历史统计、日期/关键字/排序、清空、离线重开                  | `StatsStore`                                                                              | 已有真实汇总/默认查询，缺完整查询及清空交互 | 未变                                                                                                                             |
+| 运行日志、暂停/过滤/全文、磁盘日志尾读及导出                     | 应用 tracing、核心日志 API、现行 Tauri 日志适配                                           | 已有真实内存流，磁盘/导出未接入             | 未变                                                                                                                             |
+| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化            | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe`                                | 未接入，固定 JSON 字段不算编辑能力          | 已接入共享完整 slices 草稿、跨切片校验/原子保存、DNS 探测、重开恢复与配置重新生成；路由规则/规则集 CRUD 仍属下一行               |
+| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐     | `LocalOverrideStore`、`LocalOverrideService`、`RuleSetManager`、`ruleset_update`          | 未接入                                      | 已接入共享完整草稿、规则 CRUD/排序/引用/最终路由、规则集 CRUD/分类/市场/单项与批量更新、缺失资源补齐、重开恢复和配置重新生成     |
+| 远程脚本/片段、导入、参数、刷新、调度与任务结果                  | `RemoteResourceService`、`RemoteManager`、`import`、`ScriptTaskSession`、`lanpath-script` | 未接入，样例 JS 不等于执行/管理             | 已接入清单 CRUD/启停、元数据嗅探、模块参数、手动批量更新、Surge/Loon 导入、核心生命周期调度、手动运行与结果；MITM 效果仍属下一行 |
+| MITM 白名单、CA、信任和抓包记录                                  | `state/mitm`、`lanpath-mitm`、平台证书适配                                                | 未接入；CA 系统变更另行授权                 | 未变                                                                                                                             |
+| 请求代理、GitHub 镜像、外观及重开恢复                            | `ClientConfig`、`request_network`、现行主题偏好                                           | 未接入，不以 GPUI 默认主题冒充迁移          | 仅持久选择重开；实验网络请求强制 `none`，设置 UI 未接入                                                                          |
+| age 备份、解密预览、确认恢复、停止、重启事务与外观恢复           | `lanpath-client::backup`、平台文件适配                                                    | 未接入，不能以普通 JSON 保存代替            | 未变                                                                                                                             |
+| 核心版本管理、端口/IPv6/面板、系统代理/TUN 授权与回滚            | `cores`、`privilege`、`sysproxy`、engine                                                  | 仅显式指定独立核心；全局系统控制未授权      | 固定实验端口与核心仍不构成管理功能；全局系统控制未授权                                                                           |
+| 安装/Portable、种子/许可资产、通知/opener、单实例、更新和回退    | 现行桌面 storage、平台适配、updater、发布工作流                                           | 未接入，现行身份与发布契约不变              | 未变                                                                                                                             |
 
 接入时保留这些业务约束：
 
@@ -169,14 +169,39 @@ store 归一化结果，并通知只读预览重新生成。
 
 该单位完成覆盖矩阵中的规则与规则集任务；不改变实验端口、系统代理、TUN、生产数据或发布授权。
 
+## 第六个业务迁移单位：远程脚本与任务调度
+
+`ScriptsView` 通过共享 `RemoteResourceService` 管理实验根中的远程资源清单，不在 GPUI 和 Tauri
+各自复制清单归一化、并发写入或缓存语义。`ScriptTaskSession` 统一从缓存创建调度器、列举状态、
+手动执行和停止；现行 Tauri 的批量更新/导入在核心运行时也通过同一客户端会话重建调度器。
+
+- 远程资源支持添加、编辑、启停和删除；名称、HTTP(S) URL、GitHub Raw 归一化、描述、图标、
+  更新间隔、方言和参数值由共享服务校验并原子写回。既有名称作为持久身份不可改名，删除清单
+  保留缓存，避免意外破坏运行中的任务。
+- URL 嗅探识别纯 JS/配置片段与 Surge/Loon 方言；可访问片段读取头部名称、描述、图标及参数声明。
+  参数以 `key=value` 保存，未显式填写时沿用声明默认值。
+- “立即更新全部”只处理已启用资源，下载片段及其脚本/任务源并重建缓存，逐项失败进入警告而不
+  伪造成功。`update_interval_secs` 目前只随清单持久化；仓库没有自动刷新编排，界面不再宣称按
+  间隔自动拉取。
+- 配置导入支持 Surge/Loon 的 rewrite、hook、cron 和 hostname 语义，采用既有追加缓存契约。
+  本单位编译 `lanpath-mitm` 仅为复用片段解析/缓存类型；GPUI 运行时没有启动 MITM 代理、安装 CA
+  或修改系统信任，rewrite/hook/hostname 的运行效果仍留在下一迁移单位。
+- 实验核心启动前从缓存建立调度会话，启动失败、停止和关窗都会显式停止并等待调度任务；无有效
+  cron 时不创建空会话。任务页展示 cron、下次/上次运行与错误，可手动执行并显示真实脚本输出。
+- 远程资源和导入的未保存正文阻止启动；核心运行和生命周期切换期间锁定这些写操作，任务手动
+  运行保持可用。停核后重新载入任务缓存；关闭前等待已接受操作并纳入放弃修改确认。
+
+该单位完成覆盖矩阵中的远程脚本和调度任务；不扩大实验端口、请求代理、系统代理、TUN、MITM、
+生产数据或发布授权。
+
 ## 本轮验收（2026-10-19）
 
-| 范围 | 实际执行与结果 |
-| --- | --- |
-| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；38 passed、2 ignored |
-| 现行 Rust 回归 / Nix | `cargo build --workspace --locked`、`bun run verify:rust` 通过，含根 fmt/clippy/test、Tauri 壳 host clippy、`aarch64-linux-android` Rust check |
-| Windows x64 / MSVC | release build 与 lib tests 通过；35 passed、2 ignored；保留 `lanpath-common` 既有未使用导入及链接器信息警告 |
-| Windows / 真实核心服务 | 以隔离复制的 sing-box 1.14.2 显式执行 `real_core_checks_exact_saved_source_and_rechecks_before_start`，1 passed |
+| 范围                   | 实际执行与结果                                                                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 独立应用 / Nix         | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；38 passed、2 ignored              |
+| 现行 Rust 回归 / Nix   | `cargo build --workspace --locked`、`bun run verify:rust` 通过，含根 fmt/clippy/test、Tauri 壳 host clippy、`aarch64-linux-android` Rust check |
+| Windows x64 / MSVC     | release build 与 lib tests 通过；35 passed、2 ignored；保留 `lanpath-common` 既有未使用导入及链接器信息警告                                    |
+| Windows / 真实核心服务 | 以隔离复制的 sing-box 1.14.2 显式执行 `real_core_checks_exact_saved_source_and_rechecks_before_start`，1 passed                                |
 
 普通套件的 ignored 为真实核心显式选择用例和跨进程锁测试入口；后者由父用例实际启动子进程执行。
 未修改前，新增 hosts 环境变量路径回归在 Nix 失败，Windows 硬链接回归失败；修正后两平台通过。
@@ -212,13 +237,13 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 ## 订阅与覆写迁移验收（2026-10-20）
 
-| 范围 | 实际执行与结果 |
-| --- | --- |
-| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；44 passed、3 ignored |
-| 现行 Rust 回归 / Nix | `cargo build --workspace --locked` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check |
-| Windows x64 / MSVC | Rust 1.98.0 release build 与 lib tests 通过；41 passed、3 ignored；仅保留 `lanpath-common` 既有未使用导入警告 |
-| Windows / 本地订阅到真实核心 | 本地 HTTP 返回真实 sing-box 订阅 JSON；拉取、解析、缓存、活动选择、v2 合成、能力校验、sing-box 1.14.2 `check`、进程启动/运行确认/停止单一用例通过 |
-| Windows / 生产隔离 | 验收前后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且无私有核心残留进程 |
+| 范围                         | 实际执行与结果                                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 独立应用 / Nix               | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；44 passed、3 ignored                      |
+| 现行 Rust 回归 / Nix         | `cargo build --workspace --locked` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check |
+| Windows x64 / MSVC           | Rust 1.98.0 release build 与 lib tests 通过；41 passed、3 ignored；仅保留 `lanpath-common` 既有未使用导入警告                                          |
+| Windows / 本地订阅到真实核心 | 本地 HTTP 返回真实 sing-box 订阅 JSON；拉取、解析、缓存、活动选择、v2 合成、能力校验、sing-box 1.14.2 `check`、进程启动/运行确认/停止单一用例通过      |
+| Windows / 生产隔离           | 验收前后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且无私有核心残留进程        |
 
 普通回归另外覆盖本地 HTTP 成功缓存、刷新失败保留成功缓存、迟到刷新不覆盖已编辑 URL/UA、
 活动选择/模板/订阅重开、无效模板和引用的原子失败、生成缓存落在 `root/cache/` 以及配置能力边界。
@@ -230,27 +255,27 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 ## 代理策略迁移验收（2026-10-20）
 
-| 范围 | 实际执行与结果 |
-| --- | --- |
-| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；44 passed、3 ignored |
-| 现行 Rust 回归 / Nix | `cargo build --workspace` 与 `bun run verify:rust` 通过；共享客户端 558 tests、Tauri 56 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过 |
-| Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离 sing-box 1.14.2 用例验证两个订阅节点、完整 `proxy` 成员、选择并持久化、运行时模式推送、单节点不可达测速、整组测速结果和重启后选择恢复，1 passed |
-| Windows / 应用冒烟 | 本地构建程序启动后取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，随后强制回收验证进程和临时数据；未取得页面截图或可访问性树 |
-| Windows / 生产隔离 | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且私有核心进程数为 0 |
+| 范围                   | 实际执行与结果                                                                                                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 独立应用 / Nix         | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；44 passed、3 ignored                                                       |
+| 现行 Rust 回归 / Nix   | `cargo build --workspace` 与 `bun run verify:rust` 通过；共享客户端 558 tests、Tauri 56 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过 |
+| Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离 sing-box 1.14.2 用例验证两个订阅节点、完整 `proxy` 成员、选择并持久化、运行时模式推送、单节点不可达测速、整组测速结果和重启后选择恢复，1 passed         |
+| Windows / 应用冒烟     | 本地构建程序启动后取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，随后强制回收验证进程和临时数据；未取得页面截图或可访问性树                                                            |
+| Windows / 生产隔离     | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且私有核心进程数为 0                                           |
 
 真实核心测速中的不可达节点按契约返回无延迟值；共享本地 HTTP 测试另行证明成功延迟解析及整组
 结果顺序。当前环境仍无 `orca`/`orca-ide`，因此本轮不声明代理页视觉、键盘、IME、高 DPI 或读屏验收。
 
 ## 结构化配置迁移验收（2026-10-20）
 
-| 范围 | 实际执行与结果 |
-| --- | --- |
-| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；46 passed、3 ignored |
-| 结构化业务回归 / Nix | 保存并重开完整 slices、生成 DNS/自定义出站/默认路由/解析器/缓存、无效保存保持旧文件，以及本地 UDP DNS 探测通过；2 passed |
-| 现行 Rust 回归 / Nix | `cargo build --workspace` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check |
+| 范围                   | 实际执行与结果                                                                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 独立应用 / Nix         | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；46 passed、3 ignored                                    |
+| 结构化业务回归 / Nix   | 保存并重开完整 slices、生成 DNS/自定义出站/默认路由/解析器/缓存、无效保存保持旧文件，以及本地 UDP DNS 探测通过；2 passed                                             |
+| 现行 Rust 回归 / Nix   | `cargo build --workspace` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check                        |
 | Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离用例保存并重开 DNS、内置 `proxy` 默认成员、默认路由/解析器和缓存，生成结果经 sing-box 1.14.2 `check` 后实际启动、运行并停止，1 passed |
-| Windows / 应用冒烟 | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束；结构化页视觉交互未自动化 |
-| Windows / 生产隔离 | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且私有核心进程数为 0 |
+| Windows / 应用冒烟     | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束；结构化页视觉交互未自动化                                                |
+| Windows / 生产隔离     | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且私有核心进程数为 0                        |
 
 真实核心首次验收暴露 DNS 接管配置移除了模板规则集 HTTP 客户端依赖的 `local` tag；验收夹具改为
 保留该实际模板引用后通过。共享 slice 校验只验证 slice 内部引用，最终模板引用仍由预览/启动时的
@@ -262,15 +287,35 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 ## 规则与规则集迁移验收（2026-10-20）
 
-| 范围 | 实际执行与结果 |
-| --- | --- |
-| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked`、`build --locked` 通过；48 passed、3 ignored |
-| 规则业务回归 / Nix | 完整规则/手写规则集保存、重开、引用、Final 覆盖和运行配置生成通过；市场目录同时覆盖 geoip/geosite，目录解析条目超过 1000 |
-| 现行 Rust 回归 / Nix | `cargo build --workspace` 与 `bun run verify:rust` 通过；共享客户端 559 tests、Tauri 55 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过 |
+| 范围                   | 实际执行与结果                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 独立应用 / Nix         | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked`、`build --locked` 通过；48 passed、3 ignored                                                                              |
+| 规则业务回归 / Nix     | 完整规则/手写规则集保存、重开、引用、Final 覆盖和运行配置生成通过；市场目录同时覆盖 geoip/geosite，目录解析条目超过 1000                                                                                 |
+| 现行 Rust 回归 / Nix   | `cargo build --workspace` 与 `bun run verify:rust` 通过；共享客户端 559 tests、Tauri 55 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过                  |
 | Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离用例保存并重开远程/手写规则集、分类、路由引用与 Final，执行本地 HTTP 单项更新，将两类 backing files 注入配置，经 sing-box 1.14.2 `check` 后实际启动、运行并停止，1 passed |
-| Windows / 应用冒烟 | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束 |
-| Windows / 生产隔离 | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且未发现私有核心进程 |
+| Windows / 应用冒烟     | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束                                                                                                              |
+| Windows / 生产隔离     | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且未发现私有核心进程                                                            |
 
 当前环境的 `orca-ide` 命令仍不存在，因此没有取得规则页面截图、可访问性树或自动化输入证据。
 编译、持久化、更新、真实核心和窗口响应通过不等于视觉、键盘、IME、高 DPI 或读屏验收；这些项目
 仍需在具备桌面自动化入口时补验。
+
+## 远程脚本与任务调度迁移验收（2026-10-21）
+
+| 范围                   | 实际执行与结果                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 独立应用 / Nix         | `fmt --check`、`check --locked`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked --all-targets` 通过；49 passed、4 ignored                                |
+| 现行 Rust 回归 / Nix   | `cargo build --workspace --locked` 与 `bun run verify:rust` 通过；共享客户端 562 tests、Tauri 55 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过 |
+| Windows x64 / MSVC     | Rust 1.98.0 release build与完整 lib tests 通过；46 passed、4 ignored；仅保留 `lanpath-common` 与 `lanpath-mitm` 既有 Windows 警告                                                                |
+| Windows / 真实核心任务 | 本地 HTTP 远程片段拉取并缓存 cron 任务；隔离 sing-box 1.14.2 使用本地缓存订阅生成配置并实际启动、确认 Clash API 就绪，随后任务手动执行返回真实脚本输出，最后停止调度器与核心；1 passed           |
+| Windows / 应用冒烟     | release 程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应；UI Automation 调用“脚本”导航，截图观察到“远程资源 / 定时任务 / 配置导入”页签及资源编辑器；正常关闭请求在 10 秒内完成且进程退出       |
+| Windows / 生产隔离     | 冒烟前后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听，隔离核心无残留进程，验证数据根与构建产物已清理                      |
+
+普通回归另外覆盖远程资源添加、探测、编辑、启停、删除，更新生成缓存，配置片段导入，调度会话
+载入、立即执行与停止。首次真实核心用例因没有活动订阅失败，补齐独立本地缓存订阅夹具后又暴露
+缓存父目录必须预先存在；两项都按实际启动前置条件修正，最终通过。
+
+本轮窗口证据覆盖页面可见、导航可调用、进程响应、正常关闭和资源隔离，不等于完整键盘、IME、
+高 DPI 或读屏验收。`orca-ide` 仍不可用；UI Automation 返回的部分中文名称受调用脚本编码影响，
+因此页签文字同时以截图确认。rewrite、hook 和 hostname 仍只完成导入与缓存，没有启动 MITM，
+不得据此宣布 MITM 功能或生产切换已经完成。

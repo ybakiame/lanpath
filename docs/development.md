@@ -86,6 +86,13 @@ source、分类批量整理、单项/全部智能更新和显式恢复内置项�
 jsDelivr。一次保存原子替换完整 local override，但规则集更新只合并后端检查状态，不覆盖并发分类
 编辑或复活已删除项；预览和启动准备实际引用的缺失 backing files。
 
+“脚本”管理实验根中的远程纯 JS 与 Surge/Loon 片段，支持清单 CRUD/启停、URL 嗅探、头部元数据、
+模块参数、立即更新、配置导入以及 cron 任务状态和手动运行。更新间隔会持久化，但当前没有自动刷新
+编排，资源只在用户点击“立即更新全部”时拉取。远程资源/导入草稿会阻止核心启动；运行中锁定清单
+和导入写操作，但允许查看及手动运行已启动调度器中的任务。核心停止和正常关窗会等待调度器退出。
+片段解析复用 MITM 数据类型不代表启用 MITM：本阶段不启动抓包代理、不创建或信任 CA，rewrite、
+hook 和 hostname 只进入缓存，运行效果仍未迁移。
+
 生成配置仍固定 mixed 为 `127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，占用则失败，
 不接管占用进程。拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须落在实验根内，
 不接受环境变量展开、系统 hosts 默认路径或外部 UI/自动证书资源。文件日志和缓存输出分别限于
@@ -96,6 +103,7 @@ jsDelivr。一次保存原子替换完整 local override，但规则集更新只
 ```powershell
 $env:LANPATH_TEST_SING_BOX = $env:LANPATH_DESKTOP_CORE_BINARY
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
+cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::scripts_tests::fetched_remote_task_runs_while_real_core_is_live -- --ignored --exact
 ```
 
 Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。
@@ -114,13 +122,13 @@ ADB 已连接设备的选择、按授权安装、日志采集和原生行为验�
 
 `.github` 中的 YAML 文件统一使用 `.yaml` 扩展名。当前工作流为 `ci.yaml`、`windows-build.yaml`、`android-build.yaml` 与 `release.yaml`。
 
-| 类型 | 使用时机 | 发现与计划 | 实现与验证 | 文档与最终复查 |
-| --- | --- | --- | --- | --- |
-| feature | 新用户能力 | 读取领域、平台边界与 ADR，列验收 | 最小完整实现，相关 verify/gates 和行为验收 | CHANGELOG、架构/API 文档，复查范围 |
-| bugfix | 既有行为错误 | 复现、定位根因，列回归路径 | 最小修复、真实可用的回归检查 | 记录根因与验证边界，复查无旁支变更 |
-| refactor | 结构改变 | 确认基线、行为不变目标 | 分步重构、相关 gates | 更新路径/架构，核对输出语义 |
-| docs | 说明变更 | 核对实现和命令证据 | 修改并验证链接/命令 | 消除冲突，复查权威与措辞 |
-| adoption | 协议采纳 | 读 ADOPT，Pass 1 inventory/mapping/audit | 无决策冲突后 Pass 2 生成、协调、验证 | schema/conformance/项目检查与 report |
+| 类型     | 使用时机     | 发现与计划                               | 实现与验证                                 | 文档与最终复查                       |
+| -------- | ------------ | ---------------------------------------- | ------------------------------------------ | ------------------------------------ |
+| feature  | 新用户能力   | 读取领域、平台边界与 ADR，列验收         | 最小完整实现，相关 verify/gates 和行为验收 | CHANGELOG、架构/API 文档，复查范围   |
+| bugfix   | 既有行为错误 | 复现、定位根因，列回归路径               | 最小修复、真实可用的回归检查               | 记录根因与验证边界，复查无旁支变更   |
+| refactor | 结构改变     | 确认基线、行为不变目标                   | 分步重构、相关 gates                       | 更新路径/架构，核对输出语义          |
+| docs     | 说明变更     | 核对实现和命令证据                       | 修改并验证链接/命令                        | 消除冲突，复查权威与措辞             |
+| adoption | 协议采纳     | 读 ADOPT，Pass 1 inventory/mapping/audit | 无决策冲突后 Pass 2 生成、协调、验证       | schema/conformance/项目检查与 report |
 
 全部工作流按 AGENTS 完成定义验收；冲突、未经授权的架构/门禁/数据变更和未知验收标准
 触发 AGENTS 停止条件。适用能力由项目事实决定，不生成无用途的 Agent/MCP/Prompt 工作流。
