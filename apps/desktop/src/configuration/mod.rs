@@ -5,11 +5,10 @@
 //! real core. Accepted source text and JSON values are never rewritten.
 mod outbound;
 mod policy;
-mod resources;
-mod store;
-mod unique_json;
+pub(crate) mod resources;
+mod validator;
 
-pub(crate) use store::ConfigStore;
+pub(crate) use validator::ConfigValidator;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Bindings {
@@ -23,6 +22,14 @@ impl Bindings {
             mixed_port,
             api_port,
         }
+    }
+
+    pub(crate) fn mixed_port(self) -> u16 {
+        self.mixed_port
+    }
+
+    pub(crate) fn api_port(self) -> u16 {
+        self.api_port
     }
 }
 

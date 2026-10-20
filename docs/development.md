@@ -52,24 +52,27 @@ cargo run --release --manifest-path apps/desktop/Cargo.toml --locked
 未知非空目录、符号链接/junction 和硬链接文件。不要手动伪造标记或删除锁文件；同时运行的第二实例
 不会读取该根的配置或离线统计。这不是抵抗同用户恶意运行期文件替换的 OS 沙箱。
 
-配置原文为 `configuration.json`，派生运行配置 `sing-box.json` 不作为编辑源。首次显示未保存的
-直连新文档；缺失文档不会自动保存，损坏的 UTF-8 JSON 原文保留以供编辑，不回退演示配置。
-校验调用选定核心的真实 `check`；保存通过后原子替换原文，保留文本排版；启动重新加载并校验
-已保存值，绝不以草稿或固定样例启动。校验不会保存/启动；保存不热生效；运行和操作期间编辑器只读。
-在正文编辑器内 Ctrl+S 保存、Ctrl+Enter 校验、Ctrl+R 重新载入；校验快捷键不插入换行。
-丢弃修改或关闭未保存草稿需确认。
+实验版以独立 `client.json`、订阅清单/成功缓存和覆写模板作为持久业务源，不再编辑完整
+`configuration.json`。订阅页支持添加/编辑、刷新、启停、设为当前、绑定覆写模板以及查看/导出
+最近一次成功原文；刷新失败记录错误并保留旧缓存。覆写页在一次保存前统一校验名称、本地
+YAML/JS 和远程 URL；仍有关联订阅时拒绝删除。切换脏表单、删除和关闭未保存表单均需确认。
 
-本阶段接收完整 JSON 文档，但不是全部 sing-box 能力的开放入口：固定 mixed 为
-`127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，占用则失败，不接管占用进程。
-拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须显式位于实验根内，不接受
-环境变量展开、系统 hosts 默认路径或外部 UI/自动证书资源。文件日志和缓存输出分别限于根下
-`logs/`、`cache/`。能力边界先检查，具体配置 schema 仍由同一真实核心负责。
+“预览”按共享 v2 顺序合成当前订阅节点、本地模板、结构化 slices、远程/本地 YAML、远程/本地
+JS、local override、面板特性和规则集物化结果。预览只读并调用选定核心的真实 `check`；启动
+不复用预览文本，而是重新生成、下载所需内置规则集并再次执行同一能力边界和核心校验。
+订阅或覆写变更会使预览重新生成；并发变更排队一次后重跑，避免旧预览重新开放启动按钮。
+Ctrl+R 可手动重新生成。保存成功不热应用，运行和配置操作期间订阅、覆写及预览锁定。
 
-可用 `LANPATH_TEST_SING_BOX` 显式选择真实核心，单独执行被普通套件跳过的服务回归：
+生成配置仍固定 mixed 为 `127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，占用则失败，
+不接管占用进程。拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须落在实验根内，
+不接受环境变量展开、系统 hosts 默认路径或外部 UI/自动证书资源。文件日志和缓存输出分别限于
+根下 `logs/`、`cache/`。能力边界先检查，具体配置 schema 仍由同一真实核心负责。
+
+可用 `LANPATH_TEST_SING_BOX` 显式选择真实核心，单独执行普通套件跳过的生成配置与生命周期回归：
 
 ```powershell
 $env:LANPATH_TEST_SING_BOX = $env:LANPATH_DESKTOP_CORE_BINARY
-cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib -- --ignored --exact configuration::tests::real_core_checks_exact_saved_source_and_rechecks_before_start
+cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
 ```
 
 Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。

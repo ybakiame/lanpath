@@ -14,7 +14,7 @@ impl DesktopView {
             let view = view.clone();
             dialog
                 .title("放弃修改并关闭实验版？")
-                .description("配置有未保存修改。关闭会丢弃这些修改；已保存文件不会删除。")
+                .description("订阅或覆写表单有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。")
                 .confirm()
                 .ok_text("放弃修改并关闭")
                 .cancel_text("取消")
@@ -32,6 +32,10 @@ impl DesktopView {
         self.closing = true;
         self.configuration
             .update(cx, |view, cx| view.set_locked(true, cx));
+        self.subscriptions
+            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.profiles
+            .update(cx, |view, cx| view.set_locked(true, cx));
         self.connections
             .update(cx, |view, cx| view.set_running(false, cx));
         self.stats
@@ -45,6 +49,8 @@ impl DesktopView {
                     this.core_busy.is_some()
                         || this.proxy_busy.is_some()
                         || this.configuration.read(cx).busy()
+                        || this.subscriptions.read(cx).busy()
+                        || this.profiles.read(cx).busy()
                 }) else {
                     return;
                 };
@@ -55,7 +61,9 @@ impl DesktopView {
                     .timer(std::time::Duration::from_millis(20))
                     .await;
             }
-            let Ok(dirty) = this.update(cx, |this, cx| this.configuration.read(cx).dirty()) else {
+            let Ok(dirty) = this.update(cx, |this, cx| {
+                this.subscriptions.read(cx).dirty() || this.profiles.read(cx).dirty()
+            }) else {
                 return;
             };
             if dirty && !discard {
@@ -63,6 +71,10 @@ impl DesktopView {
                     this.update(cx, |this, cx| {
                         this.closing = false;
                         this.configuration
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.subscriptions
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.connections
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
@@ -91,6 +103,10 @@ impl DesktopView {
                         this.closing = false;
                         this.core_error = Some(error);
                         this.configuration
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.subscriptions
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.connections
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));

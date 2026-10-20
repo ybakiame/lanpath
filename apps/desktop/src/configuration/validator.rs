@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use lanpath_common::{LanpathError, LanpathResult};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
@@ -13,13 +13,13 @@ use super::{Bindings, policy, resources};
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
 const DIAGNOSTIC_LIMIT: usize = 32 * 1024;
 
-pub(crate) struct ConfigStore {
+pub(crate) struct ConfigValidator {
     root: PathBuf,
     binary: Option<PathBuf>,
     bindings: Bindings,
 }
 
-impl ConfigStore {
+impl ConfigValidator {
     /// The caller retains DataRoot's directory lock and supplies the same
     /// canonical root and selected executable to the engine manager.
     pub(crate) fn new(root: &Path, binary: Option<PathBuf>, bindings: Bindings) -> Self {
@@ -30,70 +30,12 @@ impl ConfigStore {
         }
     }
 
-    pub(crate) fn starter_text(&self) -> LanpathResult<String> {
-        Ok(serde_json::to_string_pretty(&json!({
-            "log": { "level": "info", "timestamp": true },
-            "inbounds": [{
-                "type": "mixed", "tag": "mixed-in",
-                "listen": "127.0.0.1", "listen_port": self.bindings.mixed_port
-            }],
-            "outbounds": [
-                { "type": "selector", "tag": "proxy", "outbounds": ["direct"], "default": "direct" },
-                { "type": "direct", "tag": "direct" }
-            ],
-            "route": { "final": "proxy" },
-            "experimental": { "clash_api": {
-                "external_controller": format!("127.0.0.1:{}", self.bindings.api_port),
-                "default_mode": "rule"
-            }}
-        }))?)
-    }
-
-    /// Load even invalid JSON exactly as saved, so the editor can repair it.
-    pub(crate) async fn load(&self) -> LanpathResult<Option<String>> {
-        let path = resources::source_path(&self.root)?;
-        match tokio::fs::read_to_string(path).await {
-            Ok(text) => Ok(Some(text)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    pub(crate) async fn validate(&self, text: &str) -> LanpathResult<()> {
-        self.checked_value(text).await?;
-        Ok(())
-    }
-
-    pub(crate) async fn save(&self, text: &str) -> LanpathResult<()> {
-        self.checked_value(text).await?;
-        let path = resources::source_path(&self.root)?;
-        // Same private transaction pattern as lanpath-client/backup/transaction:
-        // a unique sibling file, write_all, sync_all, then atomic persist.
-        let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
-        file.write_all(text.as_bytes())?;
-        file.as_file().sync_all()?;
-        file.persist(path).map_err(|error| error.error)?;
-        Ok(())
-    }
-
-    pub(crate) async fn for_start(&self) -> LanpathResult<Value> {
-        let text = self.load().await?.ok_or_else(|| {
-            resources::denied(
-                "configuration.json",
-                "no saved configuration; save and validate the document before starting",
-            )
-        })?;
-        self.checked_value(&text).await
-    }
-
-    async fn checked_value(&self, text: &str) -> LanpathResult<Value> {
-        // Go's JSON decoder may merge duplicate objects, whereas serde_json
-        // keeps the last value. Reject duplicates before either parser can
-        // interpret a different authorization boundary.
-        let value = super::unique_json::parse(text)?;
-        policy::check(&self.root, &value, self.bindings)?;
+    pub(crate) async fn validate_value(&self, value: &Value) -> LanpathResult<()> {
+        policy::check(&self.root, value, self.bindings)?;
         let binary = self.binary.as_deref().ok_or_else(|| {
-            LanpathError::Core("no sing-box binary selected; install/select the real core before checking or saving".into())
+            LanpathError::Core(
+                "no sing-box binary selected; install/select the real core before checking".into(),
+            )
         })?;
         if !binary.is_absolute() || !self.root.is_absolute() {
             return Err(resources::denied(
@@ -126,8 +68,8 @@ impl ConfigStore {
                 ));
             }
         }
-        self.check_core(binary, text).await?;
-        Ok(value)
+        let text = serde_json::to_string_pretty(value)?;
+        self.check_core(binary, &text).await
     }
 
     async fn check_core(&self, binary: &Path, text: &str) -> LanpathResult<()> {
@@ -187,9 +129,6 @@ impl ConfigStore {
                 )))
             }
             Err(_) => {
-                // kill() waits for exit; wait() also reaps when a race meant
-                // the checker had already exited. Keep the candidate alive
-                // until the checker can no longer read it.
                 let killed = child.kill().await;
                 let reaped = child.wait().await;
                 stdout.abort();

@@ -22,6 +22,7 @@ tokio = { version = "1.45", features = ["full"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 
 # Windows 实验性并行目标；不进入根 workspace、Android 或现行发布/CI 门禁。
 [workspace]

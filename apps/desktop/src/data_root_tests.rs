@@ -38,6 +38,25 @@ fn absent_and_empty_roots_become_canonical_persistent_owned_directories() {
 }
 
 #[test]
+fn owned_root_may_hold_experimental_client_config_but_foreign_root_cannot() {
+    let temporary = tempfile::tempdir().unwrap();
+    let owned = temporary.path().join("owned");
+    let root = DataRoot::open(&owned).unwrap();
+    fs::write(owned.join("client.json"), b"experimental settings").unwrap();
+    drop(root);
+    DataRoot::open(&owned).unwrap();
+
+    let foreign = temporary.path().join("foreign");
+    fs::create_dir(&foreign).unwrap();
+    fs::write(foreign.join("client.json"), b"production-shaped settings").unwrap();
+    assert!(DataRoot::open(&foreign).is_err());
+    assert_eq!(
+        fs::read(foreign.join("client.json")).unwrap(),
+        b"production-shaped settings"
+    );
+}
+
+#[test]
 fn foreign_nonempty_directories_are_unchanged() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path();

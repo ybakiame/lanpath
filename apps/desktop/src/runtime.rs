@@ -1,15 +1,11 @@
-use std::{
-    future::Future,
-    net::Ipv4Addr,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 use lanpath_engine::{CoreManager, SingBoxProcessManager};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::{
-    configuration::{Bindings, ConfigStore},
+    business::BusinessService,
+    configuration::Bindings,
     data_root::{DataRoot, default_data_dir},
     log_stream::LogService,
     observation::ObservationService,
@@ -25,11 +21,11 @@ pub(crate) struct DesktopRuntime {
     // the directory lease until every service and the executor have dropped.
     manager: Option<Arc<SingBoxProcessManager>>,
     observations: Option<ObservationService>,
-    configuration: Option<ConfigStore>,
+    business: Option<BusinessService>,
     logs: LogService,
     runtime: Option<Runtime>,
     configuration_error: Option<String>,
-    data_root: Option<DataRoot>,
+    _data_root: Option<DataRoot>,
 }
 
 impl DesktopRuntime {
@@ -92,26 +88,26 @@ impl DesktopRuntime {
         let observations = data_root
             .as_ref()
             .map(|root| ObservationService::new(root.path().to_path_buf()));
-        let configuration = data_root.as_ref().map(|root| {
-            ConfigStore::new(
-                root.path(),
-                binary,
-                Bindings::new(MIXED_PORT, CLASH_API_PORT),
-            )
-        });
+        let bindings = Bindings::new(MIXED_PORT, CLASH_API_PORT);
+        let business = data_root
+            .as_ref()
+            .map(|root| BusinessService::new(root.path(), binary.clone(), bindings));
         Self {
             manager,
             observations,
-            configuration,
+            business,
             logs: LogService::new(),
             runtime,
             configuration_error: (!errors.is_empty()).then(|| errors.join("；")),
-            data_root,
+            _data_root: data_root,
         }
     }
 
     pub(crate) fn is_configured(&self) -> bool {
-        self.configuration_error.is_none() && self.runtime.is_some() && self.manager.is_some()
+        self.configuration_error.is_none()
+            && self.runtime.is_some()
+            && self.manager.is_some()
+            && self.business.is_some()
     }
 
     pub(crate) fn configuration_error(&self) -> Option<&str> {
@@ -123,12 +119,9 @@ impl DesktopRuntime {
     pub(crate) fn api_port(&self) -> u16 {
         CLASH_API_PORT
     }
-    pub(crate) fn data_dir(&self) -> Option<&Path> {
-        self.data_root.as_ref().map(DataRoot::path)
-    }
 
-    pub(crate) fn configuration(&self) -> Result<&ConfigStore, String> {
-        self.configuration
+    pub(crate) fn business(&self) -> Result<&BusinessService, String> {
+        self.business
             .as_ref()
             .ok_or_else(|| self.unavailable_data_error())
     }
@@ -147,9 +140,14 @@ impl DesktopRuntime {
     pub(crate) fn start(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
         runtime.block_on(async {
-            let config = self
-                .configuration()?
-                .for_start()
+            let business = self.business()?;
+            let config = business
+                .build_config(true)
+                .await
+                .map_err(|error| error.to_string())?;
+            business
+                .validator()
+                .validate_value(&config)
                 .await
                 .map_err(|error| error.to_string())?;
             let observations = self.observations()?;

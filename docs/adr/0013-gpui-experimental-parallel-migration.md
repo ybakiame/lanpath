@@ -41,23 +41,23 @@
 
 基线为批准本阶段时的 `0e87b89`，按完整用户任务统计，而不是按能打开的页面统计。以下缺口不因应用改名而视为完成。
 
-| 用户任务 | 既有复用边界 | 阶段开始时 GPUI 覆盖 |
-| --- | --- | --- |
-| 添加/编辑订阅、刷新节点与用量、选用、查看/导出原文 | `lanpath-client::subscription`、`SubscriptionStore` | 未接入 |
-| 创建覆写、校验 YAML/JS/远程 URL、保存、绑定订阅并重启生效 | `ProfileStoreV2`、`validation`、`profile::overrides` | 仅编辑器技术验证，无业务闭环 |
-| 预览最终配置、启动所选订阅、启动阶段与失败反馈、重开使用已保存值 | `profile::build_core_config_v2`、`core_config`、`state/start`、engine | 仅固定配置的隔离启停和正常退出 |
-| 全部策略组、节点选择持久化、测速、规则/全局/直连模式 | `proxies`、`persist_group_selection`、`set_rule_mode_persist` | 仅固定 `proxy` 组的即时选择 |
-| 活动连接、会话关闭记录、流量与路由、关闭连接 | `connections`、`ConnectionTrackerHandle` | 已接真实服务，尚非完整业务会话集成 |
-| 今日/历史统计、日期/关键字/排序、清空、离线重开 | `StatsStore` | 已有真实汇总/默认查询，缺完整查询及清空交互 |
-| 运行日志、暂停/过滤/全文、磁盘日志尾读及导出 | 应用 tracing、核心日志 API、现行 Tauri 日志适配 | 已有真实内存流，磁盘/导出未接入 |
-| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 |
-| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`RuleSetManager`、`ruleset_update` | 未接入 |
-| 远程脚本/片段、导入、参数、刷新、调度与任务结果 | `RemoteManager`、`import`、scheduler、`lanpath-script` | 未接入，样例 JS 不等于执行/管理 |
-| MITM 白名单、CA、信任和抓包记录 | `state/mitm`、`lanpath-mitm`、平台证书适配 | 未接入；CA 系统变更另行授权 |
-| 请求代理、GitHub 镜像、外观及重开恢复 | `ClientConfig`、`request_network`、现行主题偏好 | 未接入，不以 GPUI 默认主题冒充迁移 |
-| age 备份、解密预览、确认恢复、停止、重启事务与外观恢复 | `lanpath-client::backup`、平台文件适配 | 未接入，不能以普通 JSON 保存代替 |
-| 核心版本管理、端口/IPv6/面板、系统代理/TUN 授权与回滚 | `cores`、`privilege`、`sysproxy`、engine | 仅显式指定独立核心；全局系统控制未授权 |
-| 安装/Portable、种子/许可资产、通知/opener、单实例、更新和回退 | 现行桌面 storage、平台适配、updater、发布工作流 | 未接入，现行身份与发布契约不变 |
+| 用户任务 | 既有复用边界 | 阶段开始时 GPUI 覆盖 | 当前 GPUI 覆盖（2026-10-20） |
+| --- | --- | --- | --- |
+| 添加/编辑订阅、刷新节点与用量、选用、查看/导出原文 | `lanpath-client::subscription`、`SubscriptionStore` | 未接入 | 已接入；刷新失败保留上次成功缓存 |
+| 创建覆写、校验 YAML/JS/远程 URL、保存、绑定订阅并重启生效 | `ProfileStoreV2`、`validation`、`profile::overrides` | 仅编辑器技术验证，无业务闭环 | 已接入保存、绑定、关联删除保护与重开恢复 |
+| 预览最终配置、启动所选订阅、启动阶段与失败反馈、重开使用已保存值 | `profile::build_core_config_v2`、`core_config`、`state/start`、engine | 仅固定配置的隔离启停和正常退出 | 已接入 v2 生成、真实核心预检、启动重新生成和持久选择；细分启动阶段仍缺 |
+| 全部策略组、节点选择持久化、测速、规则/全局/直连模式 | `proxies`、`persist_group_selection`、`set_rule_mode_persist` | 仅固定 `proxy` 组的即时选择 | 未变 |
+| 活动连接、会话关闭记录、流量与路由、关闭连接 | `connections`、`ConnectionTrackerHandle` | 已接真实服务，尚非完整业务会话集成 | 未变 |
+| 今日/历史统计、日期/关键字/排序、清空、离线重开 | `StatsStore` | 已有真实汇总/默认查询，缺完整查询及清空交互 | 未变 |
+| 运行日志、暂停/过滤/全文、磁盘日志尾读及导出 | 应用 tracing、核心日志 API、现行 Tauri 日志适配 | 已有真实内存流，磁盘/导出未接入 | 未变 |
+| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 | 合成会读取已有 slices；编辑与探测 UI 未接入 |
+| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`RuleSetManager`、`ruleset_update` | 未接入 | 合成会读取 local override 并物化已有/内置规则集；管理 UI 未接入 |
+| 远程脚本/片段、导入、参数、刷新、调度与任务结果 | `RemoteManager`、`import`、scheduler、`lanpath-script` | 未接入，样例 JS 不等于执行/管理 | 覆写模板 JS 已进入合成；脚本管理和调度仍未接入 |
+| MITM 白名单、CA、信任和抓包记录 | `state/mitm`、`lanpath-mitm`、平台证书适配 | 未接入；CA 系统变更另行授权 | 未变 |
+| 请求代理、GitHub 镜像、外观及重开恢复 | `ClientConfig`、`request_network`、现行主题偏好 | 未接入，不以 GPUI 默认主题冒充迁移 | 仅持久选择重开；实验网络请求强制 `none`，设置 UI 未接入 |
+| age 备份、解密预览、确认恢复、停止、重启事务与外观恢复 | `lanpath-client::backup`、平台文件适配 | 未接入，不能以普通 JSON 保存代替 | 未变 |
+| 核心版本管理、端口/IPv6/面板、系统代理/TUN 授权与回滚 | `cores`、`privilege`、`sysproxy`、engine | 仅显式指定独立核心；全局系统控制未授权 | 固定实验端口与核心仍不构成管理功能；全局系统控制未授权 |
+| 安装/Portable、种子/许可资产、通知/opener、单实例、更新和回退 | 现行桌面 storage、平台适配、updater、发布工作流 | 未接入，现行身份与发布契约不变 | 未变 |
 
 接入时保留这些业务约束：
 
@@ -70,25 +70,47 @@
 
 ## 首个业务迁移单位：实验配置文档
 
-原验证程序已干净迁至 `apps/desktop`，删除样例 YAML/JS、只读演示与固定运行 JSON。
-新实体 `ConfigView` 拥有真实 UTF-8 JSON 草稿、脏状态和单飞操作；`ConfigStore` 负责原文加载、
-能力边界、真实核心 checker 和同目录原子保存，`DesktopRuntime` 负责已保存配置的重新校验与生命周期。
-没有把 `ProfileStoreV2` 的 YAML/JS 覆写存储冒充完整核心文档，也未调用会重新合成字段的面板 builder。
-订阅、覆写合成、结构化 slices 等仍按上表缺口接入；此单位不是这些任务的替代实现。
+该阶段将验证程序迁至 `apps/desktop`，并以可编辑完整 JSON 验证真实 checker、持久源和生命周期。
+这是进入业务迁移前的临时切片；下面的“订阅、覆写与配置合成”单位已删除该运行源和编辑入口，
+改由真实业务数据生成配置。以下条目保留为当时的安全与交互验证记录，不描述当前配置来源。
 
 - 默认持久根与两个新环境变量、启动/检查命令见[开发指南](../development.md#windows-gpui-实验性并行)。
 - `DataRoot` 在服务创建前验证祖先、所有权与文件树，持有真实 OS 独占锁至服务和 executor 释放；
   拒绝目录不会进入配置或离线统计服务，不以伪平台适配绕过权限。
-- `configuration.json` 是唯一保存源；首次新建文档未保存不可启动。校验不保存，保存不热应用，
+- 该阶段以 `configuration.json` 为唯一保存源；首次新建文档未保存不可启动。校验不保存，保存不热应用，
   启动只消费重新加载且通过同一 checker 的已保存值。失败保留原文件和当前草稿。
 - 运行/切换/配置操作期间只读；重新载入与正常关闭处理未保存确认，关闭等待已接受任务再停日志、
   tracker 和核心。已有实时代理、连接、统计、日志继续使用同一隔离实例。
 - checker 是选定核心的 `check -c … -D …` 子进程，不是文本模拟；20 秒超时并回收，持续排空输出，
   有界保留诊断。能力策略不取代核心 schema，也不会静默改写不被允许的字段。
 - 本阶段固定 loopback mixed/API；拒绝重复 JSON 键、Go 大小写字段别名、额外监听、TUN/系统副作用、
-  隐式外部文件与未审定能力；资源仅根内显式相对路径，日志/缓存输出限各自目录。
+  隐式外部文件与未审定能力；资源仅允许根内相对路径或规范化后仍在根内的生成绝对路径，日志/缓存输出限各自目录。
 - 路径边界同时拒绝核心的 `$` 环境变量展开和 Windows 硬链接；`..` 在 Windows 绝对化可能消去之前检查。
   这是受控实验目录的准入和配置约束，不是对同用户恶意运行期篡改的 OS 沙箱。
+
+## 第二个业务迁移单位：订阅、覆写与配置合成
+
+完整 JSON 编辑器不再是运行配置源。`BusinessService` 复用 `SubscriptionStore`、
+`ProfileStoreV2`、订阅拉取/解析、覆写解析和 `build_core_config_v2`，并将实验网络边界规范化到
+独立 `client.json`。订阅、成功原文/节点缓存、活动选择与模板均位于实验根；不读取或迁移生产数据。
+
+- 订阅支持添加/编辑、刷新、启停、设为当前、模板绑定、成功原文查看和根内导出。相同 URL/UA
+  刷新失败只写错误，不删除上次成功缓存；URL/UA 变化会清除旧缓存，迟到响应不能恢复旧地址或元数据。
+- 覆写模板在一次持久化前校验名称、本地 YAML/JS 和远程 URL；无效新增不会留下半成品，
+  有关联订阅时拒绝删除。订阅和模板的脏表单切换、删除及关窗都有确认。
+- 生成顺序保持节点、本地模板、slices、远程 YAML、本地 YAML、远程 JS、本地 JS，再执行 compose、
+  local override、实验面板特性和规则集物化。远程降级警告与规则集缺失按共享策略记录。
+- `ConfigView` 只展示生成结果；每次预览经过实验能力边界和真实核心 `check`。订阅/模板并发变更
+  会排队重新生成，旧预览不能重新开放启动。`DesktopRuntime::start` 不信任预览文本，会重新生成、
+  补齐内置规则集并再次校验后启动。
+- mixed/API 固定为 `127.0.0.1:17899` 和 `127.0.0.1:19090`，请求代理强制 `none`，
+  系统代理、TUN、MITM 和外部面板下载保持关闭。此切片不扩大 ADR 对全局网络控制的授权。
+- 普通回归覆盖活动选择/模板/订阅重开、无效模板与引用的原子失败、刷新失败保留成功缓存以及
+  生成配置边界；显式真实核心用例另外覆盖生成配置的 checker、启动、运行状态和停止。
+
+这完成覆盖矩阵前三项的实验主闭环，不代表整机功能对等。策略组完整交互、结构化设置、规则管理、
+远程任务、MITM、备份、核心管理、安装更新和系统集成仍按矩阵保留为后续迁移；现行 Tauri/Android
+仍是生产实现。
 
 ## 本轮验收（2026-10-19）
 
@@ -130,3 +152,21 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 这不是性能对照、ARM64 发行、系统代理/TUN 接管、Kotlin/AAR/APK 构建或 Android 真机验收。
 本轮未执行这些项目，不据 Rust target check 宣称 Android 运行行为正确；完整业务替换仍按切换条件另行决策。
+
+## 订阅与覆写迁移验收（2026-10-20）
+
+| 范围 | 实际执行与结果 |
+| --- | --- |
+| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；44 passed、3 ignored |
+| 现行 Rust 回归 / Nix | `cargo build --workspace --locked` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check |
+| Windows x64 / MSVC | Rust 1.98.0 release build 与 lib tests 通过；41 passed、3 ignored；仅保留 `lanpath-common` 既有未使用导入警告 |
+| Windows / 本地订阅到真实核心 | 本地 HTTP 返回真实 sing-box 订阅 JSON；拉取、解析、缓存、活动选择、v2 合成、能力校验、sing-box 1.14.2 `check`、进程启动/运行确认/停止单一用例通过 |
+| Windows / 生产隔离 | 验收前后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且无私有核心残留进程 |
+
+普通回归另外覆盖本地 HTTP 成功缓存、刷新失败保留成功缓存、迟到刷新不覆盖已编辑 URL/UA、
+活动选择/模板/订阅重开、无效模板和引用的原子失败、生成缓存落在 `root/cache/` 以及配置能力边界。
+原生真实核心用例使用隔离临时数据根和隔离核心副本，不读取生产订阅。
+
+本轮没有取得新订阅页、覆写页和只读预览页的真实窗口截图或可访问性树：当前环境未提供
+`orca`/`orca-ide` 客户端，旧配置编辑器截图不作为新页面证据。原生构建和业务/核心闭环通过不等于
+视觉、键盘、IME、高 DPI 或读屏验收；这些界面项仍需在具备桌面自动化入口时补验。

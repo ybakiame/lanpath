@@ -2,18 +2,29 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
-use super::{Bindings, ConfigStore, policy, resources, unique_json};
+use super::{Bindings, ConfigValidator, policy, resources};
 
 fn bindings() -> Bindings {
     Bindings::new(17891, 19091)
 }
 
-fn store(root: &std::path::Path) -> ConfigStore {
-    ConfigStore::new(root, None, bindings())
-}
-
-fn document(root: &std::path::Path) -> Value {
-    serde_json::from_str(&store(root).starter_text().unwrap()).unwrap()
+fn document(_root: &std::path::Path) -> Value {
+    json!({
+        "log": { "level": "info", "timestamp": true },
+        "inbounds": [{
+            "type": "mixed", "tag": "mixed-in",
+            "listen": "127.0.0.1", "listen_port": bindings().mixed_port()
+        }],
+        "outbounds": [
+            { "type": "selector", "tag": "proxy", "outbounds": ["direct"], "default": "direct" },
+            { "type": "direct", "tag": "direct" }
+        ],
+        "route": { "final": "proxy" },
+        "experimental": { "clash_api": {
+            "external_controller": format!("127.0.0.1:{}", bindings().api_port()),
+            "default_mode": "rule"
+        }}
+    })
 }
 
 fn reject(root: &std::path::Path, value: &Value, location: &str) {
@@ -279,50 +290,6 @@ fn unknown_nested_tls_and_rule_actions_are_rejected() {
 }
 
 #[test]
-fn duplicate_object_keys_are_rejected_at_every_depth_including_escaped_keys() {
-    for text in [
-        r#"{"experimental":{"v2ray_api":{}},"experimental":{"clash_api":{}}}"#,
-        r#"{"a":[{"tls":{"key_path":"outside"},"tls":{}}]}"#,
-        r#"{"listen":"0.0.0.0","\u006cisten":"127.0.0.1"}"#,
-    ] {
-        assert!(unique_json::parse(text).is_err());
-    }
-    let text = r#"{"a":[null,true,false,-1,18446744073709551615,1.25,"é"]}"#;
-    assert_eq!(
-        unique_json::parse(text).unwrap(),
-        serde_json::from_str::<Value>(text).unwrap()
-    );
-}
-
-#[tokio::test]
-async fn missing_or_malformed_saved_documents_remain_distinguishable_and_editable() {
-    let root = tempfile::tempdir().unwrap();
-    let store = store(root.path());
-    assert!(store.load().await.unwrap().is_none());
-    assert!(store.for_start().await.is_err());
-    let malformed = "{\n  unclosed draft\n";
-    std::fs::write(root.path().join("configuration.json"), malformed).unwrap();
-    assert_eq!(store.load().await.unwrap().unwrap(), malformed);
-    assert!(store.save("[]").await.is_err());
-    assert!(store.save("{invalid}").await.is_err());
-    assert_eq!(store.load().await.unwrap().unwrap(), malformed);
-    assert!(store.for_start().await.is_err());
-}
-
-#[tokio::test]
-async fn missing_real_core_never_marks_a_valid_draft_as_saved() {
-    let root = tempfile::tempdir().unwrap();
-    let store = store(root.path());
-    let original = "old source retained exactly\n";
-    std::fs::write(root.path().join("configuration.json"), original).unwrap();
-    let draft = store.starter_text().unwrap();
-    assert!(store.validate(&draft).await.is_err());
-    assert!(store.save(&draft).await.is_err());
-    assert_eq!(store.load().await.unwrap().unwrap(), original);
-    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
-}
-
-#[test]
 fn existing_resource_hardlinks_are_rejected() {
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
@@ -331,19 +298,35 @@ fn existing_resource_hardlinks_are_rejected() {
     assert!(resources::confined(root.path(), "linked", "resource").is_err());
 }
 
+#[test]
+fn generated_absolute_resources_must_remain_inside_experimental_root() {
+    let root = tempfile::tempdir().unwrap();
+    let inside = root.path().join("cache/rules.srs");
+    std::fs::create_dir_all(inside.parent().unwrap()).unwrap();
+    std::fs::write(&inside, "rules").unwrap();
+    let inside = inside.canonicalize().unwrap();
+    assert_eq!(
+        resources::confined(root.path(), inside.to_str().unwrap(), "route.rule_set.path").unwrap(),
+        inside
+    );
+
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    assert!(
+        resources::confined(
+            root.path(),
+            outside.path().to_str().unwrap(),
+            "route.rule_set.path"
+        )
+        .is_err()
+    );
+}
+
 #[cfg(unix)]
-#[tokio::test]
-async fn symlinked_sources_and_resource_parents_are_refused_without_reading_them() {
+#[test]
+fn symlinked_resource_parents_are_refused_without_reading_them() {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::fs::write(outside.path().join("production.json"), "production source").unwrap();
-    symlink(
-        outside.path().join("production.json"),
-        root.path().join("configuration.json"),
-    )
-    .unwrap();
-    assert!(store(root.path()).load().await.is_err());
     symlink(outside.path(), root.path().join("logs")).unwrap();
     let mut config = document(root.path());
     config["log"]["output"] = json!("logs/core.log");
@@ -354,7 +337,7 @@ async fn symlinked_sources_and_resource_parents_are_refused_without_reading_them
 /// or a fake checker. Set LANPATH_TEST_SING_BOX to its absolute executable path.
 #[tokio::test]
 #[ignore = "requires LANPATH_TEST_SING_BOX pointing to a real sing-box executable"]
-async fn real_core_checks_exact_saved_source_and_rechecks_before_start() {
+async fn real_core_checks_generated_value() {
     let binary = PathBuf::from(
         std::env::var_os("LANPATH_TEST_SING_BOX")
             .expect("set LANPATH_TEST_SING_BOX to a real core"),
@@ -362,26 +345,15 @@ async fn real_core_checks_exact_saved_source_and_rechecks_before_start() {
     assert!(binary.is_absolute());
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path().canonicalize().unwrap();
-    let store = ConfigStore::new(&root_path, Some(binary), bindings());
-    let exact = format!(" \n{}\n\n", store.starter_text().unwrap());
-    store.validate(&exact).await.unwrap();
-    assert!(!root_path.join("configuration.json").exists());
-    store.save(&exact).await.unwrap();
-    assert_eq!(store.load().await.unwrap().unwrap(), exact);
-    assert_eq!(
-        store.for_start().await.unwrap(),
-        serde_json::from_str::<Value>(&exact).unwrap()
-    );
-    let mut invalid = serde_json::from_str::<Value>(&exact).unwrap();
+    let store = ConfigValidator::new(&root_path, Some(binary), bindings());
+    let valid = document(&root_path);
+    store.validate_value(&valid).await.unwrap();
+    let mut invalid = valid;
     invalid["outbounds"][1] =
         json!({"type":"socks","tag":"direct","server":"127.0.0.1","server_port":"not-a-port"});
-    let invalid = serde_json::to_string(&invalid).unwrap();
     // Passes capability checks; only the actual core rejects the bad schema.
-    assert!(store.save(&invalid).await.is_err());
-    assert_eq!(store.load().await.unwrap().unwrap(), exact);
-    std::fs::write(root_path.join("configuration.json"), invalid).unwrap();
-    assert!(store.for_start().await.is_err());
-    assert_eq!(std::fs::read_dir(&root_path).unwrap().count(), 1);
+    assert!(store.validate_value(&invalid).await.is_err());
+    assert_eq!(std::fs::read_dir(&root_path).unwrap().count(), 0);
 }
 
 #[test]

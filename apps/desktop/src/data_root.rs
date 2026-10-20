@@ -83,6 +83,12 @@ impl DataRoot {
     }
 }
 
+impl Drop for DataRoot {
+    fn drop(&mut self) {
+        let _ = self._lock.unlock();
+    }
+}
+
 pub(crate) fn default_data_dir() -> LanpathResult<PathBuf> {
     #[cfg(windows)]
     {
@@ -157,7 +163,11 @@ fn check_owner(root: &Path) -> LanpathResult<()> {
 }
 
 fn check_ancestors(path: &Path) -> LanpathResult<()> {
-    for ancestor in path.ancestors() {
+    // Once the exact experimental marker owns the root, its own client.json is
+    // application state rather than evidence that this is a production root.
+    // Ancestor client.json files remain forbidden.
+    let owned_self = path.is_dir() && check_owner(path).is_ok();
+    for (depth, ancestor) in path.ancestors().enumerate() {
         if ancestor.file_name().is_some_and(|name| {
             [".lanpath", ".proxy-panel-client", "com.ybakiame.lanpath"]
                 .iter()
@@ -180,8 +190,9 @@ fn check_ancestors(path: &Path) -> LanpathResult<()> {
             )));
         }
         // Probe metadata only; never open production configuration or seed data.
-        let production_marker = metadata_if_present(&ancestor.join("client.json"))?.is_some()
-            || metadata_if_present(&ancestor.join("lanpath.portable"))?.is_some();
+        let production_marker = (depth != 0 || !owned_self)
+            && (metadata_if_present(&ancestor.join("client.json"))?.is_some()
+                || metadata_if_present(&ancestor.join("lanpath.portable"))?.is_some());
         let portable_layout = (metadata_if_present(&ancestor.join("Lanpath.exe"))?.is_some()
             || metadata_if_present(&ancestor.join("lanpath-app.exe"))?.is_some())
             && (metadata_if_present(&ancestor.join("data"))?.is_some()

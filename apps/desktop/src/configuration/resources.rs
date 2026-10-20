@@ -12,7 +12,7 @@ pub(super) fn denied(location: &str, reason: &str) -> LanpathError {
 /// Missing leaves are permitted for output files, never missing parents.
 /// This is configuration confinement, not protection against a hostile process
 /// with permission to replace files after validation.
-pub(super) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult<PathBuf> {
+pub(crate) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult<PathBuf> {
     if text.is_empty() || text.contains('\0') {
         return Err(denied(location, "expected a nonempty file path"));
     }
@@ -22,31 +22,44 @@ pub(super) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult
             "environment-variable resource paths are unsupported",
         ));
     }
-    // A colon also rules out Windows alternate data streams and device paths.
-    // Absolute paths are intentionally unsupported: portable resources are root-relative.
-    if text.contains(':') || text.contains('\\') {
-        return Err(denied(
-            location,
-            "use a root-relative path with '/' separators",
-        ));
-    }
-    let relative = Path::new(text);
+    let canonical_root = std::fs::canonicalize(root)?;
+    let candidate = Path::new(text);
+    let relative = if candidate.is_absolute() {
+        candidate
+            .strip_prefix(&canonical_root)
+            .map(Path::to_path_buf)
+            .map_err(|_| {
+                denied(
+                    location,
+                    "absolute resource paths must stay inside the experimental root",
+                )
+            })?
+    } else {
+        // A colon rules out Windows drive/device paths and alternate data
+        // streams. Backslashes are not portable separators for relative paths.
+        if text.contains(':') || text.contains('\\') {
+            return Err(denied(
+                location,
+                "use a root-relative path with '/' separators",
+            ));
+        }
+        candidate.to_path_buf()
+    };
     if relative
         .components()
-        .any(|c| !matches!(c, Component::Normal(_)))
+        .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(denied(
             location,
-            "absolute, '.' and '..' resource paths are unsupported",
+            "resource paths must not contain root, '.' or '..' components",
         ));
     }
-    for name in text.split('/') {
+    for component in relative.components() {
+        let name = component.as_os_str().to_string_lossy();
         let stem = name.split('.').next().unwrap_or_default();
         if name.is_empty()
-            || name == "."
-            || name == ".."
             || name.ends_with(['.', ' '])
-            || name.chars().any(|c| c.is_control() || "<>|?*".contains(c))
+            || name.chars().any(|c| c.is_control() || "<>|?*:".contains(c))
             || ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
                 .iter()
                 .any(|reserved| stem.eq_ignore_ascii_case(reserved))
@@ -63,7 +76,6 @@ pub(super) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult
             ));
         }
     }
-    let canonical_root = std::fs::canonicalize(root)?;
     let mut path = canonical_root.clone();
     let mut components = relative.components().peekable();
     while let Some(component) = components.next() {
@@ -150,17 +162,19 @@ pub(super) fn write_path(
     let text = value
         .as_str()
         .ok_or_else(|| denied(location, "expected a file path"))?;
-    let relative = Path::new(text);
-    if relative.parent().is_none_or(|p| !p.starts_with(directory)) {
+    let path = confined(root, text, location)?;
+    let canonical_root = std::fs::canonicalize(root)?;
+    let relative = path
+        .strip_prefix(&canonical_root)
+        .map_err(|_| denied(location, "output escaped the experimental root"))?;
+    if relative
+        .parent()
+        .is_none_or(|parent| !parent.starts_with(directory))
+    {
         return Err(denied(
             location,
             &format!("output must be inside the root/{directory}/ directory (create it first)"),
         ));
     }
-    confined(root, text, location)?;
     Ok(())
-}
-
-pub(super) fn source_path(root: &Path) -> LanpathResult<PathBuf> {
-    confined(root, "configuration.json", "configuration.json")
 }

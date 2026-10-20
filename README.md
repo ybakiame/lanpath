@@ -38,7 +38,7 @@ Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，�
 `apps/desktop` 已进入实验性并行迁移，独立程序名为 `lanpath-desktop-experimental`；
 现行 Tauri 桌面与 Android 保持不变，尚未批准生产替换或发行。
 实验版使用独立持久数据根与 loopback 核心/API，不接管系统代理或 TUN，不自动导入生产数据。
-当前配置入口编辑真实 sing-box JSON 文档；业务迁移覆盖与缺口见
+实验版已接入真实订阅、覆写模板和 v2 配置合成，生成只读最终配置后启动。业务覆盖与剩余缺口见
 [ADR-0013](docs/adr/0013-gpui-experimental-parallel-migration.md)，
 启动及校验命令见[开发指南](docs/development.md#windows-gpui-实验性并行)。
 

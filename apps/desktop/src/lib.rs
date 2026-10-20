@@ -1,3 +1,4 @@
+mod business;
 mod config_view;
 mod configuration;
 mod connection_list;
@@ -9,6 +10,7 @@ mod log_list;
 mod log_stream;
 mod logs_view;
 mod observation;
+mod profiles_view;
 mod proxy_list;
 mod proxy_service;
 mod proxy_view;
@@ -16,6 +18,7 @@ mod runtime;
 mod shutdown_view;
 mod stats_list;
 mod stats_view;
+mod subscriptions_view;
 #[cfg(windows)]
 mod windows_file;
 
@@ -34,10 +37,12 @@ use gpui_kit::{
     TitlebarOptions, Window, WindowOptions, div,
 };
 use logs_view::LogsView;
+use profiles_view::{ProfilesChanged, ProfilesView};
 use proxy_list::ProxyListDelegate;
 use proxy_service::ProxyService;
 use runtime::DesktopRuntime;
 use stats_view::StatsView;
+use subscriptions_view::{SubscriptionsChanged, SubscriptionsView};
 
 #[derive(Clone, Copy)]
 enum CoreOperationKind {
@@ -52,6 +57,8 @@ enum ProxyOperation {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
+    Subscriptions,
+    Profiles,
     Configuration,
     Proxies,
     Connections,
@@ -62,6 +69,8 @@ enum Page {
 struct DesktopView {
     page: Page,
     configuration: Entity<ConfigView>,
+    subscriptions: Entity<SubscriptionsView>,
+    profiles: Entity<ProfilesView>,
     core: Arc<DesktopRuntime>,
     connections: Entity<ConnectionsView>,
     stats: Entity<StatsView>,
@@ -80,6 +89,7 @@ struct DesktopView {
     proxy_action_error: Option<String>,
     _proxy_subscription: Subscription,
     _configuration_subscription: Subscription,
+    _business_subscriptions: Vec<Subscription>,
 }
 
 impl DesktopView {
@@ -87,6 +97,30 @@ impl DesktopView {
         let configuration = cx.new(|cx| ConfigView::new(core.clone(), window, cx));
         let _configuration_subscription =
             cx.subscribe(&configuration, |_, _, _: &ConfigEvent, cx| cx.notify());
+        let subscriptions = cx.new(|cx| SubscriptionsView::new(core.clone(), window, cx));
+        let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
+        let _business_subscriptions = vec![
+            cx.subscribe_in(
+                &subscriptions,
+                window,
+                |this, _, _: &SubscriptionsChanged, window, cx| {
+                    this.configuration
+                        .update(cx, |view, cx| view.refresh(window, cx));
+                    cx.notify();
+                },
+            ),
+            cx.subscribe_in(
+                &profiles,
+                window,
+                |this, _, _: &ProfilesChanged, window, cx| {
+                    this.subscriptions
+                        .update(cx, |view, cx| view.reload_profiles(cx));
+                    this.configuration
+                        .update(cx, |view, cx| view.refresh(window, cx));
+                    cx.notify();
+                },
+            ),
+        ];
         let proxies = ProxyService::new(core.api_port());
         let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
         let stats = cx.new(|cx| StatsView::new(core.clone(), window, cx));
@@ -111,8 +145,10 @@ impl DesktopView {
         });
 
         Self {
-            page: Page::Configuration,
+            page: Page::Subscriptions,
             configuration,
+            subscriptions,
+            profiles,
             core,
             connections,
             stats,
@@ -131,6 +167,7 @@ impl DesktopView {
             proxy_action_error: None,
             _proxy_subscription,
             _configuration_subscription,
+            _business_subscriptions,
         }
     }
 
@@ -145,6 +182,8 @@ impl DesktopView {
             || self.closing
             || self.proxy_busy.is_some()
             || self.configuration.read(cx).busy()
+            || self.subscriptions.read(cx).busy()
+            || self.profiles.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -155,6 +194,10 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_running(false, cx));
         self.core_busy = Some(kind);
         self.configuration
+            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.subscriptions
+            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.profiles
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.core_error = None;
         self.core_task = None;
@@ -215,6 +258,12 @@ impl DesktopView {
                 this.configuration.update(cx, |view, cx| {
                     view.set_locked(this.core_running || this.closing, cx)
                 });
+                this.subscriptions.update(cx, |view, cx| {
+                    view.set_locked(this.core_running || this.closing, cx)
+                });
+                this.profiles.update(cx, |view, cx| {
+                    view.set_locked(this.core_running || this.closing, cx)
+                });
                 cx.notify();
             });
         });
@@ -228,7 +277,7 @@ impl DesktopView {
         }
         if let Some(kind) = self.core_busy {
             return match kind {
-                CoreOperationKind::Start => "正在加载保存配置并启动实验核心…".to_string(),
+                CoreOperationKind::Start => "正在生成、校验配置并启动实验核心…".to_string(),
                 CoreOperationKind::Stop => "正在停止核心…".to_string(),
             };
         }
@@ -265,9 +314,13 @@ impl Render for DesktopView {
         let operation_busy = self.closing
             || self.core_busy.is_some()
             || self.proxy_busy.is_some()
-            || self.configuration.read(cx).busy();
+            || self.configuration.read(cx).busy()
+            || self.subscriptions.read(cx).busy()
+            || self.profiles.read(cx).busy();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
+            Page::Subscriptions => self.subscriptions.clone().into_any_element(),
+            Page::Profiles => self.profiles.clone().into_any_element(),
             Page::Configuration => self.configuration.clone().into_any_element(),
             Page::Proxies => self.render_proxy_panel(cx).into_any_element(),
             Page::Connections => self.connections.clone().into_any_element(),
@@ -303,8 +356,24 @@ impl Render for DesktopView {
                     .items_center()
                     .gap_2()
                     .child(
+                        Button::new("page-subscriptions")
+                            .label("订阅")
+                            .selected(self.page == Page::Subscriptions)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(Page::Subscriptions, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("page-profiles")
+                            .label("覆写")
+                            .selected(self.page == Page::Profiles)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(Page::Profiles, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("page-configuration")
-                            .label("配置")
+                            .label("预览")
                             .selected(self.page == Page::Configuration)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_page(Page::Configuration, cx);
