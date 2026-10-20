@@ -1,9 +1,11 @@
 mod config;
 mod config_slices;
 mod profiles;
+mod rules;
 mod state;
 
 pub(crate) use config_slices::ConfigSlicesDocument;
+pub(crate) use rules::LocalOverrideDocument;
 mod subscriptions;
 
 use std::path::{Path, PathBuf};

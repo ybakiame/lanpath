@@ -1,8 +1,8 @@
 use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
 use lanpath_client::{
     EffectiveOverrides, PanelFeatures, ProfileStoreV2, SubscriptionStore, apply_panel_features,
-    build_core_config_v2, compose_singbox_config, inject_local_override_warn_only,
-    resolve_remote_overrides,
+    build_core_config_v2, compose_singbox_config, download_missing_rule_sets_warn_only,
+    inject_local_override_warn_only, resolve_remote_overrides,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use serde_json::Value;
@@ -62,6 +62,12 @@ impl BusinessService {
         let slices = load_slices(&self.root);
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
         let mut value = compose_singbox_config(&profile_config, self.bindings.mixed_port(), None)?;
+        if download_rule_sets {
+            download_missing_rule_sets_warn_only(&self.root, &value, &|message| {
+                tracing::info!(%message, "实验规则集启动补齐");
+            })
+            .await;
+        }
         inject_local_override_warn_only(&self.root, &mut value);
         apply_panel_features(
             &mut value,
@@ -84,7 +90,10 @@ impl BusinessService {
     }
 
     pub(crate) async fn preview_config(&self) -> LanpathResult<String> {
-        let value = self.build_config(false).await?;
+        // Preview is the start gate, so it must exercise the same resource-fill
+        // path as start; otherwise a newly referenced remote rule set would make
+        // preview fail before start gets a chance to download it.
+        let value = self.build_config(true).await?;
         self.validator().validate_value(&value).await?;
         Ok(serde_json::to_string_pretty(&value)?)
     }

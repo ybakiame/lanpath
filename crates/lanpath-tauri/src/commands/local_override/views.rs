@@ -55,7 +55,7 @@ pub struct LocalRuleView {
     pub note: String,
     pub created_at: u64,
     pub sort_order: i32,
-    /// 是否为内置规则（可修改开关/出站/排序，不可删除）。
+    /// 是否为可显式恢复的内置规则；规则本身仍可编辑和删除。
     pub builtin: bool,
 }
 

@@ -114,11 +114,11 @@ pub struct LocalRule {
     pub created_at: u64,
     /// Sort weight (smaller = earlier).
     pub sort_order: i32,
-    /// Whether this is a materialized built-in rule (CN-split baseline).
+    /// Whether this is a materialized built-in rule.
     ///
-    /// 内置规则**可修改不可删除**：`enabled` / `action` / 排序可调，`id` /
-    /// `match_type` / `target` / `name` 由内置规格在加载迁移与保存时归一化；缺失的
-    /// 内置规则在加载时自动补种（见 store 迁移）。
+    /// Built-ins remain ordinary editable and deletable rules. The marker identifies entries
+    /// that can be restored explicitly; loading and saving only normalize matching entries and
+    /// never recreate a deletion.
     #[serde(default)]
     pub builtin: bool,
 }

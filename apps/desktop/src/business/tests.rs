@@ -395,12 +395,111 @@ async fn generated_subscription_pipeline_starts_real_core() {
     };
     selector.default = "fixture-node-b".into();
     let saved = service.save_config_slices(&slices).unwrap();
+    let rule_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let rule_address = rule_listener.local_addr().unwrap();
+    let rule_body = r#"{"version":1,"rules":[{"domain_suffix":["updated.test"]}]}"#;
+    let rule_response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{rule_body}",
+        rule_body.len()
+    );
+    let rule_server = tokio::spawn(async move {
+        let (mut stream, _) = rule_listener.accept().await.unwrap();
+        let mut request = [0; 2048];
+        let _ = stream.read(&mut request).await.unwrap();
+        stream.write_all(rule_response.as_bytes()).await.unwrap();
+    });
+    let mut local = service.local_override().unwrap().value;
+    local
+        .custom_rule_sets
+        .push(lanpath_client::local_override::CustomRuleSet {
+            id: "real-core-manual".into(),
+            name: "Real core manual".into(),
+            tag: "real-core-manual".into(),
+            category: "验证".into(),
+            source: lanpath_client::local_override::CustomRuleSetSource::Manual {
+                content: r#"{"version":1,"rules":[{"domain_suffix":["example.test"]}]}"#.into(),
+            },
+            last_updated: 0,
+            remote_updated_at: 0,
+            remote_state: Default::default(),
+            builtin: false,
+        });
+    local
+        .custom_rule_sets
+        .push(lanpath_client::local_override::CustomRuleSet {
+            id: "real-core-remote".into(),
+            name: "Real core remote".into(),
+            tag: "real-core-remote".into(),
+            category: "更新".into(),
+            source: lanpath_client::local_override::CustomRuleSetSource::Remote {
+                url: format!("http://{rule_address}/rules.json"),
+                format: lanpath_client::local_override::RuleSetFormat::Source,
+            },
+            last_updated: 0,
+            remote_updated_at: 0,
+            remote_state: Default::default(),
+            builtin: false,
+        });
+    local
+        .singbox
+        .rules
+        .push(lanpath_client::local_override::LocalRule {
+            id: "real-core-route".into(),
+            name: "Real core route".into(),
+            enabled: true,
+            match_type: lanpath_client::local_override::RuleMatchType::RuleSet,
+            target: "real-core-manual,real-core-remote".into(),
+            action: lanpath_client::local_override::RuleAction::Direct,
+            advanced: Default::default(),
+            note: String::new(),
+            created_at: 1,
+            sort_order: -1_000,
+            builtin: false,
+        });
+    local
+        .singbox
+        .rules
+        .push(lanpath_client::local_override::LocalRule {
+            id: "real-core-final".into(),
+            name: "Real core final".into(),
+            enabled: true,
+            match_type: lanpath_client::local_override::RuleMatchType::Final,
+            target: String::new(),
+            action: lanpath_client::local_override::RuleAction::Outbound {
+                tag: "fixture-node-b".into(),
+            },
+            advanced: Default::default(),
+            note: String::new(),
+            created_at: 2,
+            sort_order: 10_000,
+            builtin: false,
+        });
+    service.save_local_override(local).unwrap();
+    let (outcome, updated) = service.update_rule_set("real-core-remote").await.unwrap();
+    rule_server.await.unwrap();
+    assert_eq!(
+        (outcome.updated, outcome.skipped, outcome.failed),
+        (1, 0, 0)
+    );
+    assert!(updated.cached_rule_sets.contains("real-core-remote"));
     let reopened = BusinessService::new(
         &root_path,
         Some(binary.clone()),
         Bindings::new(17899, 19090),
     );
     assert_eq!(reopened.config_slices().unwrap().slices, saved.slices);
+    let reopened_local = reopened.local_override().unwrap();
+    assert!(reopened_local.cached_rule_sets.contains("real-core-manual"));
+    assert!(reopened_local.cached_rule_sets.contains("real-core-remote"));
+    assert_eq!(
+        reopened_local
+            .value
+            .custom_rule_sets
+            .iter()
+            .find(|set| set.id == "real-core-manual")
+            .map(|set| set.category.as_str()),
+        Some("验证")
+    );
 
     let generated = service.build_config(false).await.unwrap();
     assert_eq!(
@@ -410,7 +509,7 @@ async fn generated_subscription_pipeline_starts_real_core() {
     assert_eq!(generated.pointer("/dns/final"), Some(&json!("local")));
     assert_eq!(
         generated.pointer("/route/final"),
-        Some(&json!("fixture-node-a"))
+        Some(&json!("fixture-node-b"))
     );
     assert_eq!(
         generated.pointer("/route/default_domain_resolver/server"),
@@ -428,6 +527,23 @@ async fn generated_subscription_pipeline_starts_real_core() {
                 .and_then(|item| item.get("default"))
         }),
         Some(&json!("fixture-node-b"))
+    );
+    let generated_sets = generated["route"]["rule_set"].as_array().unwrap();
+    for tag in ["real-core-manual", "real-core-remote"] {
+        assert!(generated_sets.iter().any(|set| {
+            set["tag"] == tag && set["type"] == "local" && set["format"] == "source"
+        }));
+    }
+    assert!(
+        generated["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| {
+                rule["rule_set"].as_array().is_some_and(|tags| {
+                    tags == &[json!("real-core-manual"), json!("real-core-remote")]
+                }) && rule["outbound"] == "direct"
+            })
     );
     service
         .validator()
@@ -634,4 +750,126 @@ async fn structured_dns_probe_uses_selected_server_address_and_port() {
         .unwrap();
     responder.await.unwrap();
     assert!(latency < 3_000);
+}
+
+#[tokio::test]
+async fn route_rules_and_manual_rule_sets_persist_reopen_and_generate_runtime_config() {
+    use lanpath_client::local_override::{
+        CustomRuleSet, CustomRuleSetSource, LocalRule, RuleAction, RuleMatchType,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let initial = service(root.path());
+    let subscription = initial
+        .subscription_store()
+        .add("fixture", "https://example.invalid/sub", true, None)
+        .unwrap();
+    initial
+        .subscription_store()
+        .write_cached_content(
+            subscription.id,
+            &CachedSubscriptionContent {
+                format: SubFormat::SingBoxJson,
+                singbox_nodes: vec![json!({
+                    "type": "shadowsocks",
+                    "tag": "node-a",
+                    "server": "127.0.0.1",
+                    "server_port": 8388,
+                    "method": "aes-128-gcm",
+                    "password": "fixture"
+                })],
+            },
+        )
+        .unwrap();
+    initial
+        .set_active_subscription(Some(subscription.id))
+        .unwrap();
+
+    let mut document = initial.local_override().unwrap().value;
+    document.custom_rule_sets.push(CustomRuleSet {
+        id: "manual-fixture".into(),
+        name: "Manual fixture".into(),
+        tag: "manual-fixture".into(),
+        category: "测试".into(),
+        source: CustomRuleSetSource::Manual {
+            content: r#"{"version":1,"rules":[{"domain_suffix":["example.test"]}]}"#.into(),
+        },
+        last_updated: 0,
+        remote_updated_at: 0,
+        remote_state: Default::default(),
+        builtin: false,
+    });
+    document.singbox.rules.push(LocalRule {
+        id: "manual-rule".into(),
+        name: "Fixture direct".into(),
+        enabled: true,
+        match_type: RuleMatchType::RuleSet,
+        target: "manual-fixture".into(),
+        action: RuleAction::Direct,
+        advanced: Default::default(),
+        note: String::new(),
+        created_at: 1,
+        sort_order: -1_000,
+        builtin: false,
+    });
+    document.singbox.rules.push(LocalRule {
+        id: "final-rule".into(),
+        name: "Fixture final".into(),
+        enabled: true,
+        match_type: RuleMatchType::Final,
+        target: String::new(),
+        action: RuleAction::Reject,
+        advanced: Default::default(),
+        note: String::new(),
+        created_at: 2,
+        sort_order: 10_000,
+        builtin: false,
+    });
+    let saved = initial.save_local_override(document).unwrap();
+    assert!(saved.cached_rule_sets.contains("manual-fixture"));
+
+    let reopened = service(root.path());
+    let reopened_document = reopened.local_override().unwrap();
+    assert_eq!(
+        reopened_document
+            .value
+            .custom_rule_sets
+            .iter()
+            .find(|set| set.id == "manual-fixture")
+            .unwrap()
+            .category,
+        "测试"
+    );
+    assert!(
+        reopened_document
+            .cached_rule_sets
+            .contains("manual-fixture")
+    );
+
+    let generated = reopened.build_config(false).await.unwrap();
+    let rule_sets = generated
+        .pointer("/route/rule_set")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    let materialized = rule_sets
+        .iter()
+        .find(|set| set["tag"] == "manual-fixture")
+        .unwrap();
+    assert_eq!(materialized["type"], "local");
+    assert_eq!(materialized["format"], "source");
+    assert!(
+        materialized["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("manual-fixture.json")
+    );
+    assert!(
+        generated["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["rule_set"] == "manual-fixture" && rule["outbound"] == "direct")
+    );
+    assert_eq!(generated.pointer("/route/final"), Some(&json!("block")));
 }

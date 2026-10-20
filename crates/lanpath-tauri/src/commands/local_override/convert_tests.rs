@@ -4,7 +4,7 @@
 
 use super::*;
 use lanpath_client::local_override::{
-    CustomRuleSet, CustomRuleSetSource, RuleAction, RuleMatchType,
+    CustomRuleSet, CustomRuleSetSource, RuleAction, RuleMatchType, validate_local_override,
 };
 
 fn custom_set(id: &str, tag: &str) -> CustomRuleSet {
@@ -81,7 +81,7 @@ fn rejects_empty_segment() {
         vec![custom_set("c1", "a"), custom_set("c2", "b")],
         vec![rule_set_rule("r1", "a,,b")],
     );
-    let err = validate_local_override(&ovr).unwrap_err();
+    let err = validate_local_override(&ovr).unwrap_err().to_string();
     assert!(err.contains("empty rule set tag"), "{err}");
 }
 

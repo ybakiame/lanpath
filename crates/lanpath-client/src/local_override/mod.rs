@@ -16,11 +16,13 @@ mod metadata_migration;
 pub mod ruleset;
 mod ruleset_update;
 pub mod schema;
+pub mod service;
 pub mod singbox;
 pub mod store;
 
 pub use ruleset::*;
 pub use schema::*;
+pub use service::*;
 pub use singbox::*;
 pub use store::*;
 

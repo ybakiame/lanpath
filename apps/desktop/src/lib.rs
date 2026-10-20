@@ -15,6 +15,7 @@ mod profiles_view;
 mod proxy_list;
 mod proxy_service;
 mod proxy_view;
+mod rules_view;
 mod runtime;
 mod shutdown_view;
 mod stats_list;
@@ -39,6 +40,7 @@ use gpui_kit::{
 use logs_view::LogsView;
 use profiles_view::{ProfilesChanged, ProfilesView};
 use proxy_view::{ProxyConfigurationChanged, ProxyView};
+use rules_view::{RulesChanged, RulesView};
 use runtime::DesktopRuntime;
 use stats_view::StatsView;
 use subscriptions_view::{SubscriptionsChanged, SubscriptionsView};
@@ -54,6 +56,7 @@ enum Page {
     Subscriptions,
     Profiles,
     Structured,
+    Rules,
     Configuration,
     Proxies,
     Connections,
@@ -67,6 +70,7 @@ struct DesktopView {
     subscriptions: Entity<SubscriptionsView>,
     profiles: Entity<ProfilesView>,
     structured: Entity<ConfigSlicesView>,
+    rules: Entity<RulesView>,
     core: Arc<DesktopRuntime>,
     proxy: Entity<ProxyView>,
     connections: Entity<ConnectionsView>,
@@ -90,6 +94,7 @@ impl DesktopView {
             cx.subscribe(&configuration, |_, _, _: &ConfigEvent, cx| cx.notify());
         let subscriptions = cx.new(|cx| SubscriptionsView::new(core.clone(), window, cx));
         let structured = cx.new(|cx| ConfigSlicesView::new(core.clone(), window, cx));
+        let rules = cx.new(|cx| RulesView::new(core.clone(), window, cx));
         let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
         let _business_subscriptions = vec![
             cx.subscribe_in(
@@ -121,6 +126,11 @@ impl DesktopView {
                     cx.notify();
                 },
             ),
+            cx.subscribe_in(&rules, window, |this, _, _: &RulesChanged, window, cx| {
+                this.configuration
+                    .update(cx, |view, cx| view.refresh(window, cx));
+                cx.notify();
+            }),
         ];
         let proxy = cx.new(|cx| ProxyView::new(core.clone(), window, cx));
         let _proxy_configuration_subscription = cx.subscribe_in(
@@ -146,6 +156,7 @@ impl DesktopView {
             configuration,
             subscriptions,
             structured,
+            rules,
             profiles,
             core,
             proxy,
@@ -175,6 +186,7 @@ impl DesktopView {
                 self.core_running
                     || !self.configuration.read(cx).ready_for_start()
                     || self.structured.read(cx).dirty()
+                    || self.rules.read(cx).dirty()
             }
             CoreOperationKind::Stop => !self.core_running,
         };
@@ -185,6 +197,7 @@ impl DesktopView {
             || self.subscriptions.read(cx).busy()
             || self.profiles.read(cx).busy()
             || self.structured.read(cx).busy()
+            || self.rules.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -204,6 +217,7 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.structured
             .update(cx, |view, cx| view.set_locked(true, cx));
+        self.rules.update(cx, |view, cx| view.set_locked(true, cx));
         self.core_error = None;
         self.core_task = None;
         let service = self.core.clone();
@@ -249,6 +263,9 @@ impl DesktopView {
                         view.set_locked(this.core_running || this.closing, cx)
                     });
                     this.structured.update(cx, |view, cx| {
+                        view.set_locked(this.core_running || this.closing, cx)
+                    });
+                    this.rules.update(cx, |view, cx| {
                         view.set_locked(this.core_running || this.closing, cx)
                     });
                     cx.notify();
@@ -306,12 +323,14 @@ impl Render for DesktopView {
             || self.configuration.read(cx).busy()
             || self.subscriptions.read(cx).busy()
             || self.profiles.read(cx).busy()
-            || self.structured.read(cx).busy();
+            || self.structured.read(cx).busy()
+            || self.rules.read(cx).busy();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
             Page::Profiles => self.profiles.clone().into_any_element(),
             Page::Structured => self.structured.clone().into_any_element(),
+            Page::Rules => self.rules.clone().into_any_element(),
             Page::Configuration => self.configuration.clone().into_any_element(),
             Page::Proxies => self.proxy.clone().into_any_element(),
             Page::Connections => self.connections.clone().into_any_element(),
@@ -371,6 +390,14 @@ impl Render for DesktopView {
                             })),
                     )
                     .child(
+                        Button::new("page-rules")
+                            .label("规则")
+                            .selected(self.page == Page::Rules)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(Page::Rules, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("page-configuration")
                             .label("预览")
                             .selected(self.page == Page::Configuration)
@@ -425,7 +452,8 @@ impl Render for DesktopView {
                                     || self.core_running
                                     || !self.core.is_configured()
                                     || !self.configuration.read(cx).ready_for_start()
-                                    || self.structured.read(cx).dirty(),
+                                    || self.structured.read(cx).dirty()
+                                    || self.rules.read(cx).dirty(),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.run_core_operation(CoreOperationKind::Start, window, cx);

@@ -13,6 +13,3 @@ mod views;
 pub use rules::*;
 pub use rulesets::*;
 pub(crate) use views::default_true;
-
-// No network awaits while holding this small write transaction lock.
-static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

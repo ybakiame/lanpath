@@ -15,7 +15,7 @@ impl DesktopView {
             dialog
                 .title("放弃修改并关闭实验版？")
                 .description(
-                    "订阅、覆写或结构化配置有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
+                    "订阅、覆写、结构化配置或规则有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
                 )
                 .confirm()
                 .ok_text("放弃修改并关闭")
@@ -40,6 +40,7 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.structured
             .update(cx, |view, cx| view.set_locked(true, cx));
+        self.rules.update(cx, |view, cx| view.set_locked(true, cx));
         self.proxy.update(cx, |view, cx| view.set_closing(true, cx));
         self.connections
             .update(cx, |view, cx| view.set_running(false, cx));
@@ -57,6 +58,7 @@ impl DesktopView {
                         || this.subscriptions.read(cx).busy()
                         || this.profiles.read(cx).busy()
                         || this.structured.read(cx).busy()
+                        || this.rules.read(cx).busy()
                 }) else {
                     return;
                 };
@@ -71,6 +73,7 @@ impl DesktopView {
                 this.subscriptions.read(cx).dirty()
                     || this.profiles.read(cx).dirty()
                     || this.structured.read(cx).dirty()
+                    || this.rules.read(cx).dirty()
             }) else {
                 return;
             };
@@ -85,6 +88,8 @@ impl DesktopView {
                         this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.structured
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.rules
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.proxy
                             .update(cx, |view, cx| view.set_closing(false, cx));
@@ -121,6 +126,8 @@ impl DesktopView {
                         this.profiles
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.structured
+                            .update(cx, |view, cx| view.set_locked(this.core_running, cx));
+                        this.rules
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.proxy
                             .update(cx, |view, cx| view.set_closing(false, cx));

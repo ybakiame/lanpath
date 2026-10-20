@@ -8,7 +8,7 @@ use tauri::State;
 
 use crate::state::AppState;
 
-use super::convert::{convert_input_to_model, validate_local_override};
+use super::convert::convert_input_to_model;
 use super::views::*;
 
 // ---------------------------------------------------------------------------
@@ -42,57 +42,11 @@ pub(crate) fn run_save(
     data_dir: &std::path::Path,
     input: SaveLocalOverrideInput,
 ) -> Result<(), String> {
-    let _write = super::WRITE_LOCK
-        .lock()
-        .map_err(|_| "规则配置写入锁不可用".to_string())?;
-    let mut ovr = convert_input_to_model(input)?;
-    validate_local_override(&ovr).map_err(|e| format!("validation failed: {e}"))?;
-
-    let store = LocalOverrideStore::new(data_dir.to_path_buf());
-    let existing = store
-        .load()
-        .map_err(|e| format!("failed to load local override: {e}"))?;
-    // `remote_updated_at` 由后端 HEAD 维护、不在前端 save 契约中：按 id 从磁盘
-    // 现值回填，避免整段替换落盘时把已探测到的远端更新时间清零。
-    for rs in &mut ovr.custom_rule_sets {
-        rs.category = rs.category.trim().to_owned();
-        // Never accept client-provided validators; preserve only for the same resource.
-        if let Some(old) = existing
-            .custom_rule_sets
-            .iter()
-            .find(|old| old.id == rs.id && old.source == rs.source)
-        {
-            if matches!(
-                rs.source,
-                lanpath_client::local_override::CustomRuleSetSource::Remote { .. }
-            ) {
-                rs.last_updated = old.last_updated;
-            }
-            rs.remote_updated_at = old.remote_updated_at;
-            rs.remote_state = old.remote_state.clone();
-        } else {
-            if matches!(
-                rs.source,
-                lanpath_client::local_override::CustomRuleSetSource::Remote { .. }
-            ) {
-                rs.last_updated = 0;
-            }
-            rs.remote_updated_at = 0;
-            rs.remote_state = Default::default();
-        }
-    }
-    // The built-in rule set seeding marker is backfilled the same way: a full-segment
-    // replacement must not reset it, otherwise deleted built-in entries would be re-seeded.
-    ovr.builtins_seeded = existing.builtins_seeded;
-
-    let manager = RuleSetManager::new(data_dir.to_path_buf());
-    manager
-        .sync_custom_rule_set_files(&ovr.custom_rule_sets)
-        .map_err(|e| format!("failed to persist custom rule set files: {e}"))?;
-
-    store
-        .save(&ovr)
-        .map_err(|e| format!("failed to save local override: {e}"))
+    let override_ = convert_input_to_model(input)?;
+    lanpath_client::local_override::LocalOverrideService::new(data_dir.to_path_buf())
+        .save(override_)
+        .map(|_| ())
+        .map_err(|error| format!("failed to save local override: {error}"))
 }
 
 #[tauri::command]
@@ -293,28 +247,12 @@ pub(super) fn set_categories(
     ids: &[String],
     category: &str,
 ) -> Result<LocalOverrideView, String> {
-    if category.chars().count() > 64 || category.chars().any(char::is_control) {
-        return Err("分类名称最多 64 个字符，不能包含控制字符".into());
-    }
-    let _write = super::WRITE_LOCK
-        .lock()
-        .map_err(|_| "规则配置写入锁不可用".to_string())?;
-    let store = LocalOverrideStore::new(data_dir.to_path_buf());
-    let mut ovr = store.load().map_err(|e| e.to_string())?;
-    if ids
-        .iter()
-        .any(|id| !ovr.custom_rule_sets.iter().any(|rs| &rs.id == id))
-    {
-        return Err("规则集列表已变化，请刷新后重新选择".into());
-    }
-    for entry in &mut ovr.custom_rule_sets {
-        if ids.contains(&entry.id) {
-            entry.category = category.trim().to_owned();
-        }
-    }
-    store.save(&ovr).map_err(|e| e.to_string())?;
+    let override_ =
+        lanpath_client::local_override::LocalOverrideService::new(data_dir.to_path_buf())
+            .set_categories(ids, category)
+            .map_err(|error| error.to_string())?;
     Ok(LocalOverrideView::from_model(
-        &ovr,
+        &override_,
         &RuleSetManager::new(data_dir.to_path_buf()),
     ))
 }

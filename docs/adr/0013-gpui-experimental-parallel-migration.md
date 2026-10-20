@@ -51,7 +51,7 @@
 | 今日/历史统计、日期/关键字/排序、清空、离线重开 | `StatsStore` | 已有真实汇总/默认查询，缺完整查询及清空交互 | 未变 |
 | 运行日志、暂停/过滤/全文、磁盘日志尾读及导出 | 应用 tracing、核心日志 API、现行 Tauri 日志适配 | 已有真实内存流，磁盘/导出未接入 | 未变 |
 | DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 | 已接入共享完整 slices 草稿、跨切片校验/原子保存、DNS 探测、重开恢复与配置重新生成；路由规则/规则集 CRUD 仍属下一行 |
-| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`RuleSetManager`、`ruleset_update` | 未接入 | 合成会读取 local override 并物化已有/内置规则集；管理 UI 未接入 |
+| 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`LocalOverrideService`、`RuleSetManager`、`ruleset_update` | 未接入 | 已接入共享完整草稿、规则 CRUD/排序/引用/最终路由、规则集 CRUD/分类/市场/单项与批量更新、缺失资源补齐、重开恢复和配置重新生成 |
 | 远程脚本/片段、导入、参数、刷新、调度与任务结果 | `RemoteManager`、`import`、scheduler、`lanpath-script` | 未接入，样例 JS 不等于执行/管理 | 覆写模板 JS 已进入合成；脚本管理和调度仍未接入 |
 | MITM 白名单、CA、信任和抓包记录 | `state/mitm`、`lanpath-mitm`、平台证书适配 | 未接入；CA 系统变更另行授权 | 未变 |
 | 请求代理、GitHub 镜像、外观及重开恢复 | `ClientConfig`、`request_network`、现行主题偏好 | 未接入，不以 GPUI 默认主题冒充迁移 | 仅持久选择重开；实验网络请求强制 `none`，设置 UI 未接入 |
@@ -149,6 +149,26 @@ store 归一化结果，并通知只读预览重新生成。
 
 该单位完成覆盖矩阵中的结构化配置任务，不扩大实验端口、系统代理、TUN、生产数据或发布授权。
 
+## 第五个业务迁移单位：规则与规则集
+
+`RulesView` 直接持有共享 `LocalOverride` 草稿；保存、分类和规则集更新由
+`lanpath-client::local_override::LocalOverrideService` 统一编排，GPUI 与 Tauri 不再各自维护写锁、
+校验、后端更新时间合并或 backing file 语义。
+
+- 路由规则覆盖共享 match/action/advanced 字段、启停、添加、编辑、删除和顺序调整。规则集目标保留
+  多 tag 引用；第一个启用的 Final 规则覆盖结构化默认路由，页面同时解释该优先级。
+- 规则集支持远程 source/binary 和手写 source，分类可多选后批量应用；内置项仍是可编辑、可删除的
+  普通项，并提供显式恢复，不在保存或重开时偷偷复活。
+- 市场直接读取现行 MetaCubeX 目录源，支持 geoip/geosite、GitHub Raw/jsDelivr、搜索和分类后添加，
+  不另建第二份条目清单。远程规则集支持单项智能更新和全部更新，后端条件请求、指纹、检查时间与
+  上游更新时间由共享服务维护。
+- 预览和启动都会按实际引用补齐缺失 backing files；下载失败不伪装成功，最终配置预检显示错误。
+  删除规则集允许保留失效引用，页面明确标记，用户可恢复同 tag 资源或修改引用。
+- 未保存规则草稿阻止启动；运行、启动、停止、保存和更新期间编辑锁定。重新载入、切页和关闭窗口
+  均保留既有脏状态确认，保存成功才使最终配置预览失效并重新生成。
+
+该单位完成覆盖矩阵中的规则与规则集任务；不改变实验端口、系统代理、TUN、生产数据或发布授权。
+
 ## 本轮验收（2026-10-19）
 
 | 范围 | 实际执行与结果 |
@@ -238,4 +258,19 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 当前环境的 `orca-ide` 命令不存在，因此没有取得结构化页面截图、可访问性树或自动化输入证据。
 编译、业务闭环、真实核心和窗口响应通过不等于视觉、键盘、IME、高 DPI 或读屏验收；这些项目
+仍需在具备桌面自动化入口时补验。
+
+## 规则与规则集迁移验收（2026-10-20）
+
+| 范围 | 实际执行与结果 |
+| --- | --- |
+| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked`、`build --locked` 通过；48 passed、3 ignored |
+| 规则业务回归 / Nix | 完整规则/手写规则集保存、重开、引用、Final 覆盖和运行配置生成通过；市场目录同时覆盖 geoip/geosite，目录解析条目超过 1000 |
+| 现行 Rust 回归 / Nix | `cargo build --workspace` 与 `bun run verify:rust` 通过；共享客户端 559 tests、Tauri 55 tests 及其余 workspace/doctests 通过，壳 host clippy 与 `aarch64-linux-android` Rust check 通过 |
+| Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离用例保存并重开远程/手写规则集、分类、路由引用与 Final，执行本地 HTTP 单项更新，将两类 backing files 注入配置，经 sing-box 1.14.2 `check` 后实际启动、运行并停止，1 passed |
+| Windows / 应用冒烟 | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束 |
+| Windows / 生产隔离 | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且未发现私有核心进程 |
+
+当前环境的 `orca-ide` 命令仍不存在，因此没有取得规则页面截图、可访问性树或自动化输入证据。
+编译、持久化、更新、真实核心和窗口响应通过不等于视觉、键盘、IME、高 DPI 或读屏验收；这些项目
 仍需在具备桌面自动化入口时补验。
