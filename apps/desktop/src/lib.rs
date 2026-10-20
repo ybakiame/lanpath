@@ -1,4 +1,5 @@
 mod business;
+mod config_slices_view;
 mod config_view;
 mod configuration;
 mod connection_list;
@@ -24,6 +25,7 @@ mod windows_file;
 
 use std::sync::Arc;
 
+use config_slices_view::{ConfigSlicesChanged, ConfigSlicesView};
 use config_view::{ConfigEvent, ConfigView};
 use connections_view::ConnectionsView;
 use gpui_kit::component::{
@@ -51,6 +53,7 @@ enum CoreOperationKind {
 enum Page {
     Subscriptions,
     Profiles,
+    Structured,
     Configuration,
     Proxies,
     Connections,
@@ -63,6 +66,7 @@ struct DesktopView {
     configuration: Entity<ConfigView>,
     subscriptions: Entity<SubscriptionsView>,
     profiles: Entity<ProfilesView>,
+    structured: Entity<ConfigSlicesView>,
     core: Arc<DesktopRuntime>,
     proxy: Entity<ProxyView>,
     connections: Entity<ConnectionsView>,
@@ -85,6 +89,7 @@ impl DesktopView {
         let _configuration_subscription =
             cx.subscribe(&configuration, |_, _, _: &ConfigEvent, cx| cx.notify());
         let subscriptions = cx.new(|cx| SubscriptionsView::new(core.clone(), window, cx));
+        let structured = cx.new(|cx| ConfigSlicesView::new(core.clone(), window, cx));
         let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
         let _business_subscriptions = vec![
             cx.subscribe_in(
@@ -102,6 +107,15 @@ impl DesktopView {
                 |this, _, _: &ProfilesChanged, window, cx| {
                     this.subscriptions
                         .update(cx, |view, cx| view.reload_profiles(cx));
+                    this.configuration
+                        .update(cx, |view, cx| view.refresh(window, cx));
+                    cx.notify();
+                },
+            ),
+            cx.subscribe_in(
+                &structured,
+                window,
+                |this, _, _: &ConfigSlicesChanged, window, cx| {
                     this.configuration
                         .update(cx, |view, cx| view.refresh(window, cx));
                     cx.notify();
@@ -131,6 +145,7 @@ impl DesktopView {
             page: Page::Subscriptions,
             configuration,
             subscriptions,
+            structured,
             profiles,
             core,
             proxy,
@@ -157,7 +172,9 @@ impl DesktopView {
     ) {
         let invalid_state = match kind {
             CoreOperationKind::Start => {
-                self.core_running || !self.configuration.read(cx).ready_for_start()
+                self.core_running
+                    || !self.configuration.read(cx).ready_for_start()
+                    || self.structured.read(cx).dirty()
             }
             CoreOperationKind::Stop => !self.core_running,
         };
@@ -167,6 +184,7 @@ impl DesktopView {
             || self.configuration.read(cx).busy()
             || self.subscriptions.read(cx).busy()
             || self.profiles.read(cx).busy()
+            || self.structured.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -183,6 +201,8 @@ impl DesktopView {
         self.subscriptions
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.profiles
+            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.structured
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.core_error = None;
         self.core_task = None;
@@ -226,6 +246,9 @@ impl DesktopView {
                         view.set_locked(this.core_running || this.closing, cx)
                     });
                     this.profiles.update(cx, |view, cx| {
+                        view.set_locked(this.core_running || this.closing, cx)
+                    });
+                    this.structured.update(cx, |view, cx| {
                         view.set_locked(this.core_running || this.closing, cx)
                     });
                     cx.notify();
@@ -282,11 +305,13 @@ impl Render for DesktopView {
             || self.proxy.read(cx).busy()
             || self.configuration.read(cx).busy()
             || self.subscriptions.read(cx).busy()
-            || self.profiles.read(cx).busy();
+            || self.profiles.read(cx).busy()
+            || self.structured.read(cx).busy();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
             Page::Profiles => self.profiles.clone().into_any_element(),
+            Page::Structured => self.structured.clone().into_any_element(),
             Page::Configuration => self.configuration.clone().into_any_element(),
             Page::Proxies => self.proxy.clone().into_any_element(),
             Page::Connections => self.connections.clone().into_any_element(),
@@ -335,6 +360,14 @@ impl Render for DesktopView {
                             .selected(self.page == Page::Profiles)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.set_page(Page::Profiles, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("page-structured")
+                            .label("结构化配置")
+                            .selected(self.page == Page::Structured)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.set_page(Page::Structured, cx);
                             })),
                     )
                     .child(
@@ -391,7 +424,8 @@ impl Render for DesktopView {
                                 operation_busy
                                     || self.core_running
                                     || !self.core.is_configured()
-                                    || !self.configuration.read(cx).ready_for_start(),
+                                    || !self.configuration.read(cx).ready_for_start()
+                                    || self.structured.read(cx).dirty(),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.run_core_operation(CoreOperationKind::Start, window, cx);

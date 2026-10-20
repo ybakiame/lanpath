@@ -1,6 +1,9 @@
 mod config;
+mod config_slices;
 mod profiles;
 mod state;
+
+pub(crate) use config_slices::ConfigSlicesDocument;
 mod subscriptions;
 
 use std::path::{Path, PathBuf};

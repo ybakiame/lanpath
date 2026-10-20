@@ -365,11 +365,69 @@ async fn generated_subscription_pipeline_starts_real_core() {
         .set_active_subscription(Some(subscription.id))
         .unwrap();
     service.set_rule_mode("global").unwrap();
+    let mut slices = service.config_slices().unwrap().slices;
+    slices.dns.mode = lanpath_client::config_slices::DnsMode::Takeover;
+    slices.dns.servers = vec![lanpath_client::config_slices::DnsServer {
+        tag: "local".into(),
+        name: "Local DNS".into(),
+        server_type: lanpath_client::config_slices::DnsServerType::Local,
+        ..Default::default()
+    }];
+    slices.dns.rules.clear();
+    slices.dns.final_tag = "local".into();
+    slices.route.final_tag = "fixture-node-a".into();
+    slices.route.resolver.server = "local".into();
+    slices.experimental.cache_file.enabled = true;
+    slices.experimental.cache_file.path = root_path
+        .join("cache/structured.db")
+        .to_string_lossy()
+        .into_owned();
+    slices.experimental.cache_file.cache_id = "windows-real-core".into();
+    let proxy = slices
+        .outbounds
+        .items
+        .iter_mut()
+        .find(|item| item.id == "builtin-group-proxy")
+        .unwrap();
+    let lanpath_client::config_slices::OutboundProtocol::Selector(selector) = &mut proxy.protocol
+    else {
+        panic!("proxy built-in must stay a selector");
+    };
+    selector.default = "fixture-node-b".into();
+    let saved = service.save_config_slices(&slices).unwrap();
+    let reopened = BusinessService::new(
+        &root_path,
+        Some(binary.clone()),
+        Bindings::new(17899, 19090),
+    );
+    assert_eq!(reopened.config_slices().unwrap().slices, saved.slices);
 
     let generated = service.build_config(false).await.unwrap();
     assert_eq!(
         generated.pointer("/experimental/clash_api/default_mode"),
         Some(&json!("global"))
+    );
+    assert_eq!(generated.pointer("/dns/final"), Some(&json!("local")));
+    assert_eq!(
+        generated.pointer("/route/final"),
+        Some(&json!("fixture-node-a"))
+    );
+    assert_eq!(
+        generated.pointer("/route/default_domain_resolver/server"),
+        Some(&json!("local"))
+    );
+    assert_eq!(
+        generated.pointer("/experimental/cache_file/cache_id"),
+        Some(&json!("windows-real-core"))
+    );
+    assert_eq!(
+        generated.pointer("/outbounds/0/default").or_else(|| {
+            generated["outbounds"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["tag"] == "proxy"))
+                .and_then(|item| item.get("default"))
+        }),
+        Some(&json!("fixture-node-b"))
     );
     service
         .validator()
@@ -444,4 +502,136 @@ async fn generated_subscription_pipeline_starts_real_core() {
     );
     manager.stop().await.unwrap();
     assert!(!manager.is_running().await);
+}
+
+#[tokio::test]
+async fn structured_slices_persist_atomically_and_change_generated_config() {
+    use lanpath_client::config_slices::{
+        CustomOutbound, DnsMode, DnsServer, DnsServerType, DnsStrategy, OutboundProtocol,
+        ShadowsocksOutbound,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let subscription = service
+        .subscription_store()
+        .add("fixture", "https://example.invalid/sub", true, None)
+        .unwrap();
+    service
+        .subscription_store()
+        .write_cached_content(
+            subscription.id,
+            &CachedSubscriptionContent {
+                format: SubFormat::SingBoxJson,
+                singbox_nodes: vec![json!({
+                    "type": "shadowsocks",
+                    "tag": "node-a",
+                    "server": "127.0.0.1",
+                    "server_port": 8388,
+                    "method": "aes-128-gcm",
+                    "password": "fixture"
+                })],
+            },
+        )
+        .unwrap();
+    service
+        .set_active_subscription(Some(subscription.id))
+        .unwrap();
+
+    let mut document = service.config_slices().unwrap();
+    document.slices.dns.mode = DnsMode::Takeover;
+    document.slices.dns.servers = vec![DnsServer {
+        tag: "local".into(),
+        name: "Local DNS".into(),
+        server_type: DnsServerType::Local,
+        ..DnsServer::default()
+    }];
+    document.slices.dns.rules.clear();
+    document.slices.dns.final_tag = "local".into();
+    document.slices.dns.strategy = DnsStrategy::Ipv4Only;
+    document.slices.outbounds.items.push(CustomOutbound {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: "Structured Node".into(),
+        enabled: true,
+        builtin: false,
+        protocol: OutboundProtocol::Shadowsocks(ShadowsocksOutbound {
+            server: "127.0.0.1".into(),
+            server_port: 8389,
+            method: "aes-128-gcm".into(),
+            password: "fixture".into(),
+        }),
+    });
+    document.slices.route.final_tag = "slice-structured-node".into();
+    document.slices.route.resolver.server = "local".into();
+    document.slices.route.resolver.strategy = Some(DnsStrategy::Ipv4Only);
+    document.slices.experimental.cache_file.enabled = true;
+    document.slices.experimental.cache_file.path = root
+        .path()
+        .join("cache/structured.db")
+        .to_string_lossy()
+        .into_owned();
+    document.slices.experimental.cache_file.cache_id = "structured".into();
+    document.slices.experimental.cache_file.store_fakeip = true;
+
+    let saved = service.save_config_slices(&document.slices).unwrap();
+    let reopened = BusinessService::new(root.path(), None, Bindings::new(17899, 19090))
+        .config_slices()
+        .unwrap();
+    assert_eq!(reopened.slices, saved.slices);
+
+    let generated = service.build_config(false).await.unwrap();
+    assert_eq!(generated.pointer("/dns/final"), Some(&json!("local")));
+    assert_eq!(
+        generated.pointer("/route/final"),
+        Some(&json!("slice-structured-node"))
+    );
+    assert_eq!(
+        generated.pointer("/route/default_domain_resolver/server"),
+        Some(&json!("local"))
+    );
+    assert_eq!(
+        generated.pointer("/experimental/cache_file/cache_id"),
+        Some(&json!("structured"))
+    );
+    assert!(
+        generated["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["tag"] == "slice-structured-node")
+    );
+
+    let mut invalid = saved.slices.clone();
+    invalid.route.final_tag = "invalid tag".into();
+    assert!(service.save_config_slices(&invalid).is_err());
+    assert_eq!(service.config_slices().unwrap().slices, saved.slices);
+}
+
+#[tokio::test]
+async fn structured_dns_probe_uses_selected_server_address_and_port() {
+    use lanpath_client::config_slices::{DnsServer, DnsServerType};
+
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let responder = tokio::spawn(async move {
+        let mut query = [0_u8; 512];
+        let (length, peer) = socket.recv_from(&mut query).await.unwrap();
+        let mut response = query[..length].to_vec();
+        response[2] = 0x81;
+        response[3] = 0x80;
+        socket.send_to(&response, peer).await.unwrap();
+    });
+    let latency = service
+        .probe_dns_server(DnsServer {
+            server: "127.0.0.1".into(),
+            server_type: DnsServerType::Udp,
+            server_port: Some(port),
+            ..DnsServer::default()
+        })
+        .await
+        .unwrap();
+    responder.await.unwrap();
+    assert!(latency < 3_000);
 }

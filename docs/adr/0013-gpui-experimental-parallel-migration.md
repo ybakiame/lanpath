@@ -50,7 +50,7 @@
 | 活动连接、会话关闭记录、流量与路由、关闭连接 | `connections`、`ConnectionTrackerHandle` | 已接真实服务，尚非完整业务会话集成 | 未变 |
 | 今日/历史统计、日期/关键字/排序、清空、离线重开 | `StatsStore` | 已有真实汇总/默认查询，缺完整查询及清空交互 | 未变 |
 | 运行日志、暂停/过滤/全文、磁盘日志尾读及导出 | 应用 tracing、核心日志 API、现行 Tauri 日志适配 | 已有真实内存流，磁盘/导出未接入 | 未变 |
-| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 | 合成会读取已有 slices；编辑与探测 UI 未接入 |
+| DNS/出站/策略/默认路由/缓存的结构化编辑、验证和持久化 | `ConfigSlicesStore`、`ConfigSlices::validate`、`dns_probe` | 未接入，固定 JSON 字段不算编辑能力 | 已接入共享完整 slices 草稿、跨切片校验/原子保存、DNS 探测、重开恢复与配置重新生成；路由规则/规则集 CRUD 仍属下一行 |
 | 规则/规则集 CRUD、市场、分类、更新、引用、缺失资源降级与补齐 | `LocalOverrideStore`、`RuleSetManager`、`ruleset_update` | 未接入 | 合成会读取 local override 并物化已有/内置规则集；管理 UI 未接入 |
 | 远程脚本/片段、导入、参数、刷新、调度与任务结果 | `RemoteManager`、`import`、scheduler、`lanpath-script` | 未接入，样例 JS 不等于执行/管理 | 覆写模板 JS 已进入合成；脚本管理和调度仍未接入 |
 | MITM 白名单、CA、信任和抓包记录 | `state/mitm`、`lanpath-mitm`、平台证书适配 | 未接入；CA 系统变更另行授权 | 未变 |
@@ -130,6 +130,25 @@
 
 这完成覆盖矩阵中的代理策略用户任务，但不改变其他未迁移项，也不构成正式桌面替换授权。
 
+## 第四个业务迁移单位：结构化配置
+
+`ConfigSlicesView` 直接持有共享 `ConfigSlices` 草稿，不在 GPUI 壳复制 schema 或持久化协议；
+`BusinessService` 只适配 `ConfigSlicesStore`、内置 DNS 显示语义和共享 `dns_probe`。保存后重新读取
+store 归一化结果，并通知只读预览重新生成。
+
+- DNS 覆盖跟随系统/接管、全局与服务器策略、服务器类型和拨号字段、规则匹配/动作及当前服务器
+  探测。显示内容与内置 DNS 完全相同时持久化为 `FollowSystem`，否则持久化为 `Takeover`。
+- 出站覆盖 VLESS、VMess、Shadowsocks、Trojan、Hysteria2、Selector 和 URLTest 的共享字段；
+  内置组可以调整启用、默认成员、测速与中断参数，但名称、协议和动态成员仍由共享规格归一化。
+- 默认路由、默认域名解析器和缓存文件进入同一草稿与一次原子保存。数值解析失败保留输入原文；
+  共享 `ConfigSlices::validate` 统一检查 tag、引用、协议、端口、规则动作和跨切片约束。
+- 删除服务器、规则或自定义出站先确认；重新载入脏草稿和关闭窗口均确认放弃。校验/保存失败保留
+  草稿与上一份文件，读取/探测错误可在同页重试。
+- 运行中及核心生命周期切换期间全部结构化输入锁定，不热应用；未保存结构化草稿会阻止启动，
+  避免实际启动旧持久值。停止后恢复编辑，保存成功才使预览失效并重新生成。
+
+该单位完成覆盖矩阵中的结构化配置任务，不扩大实验端口、系统代理、TUN、生产数据或发布授权。
+
 ## 本轮验收（2026-10-19）
 
 | 范围 | 实际执行与结果 |
@@ -201,3 +220,22 @@ UIA 的 disabled/焦点/readonly 等部分元数据仍与真实行为不一致�
 
 真实核心测速中的不可达节点按契约返回无延迟值；共享本地 HTTP 测试另行证明成功延迟解析及整组
 结果顺序。当前环境仍无 `orca`/`orca-ide`，因此本轮不声明代理页视觉、键盘、IME、高 DPI 或读屏验收。
+
+## 结构化配置迁移验收（2026-10-20）
+
+| 范围 | 实际执行与结果 |
+| --- | --- |
+| 独立应用 / Nix | `fmt --check`、`clippy --locked --all-targets -- -D warnings`、`test --locked --lib`、`build --locked` 通过；46 passed、3 ignored |
+| 结构化业务回归 / Nix | 保存并重开完整 slices、生成 DNS/自定义出站/默认路由/解析器/缓存、无效保存保持旧文件，以及本地 UDP DNS 探测通过；2 passed |
+| 现行 Rust 回归 / Nix | `cargo build --workspace` 与 `bun run verify:rust` 通过；后者含根 fmt/clippy/test、Tauri 壳 host clippy 和 `aarch64-linux-android` Rust check |
+| Windows x64 / 真实核心 | Rust 1.98.0/MSVC 构建通过；隔离用例保存并重开 DNS、内置 `proxy` 默认成员、默认路由/解析器和缓存，生成结果经 sing-box 1.14.2 `check` 后实际启动、运行并停止，1 passed |
+| Windows / 应用冒烟 | 本地构建程序取得“Lanpath 实验版（GPUI）”窗口句柄且进程响应，关闭请求在超时内以退出码 0 结束；结构化页视觉交互未自动化 |
+| Windows / 生产隔离 | 验收后 `ProxyEnable=1`、`ProxyServer=127.0.0.1:7899`；生产 PID 20816 继续监听 7899/7900/9090，实验 17899/19090 无残留监听且私有核心进程数为 0 |
+
+真实核心首次验收暴露 DNS 接管配置移除了模板规则集 HTTP 客户端依赖的 `local` tag；验收夹具改为
+保留该实际模板引用后通过。共享 slice 校验只验证 slice 内部引用，最终模板引用仍由预览/启动时的
+真实核心校验兜底。
+
+当前环境的 `orca-ide` 命令不存在，因此没有取得结构化页面截图、可访问性树或自动化输入证据。
+编译、业务闭环、真实核心和窗口响应通过不等于视觉、键盘、IME、高 DPI 或读屏验收；这些项目
+仍需在具备桌面自动化入口时补验。
