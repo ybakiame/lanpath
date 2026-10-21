@@ -31,9 +31,9 @@ pub struct MitmChain {
     pub proxy_addr: SocketAddr,
     /// MITM return inlet port (core return mixed inbound listen port, usually `mixed_port + 1`).
     pub return_port: u16,
-    /// Hostnames to be MITM-whitelisted (`*.` prefix matched by suffix, others exact match);
-    /// `-` / `!` prefix entries are exclusions, no core routing rules generated
-    /// (corresponding domain traffic goes direct, not sent to MITM inbound).
+    /// Hostnames or IP addresses to be MITM-whitelisted (`*.` prefix matched by suffix,
+    /// IP addresses become exact CIDRs, other entries are exact domains); `-` / `!` prefix
+    /// entries are exclusions and generate no core routing rule.
     pub hostnames: Vec<String>,
 }
 

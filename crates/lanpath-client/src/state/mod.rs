@@ -11,9 +11,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use lanpath_common::{LanpathError, LanpathResult};
 #[cfg(feature = "mitm")]
-use lanpath_mitm::{MemoryRecorder, RunningProxy};
+use crate::mitm::{MitmService, MitmSession};
+use lanpath_common::{LanpathError, LanpathResult};
 use lanpath_script::{Notifier, ScriptScheduler};
 
 use crate::config::ClientConfig;
@@ -50,13 +50,12 @@ pub struct ClientState {
     pub config: ClientConfig,
     core: Option<CoreRunner>,
     #[cfg(feature = "mitm")]
-    mitm: Option<RunningProxy>,
+    mitm: Option<MitmSession>,
+    #[cfg(feature = "mitm")]
+    mitm_service: MitmService,
     sysproxy: Arc<dyn SystemProxy>,
     /// Script notifier (`$notify` / `$notification`); default [`TracingNotifier`] (logs only).
     notifier: Arc<dyn Notifier>,
-    /// Packet capture recorder (in-memory ring buffer, capacity 2048; injected when MITM proxy starts).
-    #[cfg(feature = "mitm")]
-    recorder: Arc<MemoryRecorder>,
     /// Remote subscription task script scheduler (starts before core, stops on stop).
     scheduler: Option<ScriptTaskSession>,
     /// Background connection tracker (started after core startup when Clash API is enabled, stopped on stop).
@@ -108,15 +107,17 @@ impl ClientState {
         sysproxy: Arc<dyn SystemProxy>,
         notifier: Arc<dyn Notifier>,
     ) -> Self {
+        #[cfg(feature = "mitm")]
+        let mitm_service = MitmService::new(config.data_dir.clone());
         Self {
             config,
             core: None,
             #[cfg(feature = "mitm")]
             mitm: None,
+            #[cfg(feature = "mitm")]
+            mitm_service,
             sysproxy,
             notifier,
-            #[cfg(feature = "mitm")]
-            recorder: Arc::new(MemoryRecorder::new(2048)),
             scheduler: None,
             connection_tracker: None,
             stats_store: None,
@@ -127,10 +128,10 @@ impl ClientState {
         }
     }
 
-    /// Packet capture recorder (in-memory ring buffer, capacity 2048).
+    /// Shared MITM service and in-memory traffic records.
     #[cfg(feature = "mitm")]
-    pub fn recorder(&self) -> Arc<MemoryRecorder> {
-        Arc::clone(&self.recorder)
+    pub fn mitm_service(&self) -> &MitmService {
+        &self.mitm_service
     }
 
     /// 注入流量统计存储（壳层在 `start` 前调用；未注入时连接统计仅保留内存态）。
@@ -201,7 +202,7 @@ impl ClientState {
             None
         };
         #[cfg(feature = "mitm")]
-        let mitm_addr = self.mitm.as_ref().map(|m| m.addr);
+        let mitm_addr = self.mitm.as_ref().map(MitmSession::addr);
         #[cfg(not(feature = "mitm"))]
         let mitm_addr = None;
         ClientStatus {

@@ -27,7 +27,6 @@ use axum::routing::get;
 use lanpath_client::config::ClientConfig;
 use lanpath_client::state::ClientState;
 use lanpath_client::sysproxy::MockSystemProxy;
-use lanpath_mitm::recorder::TrafficRecorder;
 
 /// 客户端 mixed 主入口端口（与 core_config 测试一致）。
 const MIXED_PORT: u16 = 17890;
@@ -190,7 +189,7 @@ async fn real_singbox_full_chain_mitm_records_whitelisted_traffic() {
         Some("target-ok"),
         "白名单域名应经 MITM 后到达 target"
     );
-    let records = state.recorder().list();
+    let records = state.mitm_service().traffic();
     assert!(
         records.iter().any(|r| r.url.contains(WHITELIST_HOST)),
         "recorder 应记录白名单请求，实际：{:?}",

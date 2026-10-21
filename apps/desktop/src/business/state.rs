@@ -9,16 +9,20 @@ use crate::configuration::resources;
 impl BusinessService {
     pub(crate) fn client_config(&self) -> LanpathResult<ClientConfig> {
         let path = resources::confined(&self.root, "client.json", "client.json")?;
-        let mut config = if path.is_file() {
-            ClientConfig::load(&self.root)?
-        } else {
+        let is_new = !path.is_file();
+        let mut config = if is_new {
             ClientConfig::new(
                 self.root.clone(),
                 String::new(),
                 String::new(),
                 self.binary.clone().unwrap_or_default(),
             )
+        } else {
+            ClientConfig::load(&self.root)?
         };
+        if is_new {
+            config.mitm_enabled = false;
+        }
         normalize(&mut config, self);
         persist(&path, &config)?;
         Ok(config)
@@ -63,8 +67,9 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) {
     config.data_dir = service.root.clone();
     config.core_binary = service.binary.clone().unwrap_or_default();
     config.mixed_port = service.bindings.mixed_port();
-    config.mitm_enabled = false;
-    config.mitm.hostnames.clear();
+    // MITM remains opt-in and is confined to the experimental root and loopback
+    // chain. Preserve saved settings; unlike system proxy and TUN it has no
+    // global effect until the user explicitly installs the generated CA.
     config.mitm.ca_dir = service.root.join("certs");
     config.system_proxy_enabled = false;
     config.tun_enabled = false;
@@ -77,7 +82,7 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) {
     config.request_proxy_url.clear();
 }
 
-fn persist(path: &Path, config: &ClientConfig) -> LanpathResult<()> {
+pub(super) fn persist(path: &Path, config: &ClientConfig) -> LanpathResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| LanpathError::Config("client.json has no parent directory".into()))?;

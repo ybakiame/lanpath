@@ -15,7 +15,7 @@ use super::MitmChain;
 ///   `mitm-return` (`return_port`, MITM-decrypted traffic returns to core normal routing from here)
 /// - outbounds append `lanpath-mitm` http outbound (pointing to MITM listen address)
 /// - route.rules prepend a whitelist rule: `inbound = [main-in]`, `*.` prefix hostnames go to
-///   `domain_suffix`, rest go to `domain`, `outbound = "lanpath-mitm"`
+///   `domain_suffix`, IP addresses to exact `ip_cidr`, and other entries to `domain`.
 ///
 /// MITM chain with an empty effective whitelist (no non-exclusion hostname) leaves the config
 /// completely untouched: no route rule (a conditionless `inbound = [main-in]` rule would match
@@ -51,18 +51,23 @@ pub fn compose_singbox_config(
     // corresponding domain traffic goes direct, not sent to MITM inbound.
     let mut domain = Vec::new();
     let mut domain_suffix = Vec::new();
+    let mut ip_cidr = Vec::new();
     for hostname in &chain.hostnames {
         if hostname.starts_with('-') || hostname.starts_with('!') {
             continue;
         }
-        match hostname.strip_prefix("*.") {
-            Some(suffix) => domain_suffix.push(Value::String(suffix.to_string())),
-            None => domain.push(Value::String(hostname.clone())),
+        if let Some(suffix) = hostname.strip_prefix("*.") {
+            domain_suffix.push(Value::String(suffix.to_string()));
+        } else if let Ok(address) = hostname.parse::<std::net::IpAddr>() {
+            let prefix = if address.is_ipv4() { 32 } else { 128 };
+            ip_cidr.push(Value::String(format!("{address}/{prefix}")));
+        } else {
+            domain.push(Value::String(hostname.clone()));
         }
     }
     // Empty effective whitelist: a route rule without domain conditions would hijack all
     // main-in traffic into MITM. Leave the config untouched instead.
-    if domain.is_empty() && domain_suffix.is_empty() {
+    if domain.is_empty() && domain_suffix.is_empty() && ip_cidr.is_empty() {
         return Ok(Value::Object(obj));
     }
 
@@ -108,6 +113,9 @@ pub fn compose_singbox_config(
     }
     if !domain_suffix.is_empty() {
         rule.insert("domain_suffix".to_string(), Value::Array(domain_suffix));
+    }
+    if !ip_cidr.is_empty() {
+        rule.insert("ip_cidr".to_string(), Value::Array(ip_cidr));
     }
     rule.insert(
         "outbound".to_string(),

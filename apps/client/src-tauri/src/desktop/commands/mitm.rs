@@ -1,6 +1,6 @@
 //! MITM commands: traffic recording and CA certificate.
 
-use lanpath_mitm::{CaStore, CaTrustView, TrafficRecorder};
+use lanpath_mitm::CaTrustView;
 use serde::Serialize;
 use tauri::State;
 
@@ -22,16 +22,16 @@ pub struct TrafficRecordView {
 }
 
 impl TrafficRecordView {
-    pub(crate) fn from_record(rec: &lanpath_mitm::TrafficRecord) -> Self {
+    pub(crate) fn from_record(rec: lanpath_mitm::TrafficRecord) -> Self {
         Self {
             id: rec.id.to_string(),
-            method: rec.method.clone(),
-            url: rec.url.clone(),
-            request_headers: rec.request_headers.clone(),
-            request_body: rec.request_body.clone(),
+            method: rec.method,
+            url: rec.url,
+            request_headers: rec.request_headers,
+            request_body: rec.request_body,
             response_status: rec.response_status,
-            response_headers: rec.response_headers.clone(),
-            response_body: rec.response_body.clone(),
+            response_headers: rec.response_headers,
+            response_body: rec.response_body,
             timestamp: rec.timestamp.to_rfc3339(),
             duration_ms: rec.duration_ms,
         }
@@ -45,112 +45,57 @@ pub async fn list_traffic(state: State<'_, AppState>) -> Result<Vec<TrafficRecor
     let Some(client) = lock.as_ref() else {
         return Ok(Vec::new());
     };
-    let records = client.recorder().list();
-    Ok(records.iter().map(TrafficRecordView::from_record).collect())
-}
-
-/// 派生白名单条目视图。
-#[derive(Debug, Clone, Serialize)]
-pub struct DerivedHostnameView {
-    pub hostname: String,
-    pub sources: Vec<String>,
-}
-
-/// MITM 白名单视图：脚本/重写派生（只读）+ 手动配置（高级补充）。
-#[derive(Debug, Clone, Serialize)]
-pub struct MitmWhitelistView {
-    /// 来自远程 Snippet / 本地导入的派生域名（含来源标注）。
-    pub derived: Vec<DerivedHostnameView>,
-    /// 手动配置的包含项。
-    pub manual: Vec<String>,
-    /// 手动配置的排除项（保留 `-` / `!` 前缀原样）。
-    pub excluded: Vec<String>,
+    Ok(client
+        .mitm_service()
+        .traffic()
+        .into_iter()
+        .map(TrafficRecordView::from_record)
+        .collect())
 }
 
 /// 获取 MITM 白名单视图：派生部分读取远程缓存（与实际生效范围一致），
 /// 手动部分来自客户端配置。客户端未初始化时返回空视图。
 #[tauri::command]
-pub async fn get_mitm_whitelist(state: State<'_, AppState>) -> Result<MitmWhitelistView, String> {
+pub async fn get_mitm_whitelist(
+    state: State<'_, AppState>,
+) -> Result<lanpath_client::mitm::MitmWhitelistView, String> {
     let lock = state.client.lock().await;
     let Some(client) = lock.as_ref() else {
-        return Ok(MitmWhitelistView {
-            derived: Vec::new(),
-            manual: Vec::new(),
-            excluded: Vec::new(),
-        });
+        return Ok(lanpath_client::mitm::MitmWhitelistView::default());
     };
-    let (excluded, manual): (Vec<String>, Vec<String>) = client
-        .config
-        .mitm
-        .hostnames
-        .iter()
-        .cloned()
-        .partition(|h| h.starts_with('-') || h.starts_with('!'));
-    let derived = lanpath_client::remote::collect_hostname_sources(&client.config.data_dir)
-        .into_iter()
-        .map(|d| DerivedHostnameView {
-            hostname: d.hostname,
-            sources: d.sources,
-        })
-        .collect();
-    Ok(MitmWhitelistView {
-        derived,
-        manual,
-        excluded,
-    })
-}
-
-/// External view of MITM CA certificate.
-#[derive(Debug, Clone, Serialize)]
-pub struct MitmCaView {
-    /// Absolute path to `ca.crt` (for system/browser trust import).
-    pub path: String,
-    /// PEM-encoded root certificate content.
-    pub pem: String,
+    Ok(client.mitm_service().whitelist(&client.config))
 }
 
 /// Get MITM CA certificate (`data_dir/certs/ca.{crt,key}`).
 #[tauri::command]
-pub async fn get_mitm_ca(state: State<'_, AppState>) -> Result<MitmCaView, String> {
+pub async fn get_mitm_ca(
+    state: State<'_, AppState>,
+) -> Result<lanpath_client::mitm::MitmCaView, String> {
     let data_dir = state.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || get_mitm_ca_impl(&data_dir))
         .await
         .map_err(|e| format!("读取 CA 任务失败: {e}"))?
 }
 
-/// Implementation of `get_mitm_ca` (testable pure logic).
-pub(crate) fn get_mitm_ca_impl(data_dir: &std::path::Path) -> Result<MitmCaView, String> {
-    let store = lanpath_mitm::FileCaStore::new(data_dir.join("certs"));
-    let material = store
-        .load_or_generate()
-        .map_err(|e| format!("读取 MITM CA 失败: {e}"))?;
-    Ok(MitmCaView {
-        path: data_dir
-            .join("certs")
-            .join("ca.crt")
-            .to_string_lossy()
-            .into_owned(),
-        pem: material.cert_pem,
-    })
-}
-
-/// 确保 CA 已生成并返回 `ca.crt` 绝对路径（install / status 命令共用）。
-fn ensure_ca_path(data_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let view = get_mitm_ca_impl(data_dir)?;
-    Ok(std::path::PathBuf::from(view.path))
+pub(crate) fn get_mitm_ca_impl(
+    data_dir: &std::path::Path,
+) -> Result<lanpath_client::mitm::MitmCaView, String> {
+    lanpath_client::mitm::MitmService::new(data_dir)
+        .ca()
+        .map_err(|e| format!("读取 MITM CA 失败: {e}"))
 }
 
 /// Install MITM CA into the system trust store.
 ///
-/// Windows 写 CurrentUser Root 存储（免 UAC）；macOS / Linux 弹系统授权框。
+/// Windows 写 CurrentUser 存储（免 UAC）；macOS / Linux 弹系统授权框。
 /// 返回安装后的信任状态（供前端直接回写缓存）。
 #[tauri::command]
 pub async fn install_mitm_ca(state: State<'_, AppState>) -> Result<CaTrustView, String> {
     let data_dir = state.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let ca_path = ensure_ca_path(&data_dir)?;
-        lanpath_mitm::install_ca(&ca_path).map_err(|e| format!("安装 CA 到系统信任库失败: {e}"))?;
-        Ok(lanpath_mitm::ca_trust_status(&ca_path))
+        lanpath_client::mitm::MitmService::new(data_dir)
+            .install_ca()
+            .map_err(|e| format!("安装 CA 到系统信任库失败: {e}"))
     })
     .await
     .map_err(|e| format!("安装 CA 任务失败: {e}"))?
@@ -163,8 +108,9 @@ pub async fn install_mitm_ca(state: State<'_, AppState>) -> Result<CaTrustView, 
 pub async fn mitm_ca_trust_status(state: State<'_, AppState>) -> Result<CaTrustView, String> {
     let data_dir = state.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let ca_path = ensure_ca_path(&data_dir)?;
-        Ok(lanpath_mitm::ca_trust_status(&ca_path))
+        lanpath_client::mitm::MitmService::new(data_dir)
+            .trust_status()
+            .map_err(|e| format!("查询 CA 信任状态失败: {e}"))
     })
     .await
     .map_err(|e| format!("查询 CA 信任状态任务失败: {e}"))?

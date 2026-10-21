@@ -80,6 +80,43 @@ fn managed_listener_cannot_be_widened_or_given_system_effects() {
 }
 
 #[test]
+fn only_the_fixed_loopback_mitm_return_inbound_is_authorized() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = document(root.path());
+    config["inbounds"][0]["tag"] = json!("main-in");
+    config["inbounds"].as_array_mut().unwrap().push(json!({
+        "type": "mixed",
+        "tag": "mitm-return",
+        "listen": "127.0.0.1",
+        "listen_port": bindings().mixed_port() + 1
+    }));
+    policy::check(root.path(), &config, bindings()).unwrap();
+
+    for (key, value) in [
+        ("type", json!("tun")),
+        ("tag", json!("other-return")),
+        ("listen", json!("0.0.0.0")),
+        ("listen_port", json!(17899)),
+        ("sniff", json!(true)),
+    ] {
+        let mut invalid = config.clone();
+        invalid["inbounds"][1][key] = value;
+        reject(root.path(), &invalid, &format!("inbounds[1].{key}"));
+    }
+
+    let mut invalid_main = config.clone();
+    invalid_main["inbounds"][0]["tag"] = json!("mixed-in");
+    reject(root.path(), &invalid_main, "inbounds[0].tag");
+
+    let mut extra = config;
+    extra["inbounds"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "mixed"}));
+    reject(root.path(), &extra, "inbounds");
+}
+
+#[test]
 fn extra_control_planes_and_unknown_top_level_capabilities_are_rejected() {
     let root = tempfile::tempdir().unwrap();
     for key in [

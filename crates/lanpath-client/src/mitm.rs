@@ -8,6 +8,9 @@
 //!   [`MitmConfig::excluded_hostnames`]，其余放入 `hostnames`
 //! - 重写引擎为空、流量记录由调用方传入
 
+mod service;
+
+pub use service::*;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 

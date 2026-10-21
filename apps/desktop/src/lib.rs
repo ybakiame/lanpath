@@ -10,6 +10,7 @@ mod log_capture;
 mod log_list;
 mod log_stream;
 mod logs_view;
+mod mitm_view;
 mod observation;
 mod profiles_view;
 mod proxy_list;
@@ -36,6 +37,7 @@ use gpui_kit::{
     AppContext as _, Context, Entity, Subscription, Task, TitlebarOptions, Window, WindowOptions,
 };
 use logs_view::LogsView;
+use mitm_view::{MitmChanged, MitmView};
 use profiles_view::{ProfilesChanged, ProfilesView};
 use proxy_view::{ProxyConfigurationChanged, ProxyView};
 use rules_view::{RulesChanged, RulesView};
@@ -58,6 +60,7 @@ enum Page {
     Rules,
     Configuration,
     Scripts,
+    Mitm,
     Proxies,
     Connections,
     Stats,
@@ -72,6 +75,7 @@ struct DesktopView {
     structured: Entity<ConfigSlicesView>,
     rules: Entity<RulesView>,
     scripts: Entity<ScriptsView>,
+    mitm: Entity<MitmView>,
     core: Arc<DesktopRuntime>,
     proxy: Entity<ProxyView>,
     connections: Entity<ConnectionsView>,
@@ -98,6 +102,7 @@ impl DesktopView {
         let rules = cx.new(|cx| RulesView::new(core.clone(), window, cx));
         let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
         let scripts = cx.new(|cx| ScriptsView::new(core.clone(), window, cx));
+        let mitm = cx.new(|cx| MitmView::new(core.clone(), window, cx));
         let _business_subscriptions = vec![
             cx.subscribe_in(
                 &subscriptions,
@@ -133,6 +138,11 @@ impl DesktopView {
                     .update(cx, |view, cx| view.refresh(window, cx));
                 cx.notify();
             }),
+            cx.subscribe_in(&mitm, window, |this, _, _: &MitmChanged, window, cx| {
+                this.configuration
+                    .update(cx, |view, cx| view.refresh(window, cx));
+                cx.notify();
+            }),
         ];
         let proxy = cx.new(|cx| ProxyView::new(core.clone(), window, cx));
         let _proxy_configuration_subscription = cx.subscribe_in(
@@ -161,6 +171,7 @@ impl DesktopView {
             rules,
             profiles,
             scripts,
+            mitm,
             core,
             proxy,
             connections,
@@ -191,6 +202,7 @@ impl DesktopView {
                     || self.structured.read(cx).dirty()
                     || self.rules.read(cx).dirty()
                     || self.scripts.read(cx).dirty()
+                    || self.mitm.read(cx).dirty()
             }
             CoreOperationKind::Stop => !self.core_running,
         };
@@ -203,6 +215,7 @@ impl DesktopView {
             || self.structured.read(cx).busy()
             || self.rules.read(cx).busy()
             || self.scripts.read(cx).busy()
+            || self.mitm.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -227,6 +240,10 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.scripts
             .update(cx, |view, cx| view.set_running(false, cx));
+        self.mitm.update(cx, |view, cx| {
+            view.set_locked(true, cx);
+            view.set_running(false, cx);
+        });
         self.core_error = None;
         self.core_task = None;
         let service = self.core.clone();
@@ -259,6 +276,10 @@ impl DesktopView {
                         .update(cx, |view, cx| view.set_running(children_running, cx));
                     this.logs.update(cx, |view, cx| view.refresh(cx));
                     this.scripts.update(cx, |view, cx| {
+                        view.set_running(children_running, cx);
+                        view.set_locked(this.core_running || this.closing, cx);
+                    });
+                    this.mitm.update(cx, |view, cx| {
                         view.set_running(children_running, cx);
                         view.set_locked(this.core_running || this.closing, cx);
                     });
@@ -326,6 +347,8 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_active(page == Page::Logs, cx));
         self.scripts
             .update(cx, |view, cx| view.set_active(page == Page::Scripts, cx));
+        self.mitm
+            .update(cx, |view, cx| view.set_active(page == Page::Mitm, cx));
         cx.notify();
     }
 }

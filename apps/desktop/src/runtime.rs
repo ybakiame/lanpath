@@ -2,6 +2,7 @@ use std::{future::Future, net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duratio
 
 use lanpath_client::{
     core_config::{push_clash_mode, wait_clash_api_ready},
+    mitm::{MitmCaView, MitmService, MitmSession},
     remote::{RemoteTaskView, ScriptTaskSession, TracingNotifier},
     replay_group_selections,
 };
@@ -28,6 +29,8 @@ pub(crate) struct DesktopRuntime {
     observations: Option<ObservationService>,
     business: Option<BusinessService>,
     logs: LogService,
+    mitm: tokio::sync::Mutex<Option<MitmSession>>,
+    mitm_service: Option<MitmService>,
     script_tasks: tokio::sync::Mutex<Option<ScriptTaskSession>>,
     runtime: Option<Runtime>,
     configuration_error: Option<String>,
@@ -98,12 +101,15 @@ impl DesktopRuntime {
         let business = data_root
             .as_ref()
             .map(|root| BusinessService::new(root.path(), binary.clone(), bindings));
+        let mitm_service = data_root.as_ref().map(|root| MitmService::new(root.path()));
         Self {
             manager,
             observations,
             business,
             logs: LogService::new(),
             script_tasks: tokio::sync::Mutex::new(None),
+            mitm: tokio::sync::Mutex::new(None),
+            mitm_service,
             runtime,
             configuration_error: (!errors.is_empty()).then(|| errors.join("；")),
             _data_root: data_root,
@@ -176,13 +182,78 @@ impl DesktopRuntime {
         })
     }
 
+    pub(crate) fn mitm_ca(&self) -> Result<MitmCaView, String> {
+        self.mitm_service()?.ca().map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn mitm_trust_status(&self) -> Result<lanpath_client::mitm::CaTrustView, String> {
+        self.mitm_service()?
+            .trust_status()
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn install_mitm_ca(&self) -> Result<lanpath_client::mitm::CaTrustView, String> {
+        self.mitm_service()?
+            .install_ca()
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn mitm_traffic(&self) -> Result<Vec<lanpath_client::mitm::TrafficRecord>, String> {
+        Ok(self.mitm_service()?.traffic())
+    }
+
+    pub(crate) fn mitm_addr(&self) -> Result<Option<std::net::SocketAddr>, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| self.unavailable_data_error())?;
+        Ok(runtime.block_on(async { self.mitm.lock().await.as_ref().map(MitmSession::addr) }))
+    }
+
     /// Blocking lifecycle entry points are called only by GPUI's background executor.
     pub(crate) fn start(&self) -> Result<(), String> {
         let (runtime, manager) = self.parts()?;
         runtime.block_on(async {
             let business = self.business()?;
+            let client_config = business
+                .client_config()
+                .map_err(|error| error.to_string())?;
+            let observations = self.observations()?;
+            observations.prepare().await?;
+            manager.reap_stale();
+            let should_reserve_return_port = client_config.mitm_enabled
+                && self
+                    .mitm_service()?
+                    .whitelist(&client_config)
+                    .has_inclusions();
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, MIXED_PORT))
+                .await
+                .map_err(|error| format!("实验端口 {MIXED_PORT} 不可用：{error}"))?;
+            let api_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, CLASH_API_PORT))
+                .await
+                .map_err(|error| format!("Clash API 端口 {CLASH_API_PORT} 不可用：{error}"))?;
+            let return_listener = if should_reserve_return_port {
+                let port = MIXED_PORT + 1;
+                Some(
+                    tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+                        .await
+                        .map_err(|error| format!("MITM 回流端口 {port} 不可用：{error}"))?,
+                )
+            } else {
+                None
+            };
+            drop(return_listener);
+            drop(api_listener);
+            drop(listener);
+            self.stop_mitm().await;
+            let mitm = self
+                .mitm_service()?
+                .start(&client_config, Arc::new(TracingNotifier::new()))
+                .await
+                .map_err(|error| error.to_string())?;
+            let chain = mitm.as_ref().map(MitmSession::chain);
             let config = business
-                .build_config(true)
+                .build_config_with_chain(true, chain)
                 .await
                 .map_err(|error| error.to_string())?;
             business
@@ -190,17 +261,6 @@ impl DesktopRuntime {
                 .validate_value(&config)
                 .await
                 .map_err(|error| error.to_string())?;
-            let observations = self.observations()?;
-            observations.prepare().await?;
-            manager.reap_stale();
-            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, MIXED_PORT))
-                .await
-                .map_err(|error| format!("实验端口 {MIXED_PORT} 不可用：{error}"))?;
-            let api_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, CLASH_API_PORT))
-                .await
-                .map_err(|error| format!("Clash API 端口 {CLASH_API_PORT} 不可用：{error}"))?;
-            drop(api_listener);
-            drop(listener);
             if let Err(error) = self.start_script_tasks().await {
                 tracing::warn!(%error, "定时任务调度器启动失败（不影响核心启动）");
             }
@@ -232,6 +292,7 @@ impl DesktopRuntime {
                     Err(stop_error) => Err(format!("{error}；核心回收失败：{stop_error}")),
                 };
             }
+            *self.mitm.lock().await = mitm;
             Ok(())
         })
     }
@@ -242,6 +303,7 @@ impl DesktopRuntime {
             self.logs.stop().await;
             self.observations()?.stop().await;
             self.stop_script_tasks().await;
+            self.stop_mitm().await;
             manager.stop().await.map_err(|error| error.to_string())
         })
     }
@@ -271,6 +333,18 @@ impl DesktopRuntime {
         if let Some(session) = self.script_tasks.lock().await.take() {
             session.stop().await;
         }
+    }
+
+    async fn stop_mitm(&self) {
+        if let Some(session) = self.mitm.lock().await.take() {
+            session.stop();
+        }
+    }
+
+    fn mitm_service(&self) -> Result<&MitmService, String> {
+        self.mitm_service
+            .as_ref()
+            .ok_or_else(|| self.unavailable_data_error())
     }
 
     fn unavailable_data_error(&self) -> String {

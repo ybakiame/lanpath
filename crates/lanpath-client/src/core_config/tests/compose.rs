@@ -53,6 +53,7 @@ fn compose_singbox_with_mitm_chain_injects_inbounds_outbound_and_route() {
         hostnames: vec![
             "example.com".to_string(),
             "*.cdn.example.net".to_string(),
+            "127.0.0.1".to_string(),
             "-excluded.example.org".to_string(),
         ],
     };
@@ -83,6 +84,7 @@ fn compose_singbox_with_mitm_chain_injects_inbounds_outbound_and_route() {
     assert_eq!(rules[0]["inbound"], json!(["main-in"]));
     assert_eq!(rules[0]["domain"], json!(["example.com"]));
     assert_eq!(rules[0]["domain_suffix"], json!(["cdn.example.net"]));
+    assert_eq!(rules[0]["ip_cidr"], json!(["127.0.0.1/32"]));
     assert_eq!(rules[0]["outbound"], "lanpath-mitm");
     assert_eq!(cfg["route"]["final"], "n1");
 }

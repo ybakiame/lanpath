@@ -15,7 +15,7 @@ impl DesktopView {
             dialog
                 .title("放弃修改并关闭实验版？")
                 .description(
-                    "订阅、覆写、结构化配置、规则或脚本有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
+                    "订阅、覆写、结构化配置、规则、脚本或 MITM 有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
                 )
                 .confirm()
                 .ok_text("放弃修改并关闭")
@@ -45,6 +45,10 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.scripts
             .update(cx, |view, cx| view.set_running(false, cx));
+        self.mitm.update(cx, |view, cx| {
+            view.set_locked(true, cx);
+            view.set_running(false, cx);
+        });
         self.proxy.update(cx, |view, cx| view.set_closing(true, cx));
         self.connections
             .update(cx, |view, cx| view.set_running(false, cx));
@@ -64,6 +68,7 @@ impl DesktopView {
                         || this.structured.read(cx).busy()
                         || this.rules.read(cx).busy()
                         || this.scripts.read(cx).busy()
+                        || this.mitm.read(cx).busy()
                 }) else {
                     return;
                 };
@@ -80,6 +85,7 @@ impl DesktopView {
                     || this.structured.read(cx).dirty()
                     || this.rules.read(cx).dirty()
                     || this.scripts.read(cx).dirty()
+                    || this.mitm.read(cx).dirty()
             }) else {
                 return;
             };
@@ -98,6 +104,10 @@ impl DesktopView {
                         this.rules
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.scripts.update(cx, |view, cx| {
+                            view.set_locked(this.core_running, cx);
+                            view.set_running(this.core_running, cx);
+                        });
+                        this.mitm.update(cx, |view, cx| {
                             view.set_locked(this.core_running, cx);
                             view.set_running(this.core_running, cx);
                         });
@@ -140,6 +150,10 @@ impl DesktopView {
                         this.rules
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.scripts.update(cx, |view, cx| {
+                            view.set_locked(this.core_running, cx);
+                            view.set_running(this.core_running, cx);
+                        });
+                        this.mitm.update(cx, |view, cx| {
                             view.set_locked(this.core_running, cx);
                             view.set_running(this.core_running, cx);
                         });

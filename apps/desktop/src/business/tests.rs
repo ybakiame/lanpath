@@ -1,4 +1,6 @@
-use lanpath_client::{CachedSubscriptionContent, RequestProxyMode, SubFormat, SubscriptionSource};
+use lanpath_client::{
+    CachedSubscriptionContent, RequestProxyMode, ScriptDialect, SubFormat, SubscriptionSource,
+};
 use serde_json::json;
 
 use super::BusinessService;
@@ -35,6 +37,40 @@ fn client_state_persists_selection_but_forces_experimental_network_boundaries() 
     assert!(!normalized.tun_enabled);
     assert!(!normalized.system_proxy_enabled);
     assert_eq!(normalized.request_proxy_mode, RequestProxyMode::None);
+}
+
+#[test]
+fn mitm_settings_persist_without_relaxing_experimental_network_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let business = service(root.path());
+    assert!(!business.mitm_settings().unwrap().enabled);
+
+    let saved = business
+        .save_mitm_settings(
+            true,
+            vec![
+                " api.example.com ".into(),
+                "-private.example.com".into(),
+                "api.example.com".into(),
+            ],
+            ScriptDialect::Surge,
+        )
+        .unwrap();
+    assert!(saved.enabled);
+    assert_eq!(saved.hostnames, ["api.example.com", "-private.example.com"]);
+    assert_eq!(saved.script_dialect, ScriptDialect::Surge);
+
+    let reopened = service(root.path());
+    let config = reopened.client_config().unwrap();
+    assert!(config.mitm_enabled);
+    assert_eq!(
+        config.mitm.hostnames,
+        ["api.example.com", "-private.example.com"]
+    );
+    assert_eq!(config.mitm.script_dialect, ScriptDialect::Surge);
+    assert!(!config.tun_enabled);
+    assert!(!config.system_proxy_enabled);
+    assert_eq!(config.request_proxy_mode, RequestProxyMode::None);
 }
 
 #[test]

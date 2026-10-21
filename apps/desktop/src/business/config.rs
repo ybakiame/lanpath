@@ -1,8 +1,9 @@
 use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
 use lanpath_client::{
     EffectiveOverrides, PanelFeatures, ProfileStoreV2, SubscriptionStore, apply_panel_features,
-    build_core_config_v2, compose_singbox_config, download_missing_rule_sets_warn_only,
-    inject_local_override_warn_only, resolve_remote_overrides,
+    build_core_config_v2, compose_singbox_config, core_config::MitmChain,
+    download_missing_rule_sets_warn_only, inject_local_override_warn_only,
+    resolve_remote_overrides,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use serde_json::Value;
@@ -11,6 +12,14 @@ use super::BusinessService;
 
 impl BusinessService {
     pub(crate) async fn build_config(&self, download_rule_sets: bool) -> LanpathResult<Value> {
+        self.build_config_with_chain(download_rule_sets, None).await
+    }
+
+    pub(crate) async fn build_config_with_chain(
+        &self,
+        download_rule_sets: bool,
+        mitm_chain: Option<MitmChain>,
+    ) -> LanpathResult<Value> {
         let config = self.client_config()?;
         let selected_id = config
             .active_subscription_id
@@ -61,7 +70,8 @@ impl BusinessService {
         }
         let slices = load_slices(&self.root);
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
-        let mut value = compose_singbox_config(&profile_config, self.bindings.mixed_port(), None)?;
+        let mut value =
+            compose_singbox_config(&profile_config, self.bindings.mixed_port(), mitm_chain)?;
         if download_rule_sets {
             download_missing_rule_sets_warn_only(&self.root, &value, &|message| {
                 tracing::info!(%message, "实验规则集启动补齐");

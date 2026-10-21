@@ -3,7 +3,7 @@
 //! 平台三分（其余平台编译为「不支持 / 未知」兜底，保证任意 host 可编译）：
 //!
 //! - **Windows**：`certutil -user -addstore Root`（CurrentUser 存储，免 UAC）；
-//!   状态经 `certutil -user -store Root` 输出匹配 CA 主体名。
+//!   状态经 `certutil -user -store Root <SHA-1>` 精确匹配本机 CA 指纹。
 //! - **macOS**：`osascript` 以管理员权限执行 `security add-trusted-cert` 写入
 //!   系统钥匙串；状态经 `security verify-cert -c <ca.crt>` 退出码判定。
 //! - **Linux**：`pkexec` 将 CA 安装到 `/usr/local/share/ca-certificates/` 并
@@ -22,9 +22,6 @@ const LINUX_ANCHOR_DIRS: [&str; 2] = [
     "/usr/local/share/ca-certificates",
     "/etc/ca-certificates/trust-source/anchors",
 ];
-
-/// 本 CA 的主体 CN（与 [`crate::ca`] 生成的 CN 一致），用于 Windows certutil 输出匹配。
-pub const CA_SUBJECT_CN: &str = "ProxyPanel MITM CA";
 
 /// CA 系统信任状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -109,19 +106,16 @@ pub fn sha256_hex(data: &[u8]) -> String {
         .collect()
 }
 
-/// `certutil -user -store Root` 输出中是否包含目标主体名。
+/// 字节的 SHA-1 指纹（小写 hex，无分隔符）。
 ///
-/// certutil 的 Subject 行为 `CN=ProxyPanel MITM CA`；忽略大小写与全部空白后
-/// 匹配，以容忍本地化输出、换行与缩进差异（中文系统 OEM 编码不影响 ASCII
-/// 主体名的匹配）。
-pub fn certutil_output_contains(output: &str, subject: &str) -> bool {
-    fn normalize(s: &str) -> String {
-        s.chars()
-            .filter(|c| !c.is_whitespace())
-            .collect::<String>()
-            .to_lowercase()
-    }
-    normalize(output).contains(&normalize(subject))
+/// Windows 证书存储以 SHA-1 thumbprint 作为稳定证书标识；这里只用于精确查找，
+/// 不用于签名或密码学安全判断。
+pub fn sha1_hex(data: &[u8]) -> String {
+    use sha1::Digest;
+    sha1::Sha1::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Linux 提权安装的 shell 脚本（pkexec `sh -c` 的第三个参数；纯构造函数）。
@@ -184,24 +178,33 @@ fn platform_install_ca(ca_path: &Path) -> LanpathResult<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn platform_ca_trust_status(_ca_path: &Path) -> CaTrustView {
+fn platform_ca_trust_status(ca_path: &Path) -> CaTrustView {
+    const NTE_NOT_FOUND: i32 = 0x8009_0011_u32 as i32;
+
+    let pem = match std::fs::read_to_string(ca_path) {
+        Ok(pem) => pem,
+        Err(error) => return CaTrustView::unknown(format!("读取本机 CA 失败: {error}")),
+    };
+    let der = match pem_to_der(&pem) {
+        Ok(der) => der,
+        Err(error) => return CaTrustView::unknown(format!("解析本机 CA 失败: {error}")),
+    };
+    let thumbprint = sha1_hex(&der);
     let mut command = std::process::Command::new("certutil");
     let output = match lanpath_common::process::no_window(&mut command)
-        .args(["-user", "-store", "Root"])
+        .args(["-user", "-store", "Root", &thumbprint])
         .output()
     {
-        Ok(o) => o,
-        Err(e) => return CaTrustView::unknown(format!("无法执行 certutil: {e}")),
+        Ok(output) => output,
+        Err(error) => return CaTrustView::unknown(format!("无法执行 certutil: {error}")),
     };
-    if !output.status.success() {
-        return CaTrustView::unknown(format!("certutil -store 退出码 {}", output.status));
+    if output.status.success() {
+        return CaTrustView::trusted("当前 CA 已存在于当前用户 Root 信任存储");
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    if certutil_output_contains(&text, CA_SUBJECT_CN) {
-        CaTrustView::trusted("已存在于当前用户 Root 信任存储")
-    } else {
-        CaTrustView::not_trusted("当前用户 Root 信任存储中未找到该 CA")
+    if output.status.code() == Some(NTE_NOT_FOUND) {
+        return CaTrustView::not_trusted("当前用户 Root 信任存储中未找到当前 CA 指纹");
     }
+    CaTrustView::unknown(format!("certutil -store 退出码 {}", output.status))
 }
 
 // ---------------------------------------------------------------------------
@@ -366,23 +369,8 @@ mod tests {
     }
 
     #[test]
-    fn certutil_output_matches_subject_ignoring_case_and_whitespace() {
-        let output = "\
-================ 证书 0 ================
-序列号: 1a2b3c
-颁发者: CN=ProxyPanel MITM CA
- NotBefore: 2026/1/1
- NotAfter: 2036/1/1
-使用者: CN=ProxyPanel MITM CA
-证书哈希(sha1): aa bb cc
-";
-        assert!(certutil_output_contains(output, CA_SUBJECT_CN));
-        assert!(!certutil_output_contains(output, "Some Other CA"));
-        // 大小写与空白不敏感。
-        assert!(certutil_output_contains(
-            "subject: cn=proxypanel  mitm\tca",
-            CA_SUBJECT_CN
-        ));
+    fn sha1_hex_matches_windows_thumbprint_format() {
+        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
     }
 
     #[test]

@@ -57,6 +57,58 @@ fn false_only(obj: &Map<String, Value>, key: &str, location: &str) -> LanpathRes
     Ok(())
 }
 
+fn managed_mixed_inbound(
+    value: &Value,
+    index: usize,
+    port: u16,
+    required_tag: Option<&str>,
+    mitm_return: bool,
+) -> LanpathResult<()> {
+    let location = format!("inbounds[{index}]");
+    let inbound = object(value, &location)?;
+    if mitm_return {
+        fields(inbound, &location, &["type tag listen listen_port"])?;
+    } else {
+        fields(
+            inbound,
+            &location,
+            &[
+                "type tag listen listen_port users set_system_proxy tcp_fast_open tcp_multi_path udp_fragment udp_timeout sniff sniff_override_destination sniff_timeout domain_strategy",
+            ],
+        )?;
+    }
+    if inbound.get("type").and_then(Value::as_str) != Some("mixed") {
+        return Err(denied(
+            &format!("{location}.type"),
+            "only a managed mixed inbound is authorized",
+        ));
+    }
+    if let Some(tag) = required_tag
+        && inbound.get("tag").and_then(Value::as_str) != Some(tag)
+    {
+        return Err(denied(
+            &format!("{location}.tag"),
+            &format!("must be the managed tag {tag}"),
+        ));
+    }
+    if inbound.get("listen").and_then(Value::as_str) != Some("127.0.0.1") {
+        return Err(denied(
+            &format!("{location}.listen"),
+            "must be explicitly 127.0.0.1",
+        ));
+    }
+    if inbound.get("listen_port").and_then(Value::as_u64) != Some(u64::from(port)) {
+        return Err(denied(
+            &format!("{location}.listen_port"),
+            &format!("must be the managed port {port}"),
+        ));
+    }
+    if !mitm_return {
+        false_only(inbound, "set_system_proxy", &location)?;
+    }
+    Ok(())
+}
+
 pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathResult<()> {
     let obj = object(value, "$")?;
     fields(
@@ -77,36 +129,35 @@ pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathRe
         .get("inbounds")
         .ok_or_else(|| denied("inbounds", "one managed mixed inbound is required"))?;
     let inbounds = array(inbounds, "inbounds")?;
-    if inbounds.len() != 1 {
+    if !(1..=2).contains(&inbounds.len()) {
         return Err(denied(
             "inbounds",
-            "exactly one managed mixed inbound is allowed; TUN and extra listeners are unauthorized",
+            "one managed mixed inbound, plus the optional managed MITM return inbound, is allowed",
         ));
     }
-    let inbound = object(&inbounds[0], "inbounds[0]")?;
-    fields(
-        inbound,
-        "inbounds[0]",
-        &[
-            "type tag listen listen_port users set_system_proxy tcp_fast_open tcp_multi_path udp_fragment udp_timeout sniff sniff_override_destination sniff_timeout domain_strategy",
-        ],
+    let mitm_enabled = inbounds.len() == 2;
+    managed_mixed_inbound(
+        &inbounds[0],
+        0,
+        bindings.mixed_port,
+        mitm_enabled.then_some("main-in"),
+        false,
     )?;
-    if inbound.get("type").and_then(Value::as_str) != Some("mixed") {
-        return Err(denied(
-            "inbounds[0].type",
-            "only the managed mixed inbound is authorized",
-        ));
+    if mitm_enabled {
+        let return_port = bindings.mixed_port.checked_add(1).ok_or_else(|| {
+            denied(
+                "inbounds[1].listen_port",
+                "managed MITM return port overflow",
+            )
+        })?;
+        if return_port == bindings.api_port {
+            return Err(denied(
+                "bindings",
+                "managed MITM return and Clash API ports must be distinct",
+            ));
+        }
+        managed_mixed_inbound(&inbounds[1], 1, return_port, Some("mitm-return"), true)?;
     }
-    if inbound.get("listen").and_then(Value::as_str) != Some("127.0.0.1") {
-        return Err(denied("inbounds[0].listen", "must be explicitly 127.0.0.1"));
-    }
-    if inbound.get("listen_port").and_then(Value::as_u64) != Some(u64::from(bindings.mixed_port)) {
-        return Err(denied(
-            "inbounds[0].listen_port",
-            &format!("must be the managed port {}", bindings.mixed_port),
-        ));
-    }
-    false_only(inbound, "set_system_proxy", "inbounds[0]")?;
     experimental(root, obj.get("experimental"), bindings)?;
     if let Some(value) = obj.get("log") {
         let log = object(value, "log")?;

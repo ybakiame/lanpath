@@ -90,10 +90,15 @@ jsDelivr。一次保存原子替换完整 local override，但规则集更新只
 模块参数、立即更新、配置导入以及 cron 任务状态和手动运行。更新间隔会持久化，但当前没有自动刷新
 编排，资源只在用户点击“立即更新全部”时拉取。远程资源/导入草稿会阻止核心启动；运行中锁定清单
 和导入写操作，但允许查看及手动运行已启动调度器中的任务。核心停止和正常关窗会等待调度器退出。
-片段解析复用 MITM 数据类型不代表启用 MITM：本阶段不启动抓包代理、不创建或信任 CA，rewrite、
-hook 和 hostname 只进入缓存，运行效果仍未迁移。
+“MITM”复用脚本缓存中的 rewrite、hook 与派生 Hostname，支持开关、手动白名单、隔离 CA、按当前
+CA 指纹查询系统信任、显式确认安装、PEM 复制和进程内抓包记录。手动 IP 白名单按精确 `/32` 或 `/128`
+路由，域名继续按完整域名或 `*.` 后缀匹配。启用且存在有效白名单时，核心启动动态增加
+`main-in`、`lanpath-mitm` 与固定 `127.0.0.1:17900` 回流入站；空白名单保持普通单入站。
+CA/私钥只写实验根，页面不会自动安装 CA、设置系统代理或启用 TUN。验证时不得为了通过测试直接
+触发“安装到系统信任库”；系统证书变更仍需用户单独授权。
 
-生成配置仍固定 mixed 为 `127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，占用则失败，
+生成配置仍固定 mixed 为 `127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，MITM 生效时
+另使用 `127.0.0.1:17900` 回流端口；占用则失败，
 不接管占用进程。拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须落在实验根内，
 不接受环境变量展开、系统 hosts 默认路径或外部 UI/自动证书资源。文件日志和缓存输出分别限于
 根下 `logs/`、`cache/`。能力边界先检查，具体配置 schema 仍由同一真实核心负责。
@@ -104,6 +109,7 @@ hook 和 hostname 只进入缓存，运行效果仍未迁移。
 $env:LANPATH_TEST_SING_BOX = $env:LANPATH_DESKTOP_CORE_BINARY
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::scripts_tests::fetched_remote_task_runs_while_real_core_is_live -- --ignored --exact
+cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::mitm_tests::generated_pipeline_records_real_mitm_traffic -- --ignored --exact --nocapture
 ```
 
 Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。

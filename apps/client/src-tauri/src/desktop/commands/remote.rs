@@ -289,7 +289,6 @@ pub async fn detect_remote(
     })
 }
 
-
 /// Fetch all enabled remote resources (no system proxy, 30s timeout).
 #[tauri::command]
 pub async fn fetch_remotes(state: State<'_, AppState>) -> Result<FetchReportView, String> {
