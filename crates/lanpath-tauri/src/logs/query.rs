@@ -1,8 +1,8 @@
 //! Log query commands: get logs, list log files, read tail, clear.
 
 use crate::logs::{
-    LogEntry, clear_ring_buffer, entry_sort_ts, log_tail_default_lines, log_tail_max_lines,
-    passes_level_filter, read_libbox_entries, read_tail_bytes, ring_buffer, validate_log_file_name,
+    LogEntry, clear_ring_buffer, entry_sort_ts, passes_level_filter, read_libbox_entries,
+    ring_buffer,
 };
 use crate::state::AppState;
 
@@ -53,21 +53,9 @@ pub fn list_log_files(state: tauri::State<'_, AppState>) -> Result<Vec<String>, 
 
 /// Pure logic for `list_log_files`.
 pub(crate) fn list_log_files_impl(logs_dir: &std::path::Path) -> Result<Vec<String>, String> {
-    if !logs_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut names: Vec<String> = std::fs::read_dir(logs_dir)
-        .map_err(|e| format!("读取日志目录失败：{e}"))?
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| {
-            name.starts_with("app.log")
-                || matches!(name.as_str(), "libbox.log" | "last_start_config.json")
-        })
-        .collect();
-    names.sort();
-    names.reverse();
-    Ok(names)
+    lanpath_client::logs::DiskLogService::new(logs_dir)
+        .list_files()
+        .map_err(|error| error.to_string())
 }
 
 /// Tauri command: read tail of a specified log file.
@@ -86,16 +74,9 @@ pub(crate) fn read_log_file_tail_impl(
     name: &str,
     max_lines: Option<u32>,
 ) -> Result<String, String> {
-    validate_log_file_name(name)?;
-    let path = logs_dir.join(name);
-    let max_lines = max_lines
-        .unwrap_or(log_tail_default_lines())
-        .clamp(1, log_tail_max_lines()) as usize;
-    let bytes = read_tail_bytes(&path)?;
-    let content = String::from_utf8_lossy(&bytes);
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(max_lines);
-    Ok(lines[start..].join("\n"))
+    lanpath_client::logs::DiskLogService::new(logs_dir)
+        .read_tail(name, max_lines)
+        .map_err(|error| error.to_string())
 }
 
 /// Tauri command: clear in-memory ring buffer.
@@ -119,7 +100,7 @@ pub fn log_frontend(level: String, message: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logs::{push_entry, test_entry};
+    use crate::logs::{push_entry, test_entry, validate_log_file_name};
 
     fn temp_logs_dir(tag: &str) -> std::path::PathBuf {
         let tmp = std::env::temp_dir().join(format!("pp-log-{tag}-{}", std::process::id()));

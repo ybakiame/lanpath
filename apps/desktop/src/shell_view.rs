@@ -1,10 +1,31 @@
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Selectable as _, button::Button};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _,
+    button::Button,
+    sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
+};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 
 use crate::{CoreOperationKind, DesktopView, Page};
+
+impl DesktopView {
+    fn navigation_group(
+        &self,
+        title: &'static str,
+        pages: &[(Page, &'static str)],
+        cx: &Context<Self>,
+    ) -> SidebarGroup<SidebarMenu> {
+        SidebarGroup::new(title).child(SidebarMenu::new().children(pages.iter().map(
+            |&(page, label)| {
+                SidebarMenuItem::new(label)
+                    .active(self.page == page)
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_page(page, cx)))
+            },
+        )))
+    }
+}
 
 impl Render for DesktopView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -32,19 +53,47 @@ impl Render for DesktopView {
             Page::Scripts => self.scripts.clone().into_any_element(),
             Page::Mitm => self.mitm.clone().into_any_element(),
         };
+        let sidebar = Sidebar::new("desktop-navigation")
+            .collapsible(false)
+            .w_48()
+            .child(self.navigation_group(
+                "配置",
+                &[
+                    (Page::Subscriptions, "订阅"),
+                    (Page::Profiles, "覆写"),
+                    (Page::Structured, "结构化配置"),
+                    (Page::Rules, "规则"),
+                    (Page::Configuration, "预览"),
+                ],
+                cx,
+            ))
+            .child(self.navigation_group(
+                "运行",
+                &[
+                    (Page::Proxies, "代理策略"),
+                    (Page::Connections, "连接"),
+                    (Page::Stats, "统计"),
+                    (Page::Logs, "日志"),
+                ],
+                cx,
+            ))
+            .child(self.navigation_group(
+                "扩展",
+                &[(Page::Scripts, "脚本"), (Page::Mitm, "MITM")],
+                cx,
+            ));
 
         div()
             .flex()
             .flex_col()
             .size_full()
-            .p_4()
-            .gap_3()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .p_4()
                     .gap_1()
                     .child("Lanpath 实验版（GPUI）")
                     .child(
@@ -57,139 +106,73 @@ impl Render for DesktopView {
             .child(
                 div()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
+                    .items_stretch()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .child(sidebar)
                     .child(
-                        Button::new("page-subscriptions")
-                            .label("订阅")
-                            .selected(self.page == Page::Subscriptions)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Subscriptions, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-profiles")
-                            .label("覆写")
-                            .selected(self.page == Page::Profiles)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Profiles, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-structured")
-                            .label("结构化配置")
-                            .selected(self.page == Page::Structured)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Structured, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-rules")
-                            .label("规则")
-                            .selected(self.page == Page::Rules)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Rules, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-configuration")
-                            .label("预览")
-                            .selected(self.page == Page::Configuration)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Configuration, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-proxies")
-                            .label("代理策略")
-                            .selected(self.page == Page::Proxies)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Proxies, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-connections")
-                            .label("连接")
-                            .selected(self.page == Page::Connections)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Connections, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-stats")
-                            .label("统计")
-                            .selected(self.page == Page::Stats)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Stats, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-logs")
-                            .label("日志")
-                            .selected(self.page == Page::Logs)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Logs, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-scripts")
-                            .label("脚本")
-                            .selected(self.page == Page::Scripts)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Scripts, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("page-mitm")
-                            .label("MITM")
-                            .selected(self.page == Page::Mitm)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_page(Page::Mitm, cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("core-start")
-                            .label("启动实验核心")
-                            .disabled(
-                                operation_busy
-                                    || self.core_running
-                                    || !self.core.is_configured()
-                                    || !self.configuration.read(cx).ready_for_start()
-                                    || self.structured.read(cx).dirty()
-                                    || self.rules.read(cx).dirty()
-                                    || self.scripts.read(cx).dirty()
-                                    || self.mitm.read(cx).dirty(),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .p_4()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("core-start")
+                                            .label("启动实验核心")
+                                            .disabled(
+                                                operation_busy
+                                                    || self.core_running
+                                                    || !self.core.is_configured()
+                                                    || !self
+                                                        .configuration
+                                                        .read(cx)
+                                                        .ready_for_start()
+                                                    || self.structured.read(cx).dirty()
+                                                    || self.rules.read(cx).dirty()
+                                                    || self.scripts.read(cx).dirty()
+                                                    || self.mitm.read(cx).dirty(),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.run_core_operation(
+                                                    CoreOperationKind::Start,
+                                                    window,
+                                                    cx,
+                                                )
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("core-stop")
+                                            .label("停止核心")
+                                            .disabled(operation_busy || !self.core_running)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.run_core_operation(
+                                                    CoreOperationKind::Stop,
+                                                    window,
+                                                    cx,
+                                                )
+                                            })),
+                                    ),
                             )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_core_operation(CoreOperationKind::Start, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("core-stop")
-                            .label("停止核心")
-                            .disabled(operation_busy || !self.core_running)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run_core_operation(CoreOperationKind::Stop, window, cx);
-                            })),
+                            .child(
+                                div()
+                                    .id("core-status")
+                                    .role(Role::Status)
+                                    .aria_label(core_status.clone())
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(core_status),
+                            )
+                            .child(content),
                     ),
             )
-            .child(
-                div()
-                    .id("core-status")
-                    .role(Role::Status)
-                    .aria_label(core_status.clone())
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(core_status),
-            )
-            .child(content)
     }
 }

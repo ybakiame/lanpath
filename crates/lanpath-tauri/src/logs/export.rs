@@ -60,48 +60,20 @@ pub async fn open_export_dir(
 }
 
 /// List daily log files for desktop export (excludes export-* files).
+#[cfg(test)]
 #[cfg(not(target_os = "android"))]
 fn list_daily_files(logs_dir: &std::path::Path) -> Result<Vec<PathBuf>, String> {
-    if !logs_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut files: Vec<PathBuf> = std::fs::read_dir(logs_dir)
-        .map_err(|e| format!("读取日志目录失败：{e}"))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| {
-                    !name.starts_with("export-")
-                        && (name.starts_with("app.log") || name.ends_with(".log"))
-                })
-                .unwrap_or(false)
-        })
-        .collect();
-    files.sort();
-    Ok(files)
+    lanpath_client::logs::DiskLogService::new(logs_dir)
+        .export_files()
+        .map_err(|error| error.to_string())
 }
 
 /// Merge all rolling files into `logs_dir/export-<timestamp>.log` (desktop only).
 #[cfg(not(target_os = "android"))]
 fn write_export(logs_dir: &std::path::Path) -> Result<PathBuf, String> {
-    if !logs_dir.is_dir() {
-        return Err(format!("日志目录不存在：{}", logs_dir.display()));
-    }
-    let files = list_daily_files(logs_dir)?;
-    let export_path = logs_dir.join(format!(
-        "export-{}.log",
-        chrono::Local::now().format("%Y%m%d-%H%M%S")
-    ));
-    let mut out =
-        std::fs::File::create(&export_path).map_err(|e| format!("创建导出文件失败：{e}"))?;
-    for file in &files {
-        let content = std::fs::read(file).map_err(|e| format!("读取日志文件失败：{e}"))?;
-        std::io::Write::write_all(&mut out, &content)
-            .map_err(|e| format!("写入导出文件失败：{e}"))?;
-    }
-    Ok(export_path)
+    lanpath_client::logs::DiskLogService::new(logs_dir)
+        .export_to(logs_dir)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ mod configuration;
 mod connection_list;
 mod connections_view;
 mod data_root;
+mod disk_log_writer;
 mod log_buffer;
 mod log_capture;
 mod log_list;
@@ -337,6 +338,9 @@ impl DesktopView {
     }
 
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.closing {
+            return;
+        }
         self.page = page;
         self.connections.update(cx, |view, cx| {
             view.set_active(page == Page::Connections, cx)
@@ -360,7 +364,7 @@ pub fn run() {
         .run(move |cx| {
             gpui_kit::init(cx);
             config_view::init(cx);
-            log_capture::install(core.logs().buffer().clone())
+            log_capture::install(core.logs().buffer().clone(), core.logs().disk().cloned())
                 .expect("failed to initialize experimental log capture");
             tracing::info!("GPUI experimental desktop initialized");
             gpui_kit::open_window(

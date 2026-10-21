@@ -3,7 +3,10 @@ use gpui_kit::component::{
     label::Label,
     list::{ListDelegate, ListItem, ListState},
 };
-use gpui_kit::{App, Context, IntoElement, ParentElement as _, Styled as _, Window, div};
+use gpui_kit::{
+    App, Context, IntoElement, ParentElement as _, Role, StatefulInteractiveElement as _,
+    Styled as _, Window, div,
+};
 use lanpath_client::connections::ConnectionView;
 
 #[derive(Default)]
@@ -26,6 +29,11 @@ impl ConnectionListDelegate {
         }
         self.rows = rows;
         true
+    }
+
+    pub(crate) fn selected(&self) -> Option<&ConnectionView> {
+        let id = self.selected_id.as_deref()?;
+        self.rows.iter().find(|row| row.id == id)
     }
 
     pub(crate) fn selected_id(&self) -> Option<&str> {
@@ -61,6 +69,7 @@ impl ListDelegate for ConnectionListDelegate {
         let row = self.rows.get(ix.row)?;
         Some(
             ListItem::new(gpui_kit::SharedString::from(row.id.clone()))
+                .role(Role::ListItem)
                 .accessibility_label(format!("{} · {}", row.host, row.id))
                 .selected(self.selected_id.as_deref() == Some(row.id.as_str()))
                 .child(Label::new(format!(

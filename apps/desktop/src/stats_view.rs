@@ -1,29 +1,45 @@
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::Button,
-    list::{List, ListState},
-};
-use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Task,
-    Window, div,
-};
-use lanpath_client::stats::TodaySummary;
+use gpui_kit::component::{WindowExt as _, input::EditorState, list::ListState};
+use gpui_kit::{AppContext as _, Context, Entity, SharedString, Subscription, Task, Window};
+use lanpath_client::stats::{DailyQuery, RecordsQuery, TodaySummary};
 
-use crate::{observation::StatsKind, runtime::DesktopRuntime, stats_list::StatsListDelegate};
+use crate::{
+    observation::{StatsKind, StatsRows, StatsSnapshot},
+    runtime::DesktopRuntime,
+    stats_list::StatsListDelegate,
+};
+
+mod query;
+mod render;
+mod requests;
+
+use query::QueryInputs;
+use requests::{Request, StatsRequests};
 
 pub(crate) struct StatsView {
     core: Arc<DesktopRuntime>,
-    list: Entity<ListState<StatsListDelegate>>,
+    daily_list: Entity<ListState<StatsListDelegate>>,
+    records_list: Entity<ListState<StatsListDelegate>>,
+    details: Entity<EditorState>,
+    detail_text: Option<SharedString>,
+    _list_subscriptions: Vec<Subscription>,
+    inputs: QueryInputs,
+    daily_query: DailyQuery,
+    records_query: RecordsQuery,
+    loaded_daily: Option<DailyQuery>,
+    loaded_records: Option<RecordsQuery>,
     summary: Option<TodaySummary>,
     error: Option<String>,
+    clear_error: Option<String>,
+    notice: Option<String>,
     kind: StatsKind,
     active: bool,
     running: bool,
-    busy: bool,
-    generation: u64,
+    closing: bool,
+    requests: StatsRequests,
     request_task: Option<Task<()>>,
+    _input_subscriptions: Vec<Subscription>,
     _poll_task: Task<()>,
 }
 
@@ -33,8 +49,30 @@ impl StatsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let list =
-            cx.new(|cx| ListState::new(StatsListDelegate::default(), window, cx).selectable(false));
+        let daily_list = cx.new(|cx| ListState::new(StatsListDelegate::default(), window, cx));
+        let records_list = cx.new(|cx| ListState::new(StatsListDelegate::default(), window, cx));
+        let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
+        let list_subscriptions = [&daily_list, &records_list]
+            .into_iter()
+            .map(|list| {
+                cx.observe_in(list, window, |this, list, window, cx| {
+                    list.update(cx, |list, cx| {
+                        let selected = list.delegate().selected_index();
+                        if list.selected_index() != selected {
+                            list.set_selected_index(selected, window, cx);
+                        }
+                    });
+                    this.sync_details(window, cx);
+                    cx.notify();
+                })
+            })
+            .collect();
+        let inputs = QueryInputs::new(window, cx);
+        let input_subscriptions = inputs.subscribe(cx);
+        let daily_query = inputs.daily_query(cx).expect("valid initial daily query");
+        let records_query = inputs
+            .records_query(cx)
+            .expect("valid initial records query");
         let poll_task = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(5)).await;
@@ -52,15 +90,27 @@ impl StatsView {
         });
         Self {
             core,
-            list,
+            daily_list,
+            records_list,
+            details,
+            detail_text: None,
+            _list_subscriptions: list_subscriptions,
+            inputs,
+            daily_query,
+            records_query,
+            loaded_daily: None,
+            loaded_records: None,
             summary: None,
             error: None,
+            clear_error: None,
+            notice: None,
             kind: StatsKind::Daily,
             active: false,
             running: false,
-            busy: false,
-            generation: 0,
+            closing: false,
+            requests: StatsRequests::default(),
             request_task: None,
+            _input_subscriptions: input_subscriptions,
             _poll_task: poll_task,
         }
     }
@@ -74,110 +124,183 @@ impl StatsView {
 
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
         self.running = running;
-        self.generation += 1;
-        if self.active {
+        self.requests.invalidate();
+        self.refresh(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn busy(&self) -> bool {
+        self.requests.busy() || self.requests.clearing()
+    }
+
+    pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        self.closing = closing;
+        if !closing {
             self.refresh(cx);
         }
         cx.notify();
     }
 
-    fn select_kind(&mut self, kind: StatsKind, cx: &mut Context<Self>) {
-        if self.kind == kind {
-            return;
-        }
+    fn select_kind(&mut self, kind: StatsKind, window: &mut Window, cx: &mut Context<Self>) {
         self.kind = kind;
-        self.generation += 1;
-        // A stale result stays associated with its original segment, never
-        // displayed under a different query's heading.
-        self.list.update(cx, |list, cx| {
-            *list.delegate_mut() = StatsListDelegate::default();
-            cx.notify();
-        });
-        self.refresh(cx);
+        self.sync_details(window, cx);
         cx.notify();
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        if self.busy || !self.active {
+    fn sync_details(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let list = match self.kind {
+            StatsKind::Daily => &self.daily_list,
+            StatsKind::Records => &self.records_list,
+        };
+        let text = list.read(cx).delegate().selected_text();
+        if self.detail_text != text {
+            self.details.update(cx, |editor, cx| {
+                editor.set_value(text.clone().unwrap_or_default(), window, cx)
+            });
+            self.detail_text = text;
+        }
+    }
+
+    fn apply_query(&mut self, cx: &mut Context<Self>) {
+        if self.closing || self.requests.clearing() {
             return;
         }
-        self.busy = true;
-        let generation = self.generation;
-        let kind = self.kind;
+        let result = match self.kind {
+            StatsKind::Daily => self
+                .inputs
+                .daily_query(cx)
+                .map(|query| self.daily_query = query),
+            StatsKind::Records => self
+                .inputs
+                .records_query(cx)
+                .map(|query| self.records_query = query),
+        };
+        if let Err(error) = result {
+            self.error = Some(error);
+        } else {
+            self.error = None;
+            self.notice = None;
+            self.requests.invalidate();
+            self.refresh(cx);
+        }
+        cx.notify();
+    }
+
+    fn request_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.closing || self.requests.clearing() {
+            return;
+        }
+        let view = cx.weak_entity();
+        window.open_alert_dialog(cx, move |dialog, _, _| {
+            let view = view.clone();
+            dialog
+                .title("清空全部实验统计？")
+                .description("删除实验目录中的所有日期日聚合和持久关闭明细，不受当前筛选条件限制，且无法撤销。生产 Lanpath 数据不受影响；运行中的跟踪器会继续采集新的统计。")
+                .confirm()
+                .ok_text("清空统计")
+                .cancel_text("取消")
+                .on_ok(move |_, _, cx| {
+                    let _ = view.update(cx, |view, cx| {
+                        if view.closing { return; }
+                        view.requests.request_clear();
+                        view.notice = None;
+                        view.clear_error = None;
+                        view.refresh(cx);
+                        cx.notify();
+                    });
+                    true
+                })
+        });
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(request) = self.requests.begin(self.active && !self.closing) else {
+            return;
+        };
         let core = self.core.clone();
+        let daily = self.daily_query.clone();
+        let records = self.records_query.clone();
         self.request_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    core.observations().and_then(|observations| {
-                        core.block_on(observations.stats(kind))
-                            .and_then(|result| result)
-                    })
+                    let observations = core.observations()?;
+                    match request {
+                        Request::Clear => core.block_on(observations.clear_stats())?.map(|_| None),
+                        Request::Query(_) => core
+                            .block_on(observations.stats(&daily, &records))?
+                            .map(|snapshot| Some((snapshot, daily, records))),
+                    }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.busy = false;
-                if generation != this.generation {
-                    this.refresh(cx);
-                    return;
-                }
-                match result {
-                    Ok(snapshot) => {
-                        this.summary = Some(snapshot.summary);
-                        this.list.update(cx, |list, cx| {
-                            list.delegate_mut().replace(snapshot.rows);
-                            cx.notify();
-                        });
-                        this.error = None;
+                let accepted = this.requests.complete(request);
+                if request == Request::Clear {
+                    // Even a failed clear may have removed one table. Never
+                    // retain a pre-clear cache or accept an older queued read.
+                    this.invalidate_snapshot(cx);
+                    match result {
+                        Ok(_) => {
+                            this.clear_error = None;
+                            this.notice = Some("已清空实验统计；跟踪采集不会暂停".into());
+                        }
+                        Err(error) => this.clear_error = Some(format!("清空实验统计失败：{error}")),
                     }
-                    Err(error) => this.error = Some(error),
+                    this.refresh(cx);
+                } else if !accepted {
+                    this.refresh(cx);
+                } else {
+                    match result {
+                        Ok(Some((snapshot, daily, records))) => {
+                            this.replace_snapshot(snapshot, daily, records, cx);
+                            this.error = None;
+                        }
+                        Err(error) => {
+                            this.error = Some(format!("统计读取失败，保留上次成功结果：{error}"))
+                        }
+                        Ok(None) => unreachable!("query returns a statistics snapshot"),
+                    }
                 }
                 cx.notify();
             });
         }));
         cx.notify();
     }
-}
 
-impl Render for StatsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let summary = self.summary.as_ref().map(|s| {
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(format!(
-                    "本地日期 {} · {} 次连接 · {} 个目标",
-                    s.date, s.connection_count, s.target_count
-                ))
-                .child(format!(
-                    "总上传 {} B · 总下载 {} B · 已代理上传 {} B · 已代理下载 {} B",
-                    s.upload_bytes,
-                    s.download_bytes,
-                    s.proxied_upload_bytes,
-                    s.proxied_download_bytes
-                ))
+    fn replace_snapshot(
+        &mut self,
+        snapshot: StatsSnapshot,
+        mut daily: DailyQuery,
+        records: RecordsQuery,
+        cx: &mut Context<Self>,
+    ) {
+        if daily.date.is_none() {
+            daily.date = Some(snapshot.summary.date.clone());
+        }
+        self.summary = Some(snapshot.summary);
+        self.loaded_daily = Some(daily);
+        self.loaded_records = Some(records);
+        self.daily_list.update(cx, |list, cx| {
+            list.delegate_mut()
+                .replace(StatsRows::Daily(snapshot.daily));
+            cx.notify();
         });
-        div().flex().flex_col().flex_1().min_h_0().gap_2()
-            .child(div().flex().items_center().gap_2().child("持久统计")
-                .child(Button::new("stats-refresh").label("刷新统计").disabled(self.busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))))
-            .children(summary)
-            .children(self.error.as_ref().map(|error| div().text_sm().text_color(cx.theme().danger).child(format!("统计读取失败，保留已读取结果：{error}"))))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(if self.busy {
-                "正在读取已提交统计…"
-            } else if self.running {
-                "运行时每 5 秒刷新；跟踪采集不随页面切换暂停"
-            } else { "核心停止后仍可读取历史；统计目录由验证环境单独保存" }))
-            .child(div().flex().items_center().gap_2()
-                .child(Button::new("stats-daily").label("今日日聚合").selected(self.kind == StatsKind::Daily)
-                    .on_click(cx.listener(|this, _, _, cx| this.select_kind(StatsKind::Daily, cx))))
-                .child(Button::new("stats-records").label("持久关闭明细").selected(self.kind == StatsKind::Records)
-                    .on_click(cx.listener(|this, _, _, cx| this.select_kind(StatsKind::Records, cx)))))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(match self.kind {
-                StatsKind::Daily => "今日复合维度聚合，按流量降序显示前 200 条；不是独立目标或出站排行榜",
-                StatsKind::Records => "跨日期关闭明细，按检测关闭时间倒序显示前 200 条；字节为最后已知累计值，时间为 Unix 秒",
-            }))
-            .child(List::new(&self.list).size_full())
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("采样可能漏记短连接与尾流量；停止不执行最终结算。日聚合保留 90 天，明细保留 7 天，打开存储时清理过期记录。"))
+        self.records_list.update(cx, |list, cx| {
+            list.delegate_mut()
+                .replace(StatsRows::Records(snapshot.records));
+            cx.notify();
+        });
+    }
+
+    fn invalidate_snapshot(&mut self, cx: &mut Context<Self>) {
+        self.summary = None;
+        self.loaded_daily = None;
+        self.loaded_records = None;
+        self.error = None;
+        for list in [&self.daily_list, &self.records_list] {
+            list.update(cx, |list, cx| {
+                *list.delegate_mut() = StatsListDelegate::default();
+                cx.notify();
+            });
+        }
     }
 }

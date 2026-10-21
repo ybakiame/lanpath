@@ -18,6 +18,7 @@ pub mod dns_probe;
 pub mod http_exec;
 pub mod import;
 pub mod local_override;
+pub mod logs;
 #[cfg(feature = "mitm")]
 pub mod mitm;
 pub mod node_convert;

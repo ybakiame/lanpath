@@ -6,19 +6,26 @@ use std::{
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _,
     button::Button,
+    input::{Editor, EditorState},
     list::{List, ListState},
 };
 use gpui_kit::{
     AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
     Subscription, Task, Window, div,
 };
-use lanpath_client::connections::{ConnectionView, clash_close_connection, clash_get_connections};
+use lanpath_client::connections::{
+    ActiveConnections, clash_close_connection, clash_get_connections,
+};
 
 use crate::{connection_list::ConnectionListDelegate, runtime::DesktopRuntime};
 
 pub(crate) struct ConnectionsView {
     core: Arc<DesktopRuntime>,
     list: Entity<ListState<ConnectionListDelegate>>,
+    details: Entity<EditorState>,
+    detail_text: String,
+    upload_total: u64,
+    download_total: u64,
     running: bool,
     active: bool,
     busy: bool,
@@ -42,13 +49,33 @@ impl ConnectionsView {
         cx: &mut Context<Self>,
     ) -> Self {
         let list = cx.new(|cx| ListState::new(ConnectionListDelegate::default(), window, cx));
-        let observer = cx.observe_in(&list, window, |_, list, window, cx| {
+        let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
+        let observer = cx.observe_in(&list, window, |this, list, window, cx| {
             list.update(cx, |list, cx| {
                 let selected = list.delegate().selected_index();
                 if list.selected_index() != selected {
                     list.set_selected_index(selected, window, cx);
                 }
             });
+            let text = list
+                .read(cx)
+                .delegate()
+                .selected()
+                .map(|row| {
+                    let age = (chrono::Local::now().timestamp().max(0) as u64)
+                        .saturating_sub(row.start);
+                    format!(
+                        "目标：{}\n目标 IP：{}\n协议：{}\n出站链：{}\n命中规则：{} {}\n上传：{} B · 下载：{} B\n开始：{} · {}：{} 秒\n连接 ID：{}",
+                        row.host, row.destination_ip, row.network, row.chain, row.rule,
+                        row.rule_payload, row.upload, row.download, row.start,
+                        if this.show_closed { "距开始" } else { "持续" }, age, row.id
+                    )
+                })
+                .unwrap_or_default();
+            if text != this.detail_text {
+                this.details.update(cx, |editor, cx| editor.set_value(text.clone(), window, cx));
+                this.detail_text = text;
+            }
             cx.notify();
         });
         let poll_task = cx.spawn(async move |this, cx| {
@@ -69,6 +96,10 @@ impl ConnectionsView {
         Self {
             core,
             list,
+            details,
+            detail_text: String::new(),
+            upload_total: 0,
+            download_total: 0,
             running: false,
             active: false,
             busy: false,
@@ -86,6 +117,10 @@ impl ConnectionsView {
         }
     }
 
+    pub(crate) fn busy(&self) -> bool {
+        self.busy
+    }
+
     pub(crate) fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
         self.active = active;
         if active {
@@ -97,6 +132,8 @@ impl ConnectionsView {
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
         self.generation += 1;
         self.running = running;
+        self.upload_total = 0;
+        self.download_total = 0;
         self.loaded = false;
         self.load_error = None;
         self.action_error = None;
@@ -118,6 +155,8 @@ impl ConnectionsView {
             return;
         }
         self.show_closed = show_closed;
+        self.upload_total = 0;
+        self.download_total = 0;
         self.generation += 1;
         self.loaded = false;
         self.load_error = None;
@@ -162,11 +201,22 @@ impl ConnectionsView {
                         // Retain the HTTP health/error contract; tracker.closed()
                         // alone cannot distinguish a stale snapshot from a live one.
                         let result = match clash_get_connections(core.api_port(), "").await {
-                            Ok(_) if show_closed => match core.observations() {
-                                Ok(observations) => Ok(observations.closed().await),
+                            Ok(_) => match core.observations() {
+                                Ok(observations) if show_closed => {
+                                    let connections = observations.closed().await;
+                                    let upload_total =
+                                        connections.iter().map(|row| row.upload).sum();
+                                    let download_total =
+                                        connections.iter().map(|row| row.download).sum();
+                                    Ok(ActiveConnections {
+                                        connections,
+                                        upload_total,
+                                        download_total,
+                                    })
+                                }
+                                Ok(observations) => observations.active().await,
                                 Err(error) => Err(error),
                             },
-                            Ok(rows) => Ok(rows),
                             Err(error) => Err(error.to_string()),
                         };
                         (close_result, result)
@@ -202,17 +252,15 @@ impl ConnectionsView {
         cx.notify();
     }
 
-    fn apply_result(
-        &mut self,
-        result: Result<Vec<ConnectionView>, String>,
-        cx: &mut Context<Self>,
-    ) {
+    fn apply_result(&mut self, result: Result<ActiveConnections, String>, cx: &mut Context<Self>) {
         match result {
-            Ok(rows) => {
+            Ok(snapshot) => {
+                self.upload_total = snapshot.upload_total;
+                self.download_total = snapshot.download_total;
                 self.loaded = true;
                 self.load_error = None;
                 self.list.update(cx, |list, cx| {
-                    if list.delegate_mut().replace(rows) {
+                    if list.delegate_mut().replace(snapshot.connections) {
                         cx.notify();
                     }
                 });
@@ -309,6 +357,26 @@ impl Render for ConnectionsView {
                     .child(format!("关闭失败：{error}"))
             }))
             .children(self.notice.map(|notice| div().text_sm().child(notice)))
-            .child(List::new(&self.list).size_full())
+            .child(div().text_sm().child(format!(
+                "{}累计上传 {} B · 累计下载 {} B",
+                if self.show_closed {
+                    "关闭缓冲"
+                } else {
+                    "活动连接"
+                },
+                self.upload_total,
+                self.download_total
+            )))
+            .child(List::new(&self.list).flex_1().min_h_0())
+            .children((!self.detail_text.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .h_48()
+                    .flex_shrink_0()
+                    .child("连接详情（只读，可选择和复制）")
+                    .child(Editor::new(&self.details).readonly(true).size_full())
+            }))
     }
 }

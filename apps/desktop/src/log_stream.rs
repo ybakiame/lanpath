@@ -7,23 +7,47 @@ use tokio_tungstenite::{
     tungstenite::{Error, Message, protocol::WebSocketConfig},
 };
 
-use crate::log_buffer::{CoreLogState, LogBuffer, level_rank};
+use crate::{
+    disk_log_writer::DiskLogWriter,
+    log_buffer::{CoreLogState, LogBuffer, level_rank},
+};
 
 pub(crate) struct LogService {
     buffer: Arc<LogBuffer>,
     stream: Mutex<Option<JoinHandle<()>>>,
+    disk: Option<Arc<DiskLogWriter>>,
+    disk_error: Option<String>,
+    _disk_guards: Option<[tracing_appender::non_blocking::WorkerGuard; 2]>,
 }
 
 impl LogService {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(root: Option<&std::path::Path>) -> Self {
+        let (disk, disk_error, guards) = match root.map(DiskLogWriter::new) {
+            Some(Ok((disk, guards))) => (Some(Arc::new(disk)), None, Some(guards)),
+            Some(Err(error)) => (None, Some(error), None),
+            None => (None, None, None),
+        };
         Self {
             buffer: Arc::new(LogBuffer::new()),
             stream: Mutex::new(None),
+            disk,
+            disk_error,
+            _disk_guards: guards,
         }
     }
 
     pub(crate) fn buffer(&self) -> &Arc<LogBuffer> {
         &self.buffer
+    }
+
+    pub(crate) fn disk(&self) -> Option<&Arc<DiskLogWriter>> {
+        self.disk.as_ref()
+    }
+
+    pub(crate) fn disk_error(&self) -> Option<String> {
+        self.disk_error
+            .clone()
+            .or_else(|| self.disk.as_ref().and_then(|disk| disk.error()))
     }
 
     pub(crate) async fn start(&self, port: u16) -> Result<(), String> {
@@ -32,6 +56,7 @@ impl LogService {
             return Err("核心日志订阅已经运行".into());
         }
         let buffer = self.buffer.clone();
+        let disk = self.disk.clone();
         *stream = Some(tokio::spawn(async move {
             let url = format!("ws://127.0.0.1:{port}/logs?level=trace");
             loop {
@@ -50,9 +75,11 @@ impl LogService {
                         loop {
                             let result = match socket.next().await {
                                 Some(Ok(Message::Text(text))) => {
-                                    record_core(&buffer, text.as_bytes())
+                                    record_core(&buffer, disk.as_deref(), text.as_bytes())
                                 }
-                                Some(Ok(Message::Binary(bytes))) => record_core(&buffer, &bytes),
+                                Some(Ok(Message::Binary(bytes))) => {
+                                    record_core(&buffer, disk.as_deref(), &bytes)
+                                }
                                 Some(Ok(Message::Close(_))) | None => {
                                     Err("核心日志流已关闭".into())
                                 }
@@ -102,7 +129,11 @@ impl Drop for LogService {
     }
 }
 
-fn record_core(buffer: &LogBuffer, bytes: &[u8]) -> Result<(), String> {
+fn record_core(
+    buffer: &LogBuffer,
+    disk: Option<&DiskLogWriter>,
+    bytes: &[u8],
+) -> Result<(), String> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|error| format!("核心日志 JSON 无效：{error}"))?;
     let level = value
@@ -114,6 +145,9 @@ fn record_core(buffer: &LogBuffer, bytes: &[u8]) -> Result<(), String> {
         .get("payload")
         .and_then(|v| v.as_str())
         .ok_or("核心日志缺少消息")?;
+    if let Some(disk) = disk {
+        disk.core(level, message);
+    }
     buffer.push(
         "核心",
         &level.to_ascii_uppercase(),
@@ -132,16 +166,23 @@ mod tests {
     #[test]
     fn core_frames_preserve_severity_and_reject_invalid_payloads() {
         let buffer = LogBuffer::new();
-        record_core(&buffer, br#"{"type":"info","payload":"connection opened"}"#).unwrap();
         record_core(
             &buffer,
+            None,
+            br#"{"type":"info","payload":"connection opened"}"#,
+        )
+        .unwrap();
+        record_core(
+            &buffer,
+            None,
             br#"{"type":"error","payload":"connection refused"}"#,
         )
         .unwrap();
-        assert!(record_core(&buffer, br#"{"type":"info","payload":null}"#).is_err());
+        assert!(record_core(&buffer, None, br#"{"type":"info","payload":null}"#).is_err());
         assert!(
             record_core(
                 &buffer,
+                None,
                 br#"{"type":"unknown","payload":"not a known level"}"#
             )
             .is_err()

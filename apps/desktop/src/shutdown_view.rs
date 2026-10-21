@@ -32,6 +32,8 @@ impl DesktopView {
             return;
         }
         self.closing = true;
+        self.stats.update(cx, |view, cx| view.set_closing(true, cx));
+        self.logs.update(cx, |view, cx| view.set_closing(true, cx));
         self.configuration
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.subscriptions
@@ -69,6 +71,9 @@ impl DesktopView {
                         || this.rules.read(cx).busy()
                         || this.scripts.read(cx).busy()
                         || this.mitm.read(cx).busy()
+                        || this.connections.read(cx).busy()
+                        || this.stats.read(cx).busy()
+                        || this.logs.read(cx).busy(cx)
                 }) else {
                     return;
                 };
@@ -93,6 +98,9 @@ impl DesktopView {
                 let _ = cx.update(|window, cx| {
                     this.update(cx, |this, cx| {
                         this.closing = false;
+                        this.stats
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.logs.update(cx, |view, cx| view.set_closing(false, cx));
                         this.configuration
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.subscriptions
@@ -138,6 +146,9 @@ impl DesktopView {
                     Ok(()) => window.remove_window(),
                     Err(error) => {
                         this.closing = false;
+                        this.stats
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.logs.update(cx, |view, cx| view.set_closing(false, cx));
                         this.core_error = Some(error);
                         this.configuration
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));

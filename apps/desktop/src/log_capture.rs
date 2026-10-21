@@ -13,21 +13,28 @@ use tracing_subscriber::{
     util::SubscriberInitExt as _,
 };
 
-use crate::log_buffer::{LogBuffer, MESSAGE_BYTES, level_rank};
+use crate::{
+    disk_log_writer::DiskLogWriter,
+    log_buffer::{LogBuffer, MESSAGE_BYTES, level_rank},
+};
 
 pub(crate) fn install(
     buffer: Arc<LogBuffer>,
+    disk: Option<Arc<DiskLogWriter>>,
 ) -> Result<(), tracing_subscriber::util::TryInitError> {
     tracing_subscriber::registry()
         .with(
-            CaptureLayer(buffer).with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-                metadata.target().starts_with("lanpath_")
-            })),
+            CaptureLayer { buffer, disk }.with_filter(tracing_subscriber::filter::filter_fn(
+                |metadata| metadata.target().starts_with("lanpath_"),
+            )),
         )
         .try_init()
 }
 
-struct CaptureLayer(Arc<LogBuffer>);
+struct CaptureLayer {
+    buffer: Arc<LogBuffer>,
+    disk: Option<Arc<DiskLogWriter>>,
+}
 
 impl<S: Subscriber> Layer<S> for CaptureLayer {
     fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
@@ -36,7 +43,14 @@ impl<S: Subscriber> Layer<S> for CaptureLayer {
         };
         event.record(&mut fields);
         let metadata = event.metadata();
-        self.0.push(
+        if let Some(disk) = &self.disk {
+            disk.app(
+                metadata.level().as_str(),
+                metadata.target(),
+                &fields.message.text,
+            );
+        }
+        self.buffer.push(
             "应用",
             metadata.level().as_str(),
             level_rank(metadata.level().as_str()).unwrap_or(0),

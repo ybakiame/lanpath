@@ -29,13 +29,6 @@ pub const RING_CAPACITY: usize = 1000;
 /// Max tail bytes to read from `logs/libbox.log` (Kotlin-side libbox log).
 const LIBBOX_LOG_MAX_TAIL_BYTES: usize = 256 * 1024;
 
-/// Max bytes per file for `read_log_file_tail` (seeks to tail when exceeded).
-const LOG_TAIL_MAX_BYTES: u64 = 2 * 1024 * 1024;
-/// Default lines returned by `read_log_file_tail`.
-const LOG_TAIL_DEFAULT_LINES: u32 = 1000;
-/// Max lines returned by `read_log_file_tail`.
-const LOG_TAIL_MAX_LINES: u32 = 1000;
-
 /// Default env filter when `RUST_LOG` is not set.
 const DEFAULT_ENV_FILTER: &str =
     "info,lanpath_client=debug,lanpath_mitm=debug,lanpath_script=debug";
@@ -234,20 +227,14 @@ pub(crate) fn entry_sort_ts(entry: &LogEntry) -> Option<DateTime<FixedOffset>> {
 
 /// Read `libbox.log` tail and parse into `LogEntry` items.
 pub(crate) fn read_libbox_entries(logs_dir: &Path) -> Vec<LogEntry> {
-    let bytes = match std::fs::read(logs_dir.join("libbox.log")) {
+    let bytes = match lanpath_client::logs::read_tail_bytes(
+        logs_dir.join("libbox.log").as_path(),
+        LIBBOX_LOG_MAX_TAIL_BYTES as u64,
+    ) {
         Ok(bytes) => bytes,
         Err(_) => return Vec::new(),
     };
-    let tail = if bytes.len() > LIBBOX_LOG_MAX_TAIL_BYTES {
-        let start = bytes.len() - LIBBOX_LOG_MAX_TAIL_BYTES;
-        let line_start = bytes[start..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map_or(start, |i| start + i + 1);
-        &bytes[line_start..]
-    } else {
-        &bytes[..]
-    };
+    let tail = &bytes[..];
     String::from_utf8_lossy(tail)
         .lines()
         .filter_map(parse_libbox_line)
@@ -268,50 +255,14 @@ fn parse_libbox_line(line: &str) -> Option<LogEntry> {
 }
 
 /// Validate log file name for security.
+#[cfg(test)]
 pub(crate) fn validate_log_file_name(name: &str) -> Result<(), String> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err("非法的日志文件名".to_string());
-    }
-    if name.starts_with("app.log") || matches!(name, "libbox.log" | "last_start_config.json") {
-        Ok(())
-    } else {
-        Err(format!("非法的日志文件名：{name}"))
-    }
-}
-
-/// Read file content; seeks to tail when exceeding `LOG_TAIL_MAX_BYTES`.
-pub(crate) fn read_tail_bytes(path: &Path) -> Result<Vec<u8>, String> {
-    let size = std::fs::metadata(path)
-        .map_err(|e| format!("读取日志文件失败：{e}"))?
-        .len();
-    if size <= LOG_TAIL_MAX_BYTES {
-        return std::fs::read(path).map_err(|e| format!("读取日志文件失败：{e}"));
-    }
-    use std::io::{Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path).map_err(|e| format!("读取日志文件失败：{e}"))?;
-    file.seek(SeekFrom::End(-(LOG_TAIL_MAX_BYTES as i64)))
-        .map_err(|e| format!("读取日志文件失败：{e}"))?;
-    let mut buf = vec![0u8; LOG_TAIL_MAX_BYTES as usize];
-    file.read_exact(&mut buf)
-        .map_err(|e| format!("读取日志文件失败：{e}"))?;
-    let line_start = buf.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
-    buf.drain(..line_start);
-    Ok(buf)
-}
-
-/// Default lines for `read_log_file_tail`.
-pub(crate) fn log_tail_default_lines() -> u32 {
-    LOG_TAIL_DEFAULT_LINES
-}
-
-/// Max lines for `read_log_file_tail`.
-pub(crate) fn log_tail_max_lines() -> u32 {
-    LOG_TAIL_MAX_LINES
+    lanpath_client::logs::validate_log_file_name(name, false).map_err(|error| error.to_string())
 }
 
 /// Max bytes for `read_log_file_tail`.
 #[cfg(test)]
-pub(crate) const LOG_TAIL_MAX_BYTES_VAL: u64 = LOG_TAIL_MAX_BYTES;
+pub(crate) const LOG_TAIL_MAX_BYTES_VAL: u64 = lanpath_client::logs::LOG_TAIL_MAX_BYTES;
 
 /// Construct a test log entry (message carries sequence number for assertions).
 #[cfg(test)]

@@ -102,11 +102,12 @@ impl DesktopRuntime {
             .as_ref()
             .map(|root| BusinessService::new(root.path(), binary.clone(), bindings));
         let mitm_service = data_root.as_ref().map(|root| MitmService::new(root.path()));
+        let logs = LogService::new(data_root.as_ref().map(|root| root.path()));
         Self {
             manager,
             observations,
             business,
-            logs: LogService::new(),
+            logs,
             script_tasks: tokio::sync::Mutex::new(None),
             mitm: tokio::sync::Mutex::new(None),
             mitm_service,

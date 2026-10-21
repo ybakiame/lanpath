@@ -1,7 +1,10 @@
+#[path = "disk_logs/mod.rs"]
+mod disk_logs;
+
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
+    ActiveTheme as _, Disableable as _, Selectable as _, WindowExt as _,
     button::Button,
     input::{Editor, EditorState},
     list::{List, ListState},
@@ -16,6 +19,8 @@ use crate::{log_buffer::CoreLogState, log_list::LogListDelegate, runtime::Deskto
 
 pub(crate) struct LogsView {
     core: Arc<DesktopRuntime>,
+    disk: Entity<disk_logs::DiskLogsView>,
+    disk_visible: bool,
     list: Entity<ListState<LogListDelegate>>,
     details: Entity<EditorState>,
     detail_id: Option<u64>,
@@ -28,6 +33,7 @@ pub(crate) struct LogsView {
     total: usize,
     evicted: u64,
     state: CoreLogState,
+    disk_error: Option<String>,
     _poll_task: Task<()>,
     _list_observer: Subscription,
 }
@@ -39,6 +45,7 @@ impl LogsView {
         cx: &mut Context<Self>,
     ) -> Self {
         let list = cx.new(|cx| ListState::new(LogListDelegate::default(), window, cx));
+        let disk = cx.new(|cx| disk_logs::DiskLogsView::new(core.clone(), window, cx));
         let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let observer = cx.observe_in(&list, window, |this, list, window, cx| {
             list.update(cx, |list, cx| {
@@ -78,6 +85,8 @@ impl LogsView {
         });
         Self {
             core,
+            disk,
+            disk_visible: false,
             list,
             details,
             detail_id: None,
@@ -90,9 +99,20 @@ impl LogsView {
             total: 0,
             evicted: 0,
             state: CoreLogState::Stopped,
+            disk_error: None,
             _poll_task: poll_task,
             _list_observer: observer,
         }
+    }
+    pub(crate) fn busy(&self, cx: &gpui_kit::App) -> bool {
+        self.disk.read(cx).busy()
+    }
+
+    pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        self.disk.update(cx, |disk, cx| {
+            disk.set_closing(closing);
+            cx.notify();
+        });
     }
 
     pub(crate) fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
@@ -103,6 +123,11 @@ impl LogsView {
     }
 
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        let disk_error = self.core.logs().disk_error();
+        if self.disk_error != disk_error {
+            self.disk_error = disk_error;
+            cx.notify();
+        }
         let Some(snapshot) =
             self.core
                 .logs()
@@ -138,8 +163,8 @@ impl LogsView {
     }
 }
 
-impl Render for LogsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl LogsView {
+    fn render_memory(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let levels = [
             (0, "全部级别"),
             (1, "DEBUG+"),
@@ -161,10 +186,22 @@ impl Render for LogsView {
                         if *checked { this.refresh(cx); }
                         cx.notify();
                     })))
-                .child(Button::new("logs-clear").label("清空缓冲").disabled(self.total == 0)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.core.logs().buffer().clear();
-                        this.refresh(cx);
+                .child(Button::new("logs-clear").label("清空内存缓冲…").disabled(self.total == 0)
+                    .on_click(cx.listener(|_, _, window, cx| {
+                        let view = cx.weak_entity();
+                        window.open_alert_dialog(cx, move |dialog, _, _| {
+                            let view = view.clone();
+                            dialog.title("清空实验应用的内存日志缓冲？")
+                                .description("仅移除本次进程已采集的日志；不删除磁盘文件，不影响核心运行或后续采集。")
+                                .confirm().ok_text("清空内存缓冲").cancel_text("取消")
+                                .on_ok(move |_, _, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.core.logs().buffer().clear();
+                                        this.refresh(cx);
+                                    });
+                                    true
+                                })
+                        });
                     }))))
             .child(div().flex().items_center().gap_2().children(levels.into_iter().map(|(rank, label)| {
                 Button::new(("logs-level", rank as usize)).label(label).selected(self.min_rank == rank)
@@ -195,6 +232,56 @@ impl Render for LogsView {
             .child(div().text_sm().text_color(cx.theme().muted_foreground)
                 .child("最新在前，最多保留 1000 条；单条消息最多 8 KiB。暂停刷新或离开页面不停止采集。"))
             .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                .child("仅本次进程内存，不读取/删除磁盘日志；核心日志实时订阅，订阅前或断流期间不回放。"))
+                .child("内存缓冲仅限本次进程；核心实时订阅在订阅前或断流期间不回放。清空仅影响内存，磁盘日志在另一个视图查看。"))
+    }
+}
+
+impl Render for LogsView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = if self.disk_visible {
+            self.disk.clone().into_any_element()
+        } else {
+            self.render_memory(cx).into_any_element()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("logs-memory-view")
+                            .label("内存日志")
+                            .selected(!self.disk_visible)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.disk_visible = false;
+                                this.refresh(cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("logs-disk-view")
+                            .label("磁盘日志")
+                            .selected(self.disk_visible)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.disk_visible = true;
+                                this.disk.update(cx, |disk, cx| disk.refresh(window, cx));
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .children(self.disk_error.as_ref().map(|error| {
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(format!("磁盘日志写入失败：{error}"))
+            }))
+            .child(content)
     }
 }

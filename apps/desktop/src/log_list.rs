@@ -6,7 +6,8 @@ use gpui_kit::component::{
     list::{ListDelegate, ListItem, ListState},
 };
 use gpui_kit::{
-    App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
+    App, Context, IntoElement, ParentElement as _, Role, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 
 use crate::log_buffer::LogEntry;
@@ -64,6 +65,7 @@ impl ListDelegate for LogListDelegate {
         };
         Some(
             ListItem::new(("log", row.id))
+                .role(Role::ListItem)
                 .selected(self.selected_id == Some(row.id))
                 .accessibility_label(SharedString::from(row.line.clone()))
                 .child(

@@ -1,7 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use lanpath_client::{
-    connections::{ConnectionTrackerHandle, ConnectionView, start_connection_tracker},
+    connections::{
+        ActiveConnections, ConnectionTrackerHandle, ConnectionView, start_connection_tracker,
+    },
     stats::{
         ConnRecordRow, DailyQuery, DailyStatRow, RecordsQuery, StatsStore, TodaySummary, today,
     },
@@ -22,7 +24,8 @@ pub(crate) enum StatsRows {
 
 pub(crate) struct StatsSnapshot {
     pub(crate) summary: TodaySummary,
-    pub(crate) rows: StatsRows,
+    pub(crate) daily: Vec<DailyStatRow>,
+    pub(crate) records: Vec<ConnRecordRow>,
 }
 
 pub(crate) struct ObservationService {
@@ -81,6 +84,13 @@ impl ObservationService {
         }
     }
 
+    pub(crate) async fn active(&self) -> Result<ActiveConnections, String> {
+        match self.tracker.lock().await.as_ref() {
+            Some(tracker) => Ok(tracker.active().await),
+            None => Err("连接跟踪器未运行".into()),
+        }
+    }
+
     pub(crate) async fn closed(&self) -> Vec<ConnectionView> {
         match self.tracker.lock().await.as_ref() {
             Some(tracker) => tracker.closed().await,
@@ -88,27 +98,33 @@ impl ObservationService {
         }
     }
 
-    pub(crate) async fn stats(&self, kind: StatsKind) -> Result<StatsSnapshot, String> {
+    pub(crate) async fn stats(
+        &self,
+        daily: &DailyQuery,
+        records: &RecordsQuery,
+    ) -> Result<StatsSnapshot, String> {
         let store = self.store().await?;
         let date = today();
         let summary = store
             .today_summary(&date)
             .await
             .map_err(|e| e.to_string())?;
-        let rows = match kind {
-            StatsKind::Daily => StatsRows::Daily(
-                store
-                    .query_daily(&DailyQuery::default(), &date)
-                    .await
-                    .map_err(|e| e.to_string())?,
-            ),
-            StatsKind::Records => StatsRows::Records(
-                store
-                    .query_records(&RecordsQuery::default())
-                    .await
-                    .map_err(|e| e.to_string())?,
-            ),
-        };
-        Ok(StatsSnapshot { summary, rows })
+        let daily = store
+            .query_daily(daily, &date)
+            .await
+            .map_err(|e| e.to_string())?;
+        let records = store
+            .query_records(records)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(StatsSnapshot {
+            summary,
+            daily,
+            records,
+        })
+    }
+
+    pub(crate) async fn clear_stats(&self) -> Result<(), String> {
+        self.store().await?.clear().await.map_err(|e| e.to_string())
     }
 }
