@@ -309,12 +309,11 @@ pub async fn fetch_remotes(state: State<'_, AppState>) -> Result<FetchReportView
 /// Test GitHub proxy connectivity via real fetch pipeline.
 #[tauri::command]
 pub async fn test_github_proxy(state: State<'_, AppState>) -> Result<String, String> {
-    let url = "https://api.github.com/zen";
-    let started = std::time::Instant::now();
-    lanpath_client::fetch_resource_text(&state.data_dir, url, std::time::Duration::from_secs(10))
+    let config = lanpath_client::ClientConfig::load_for_requests(&state.data_dir)
+        .map_err(|error| error.to_string())?;
+    let elapsed_ms = lanpath_client::test_github_connectivity(&config)
         .await
-        .map_err(|e| e.to_string())?;
-    let elapsed_ms = started.elapsed().as_millis();
+        .map_err(|error| error.to_string())?;
     Ok(format!("OK（{elapsed_ms} ms）"))
 }
 

@@ -38,7 +38,8 @@ impl Render for DesktopView {
             || self.structured.read(cx).busy()
             || self.rules.read(cx).busy()
             || self.scripts.read(cx).busy()
-            || self.mitm.read(cx).busy();
+            || self.mitm.read(cx).busy()
+            || self.requests.read(cx).busy();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
@@ -52,6 +53,8 @@ impl Render for DesktopView {
             Page::Logs => self.logs.clone().into_any_element(),
             Page::Scripts => self.scripts.clone().into_any_element(),
             Page::Mitm => self.mitm.clone().into_any_element(),
+            Page::Requests => self.requests.clone().into_any_element(),
+            Page::Appearance => self.appearance.clone().into_any_element(),
         };
         let sidebar = Sidebar::new("desktop-navigation")
             .collapsible(false)
@@ -80,6 +83,11 @@ impl Render for DesktopView {
             .child(self.navigation_group(
                 "扩展",
                 &[(Page::Scripts, "脚本"), (Page::Mitm, "MITM")],
+                cx,
+            ))
+            .child(self.navigation_group(
+                "设置",
+                &[(Page::Requests, "网络请求"), (Page::Appearance, "外观")],
                 cx,
             ));
 
@@ -139,7 +147,8 @@ impl Render for DesktopView {
                                                     || self.structured.read(cx).dirty()
                                                     || self.rules.read(cx).dirty()
                                                     || self.scripts.read(cx).dirty()
-                                                    || self.mitm.read(cx).dirty(),
+                                                    || self.mitm.read(cx).dirty()
+                                                    || self.requests.read(cx).dirty(),
                                             )
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.run_core_operation(

@@ -2,12 +2,14 @@ mod config;
 mod config_slices;
 mod mitm;
 mod profiles;
+mod request_settings;
 mod rules;
 mod scripts;
 mod state;
 
 pub(crate) use config_slices::ConfigSlicesDocument;
 pub(crate) use mitm::MitmSettingsDocument;
+pub(crate) use request_settings::RequestSettingsDocument;
 pub(crate) use rules::LocalOverrideDocument;
 mod subscriptions;
 
@@ -42,6 +44,8 @@ impl BusinessService {
 
 #[cfg(test)]
 mod mitm_tests;
+#[cfg(test)]
+mod request_settings_tests;
 #[cfg(test)]
 mod scripts_tests;
 #[cfg(test)]

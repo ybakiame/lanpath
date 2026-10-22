@@ -28,6 +28,8 @@ pub mod profile;
 pub mod proxies;
 pub mod remote;
 mod request_network;
+mod request_probe;
+pub use request_probe::test_github_connectivity;
 pub mod ruleset_manager;
 pub mod runner;
 pub mod share_link;
@@ -169,13 +171,22 @@ pub async fn fetch_resource_bytes(
     url: &str,
     timeout: std::time::Duration,
 ) -> lanpath_common::LanpathResult<bytes::Bytes> {
+    let cfg = config::ClientConfig::load_for_requests(data_dir)?;
+    fetch_resource_bytes_with_config(&cfg, url, timeout).await
+}
+
+// Share the exact fetch pipeline with the saved-policy connectivity probe.
+async fn fetch_resource_bytes_with_config(
+    cfg: &ClientConfig,
+    url: &str,
+    timeout: std::time::Duration,
+) -> lanpath_common::LanpathResult<bytes::Bytes> {
     use lanpath_common::LanpathError;
 
     let is_github = is_github_url(url);
-    let cfg = config::ClientConfig::load_for_requests(data_dir)?;
     let request_url =
         apply_github_proxy_prefix(&normalize_resource_url(url), &cfg.github_proxy_prefix);
-    let client = request_network::build_client(timeout, &cfg)?;
+    let client = request_network::build_client(timeout, cfg)?;
 
     match fetch_url_bytes_with_retry(&client, &request_url).await {
         Ok(bytes) => Ok(bytes),

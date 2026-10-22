@@ -86,7 +86,11 @@ impl BusinessService {
         remove_dashboard_download(&mut value);
 
         let available = if download_rule_sets {
-            lanpath_client::ruleset_manager::ensure_builtin_rule_sets(&self.root, "").await
+            lanpath_client::ruleset_manager::ensure_builtin_rule_sets(
+                &self.root,
+                &config.github_proxy_prefix,
+            )
+            .await
         } else {
             lanpath_client::ruleset_manager::existing_rule_sets(&self.root)
         };

@@ -1,3 +1,5 @@
+mod appearance;
+mod appearance_view;
 mod business;
 mod config_slices_view;
 mod config_view;
@@ -17,6 +19,7 @@ mod profiles_view;
 mod proxy_list;
 mod proxy_service;
 mod proxy_view;
+mod request_settings_view;
 mod rules_view;
 mod runtime;
 mod scripts_view;
@@ -28,6 +31,7 @@ mod subscriptions_view;
 #[cfg(windows)]
 mod windows_file;
 
+use appearance_view::AppearanceView;
 use std::sync::Arc;
 
 use config_slices_view::{ConfigSlicesChanged, ConfigSlicesView};
@@ -41,6 +45,7 @@ use logs_view::LogsView;
 use mitm_view::{MitmChanged, MitmView};
 use profiles_view::{ProfilesChanged, ProfilesView};
 use proxy_view::{ProxyConfigurationChanged, ProxyView};
+use request_settings_view::RequestSettingsView;
 use rules_view::{RulesChanged, RulesView};
 use runtime::DesktopRuntime;
 use scripts_view::ScriptsView;
@@ -66,6 +71,8 @@ enum Page {
     Connections,
     Stats,
     Logs,
+    Requests,
+    Appearance,
 }
 
 struct DesktopView {
@@ -82,6 +89,8 @@ struct DesktopView {
     connections: Entity<ConnectionsView>,
     stats: Entity<StatsView>,
     logs: Entity<LogsView>,
+    requests: Entity<RequestSettingsView>,
+    appearance: Entity<AppearanceView>,
     closing: bool,
     close_task: Option<Task<()>>,
     core_running: bool,
@@ -104,7 +113,7 @@ impl DesktopView {
         let profiles = cx.new(|cx| ProfilesView::new(core.clone(), window, cx));
         let scripts = cx.new(|cx| ScriptsView::new(core.clone(), window, cx));
         let mitm = cx.new(|cx| MitmView::new(core.clone(), window, cx));
-        let _business_subscriptions = vec![
+        let mut _business_subscriptions = vec![
             cx.subscribe_in(
                 &subscriptions,
                 window,
@@ -158,13 +167,25 @@ impl DesktopView {
         let connections = cx.new(|cx| ConnectionsView::new(core.clone(), window, cx));
         let stats = cx.new(|cx| StatsView::new(core.clone(), window, cx));
         let logs = cx.new(|cx| LogsView::new(core.clone(), window, cx));
+        let requests = cx.new(|cx| RequestSettingsView::new(core.clone(), window, cx));
+        let appearance = cx.new(|cx| AppearanceView::new(window, cx));
+        _business_subscriptions.extend([
+            cx.observe(&configuration, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&subscriptions, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&profiles, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&structured, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&rules, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&scripts, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&mitm, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&requests, |_, _, cx| cx.notify()),
+        ]);
         let view = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             view.update(cx, |view, cx| view.request_close(window, cx))
                 .is_err()
         });
 
-        Self {
+        let mut view = Self {
             page: Page::Subscriptions,
             configuration,
             subscriptions,
@@ -178,6 +199,8 @@ impl DesktopView {
             connections,
             stats,
             logs,
+            requests,
+            appearance,
             closing: false,
             close_task: None,
             core_running: false,
@@ -187,7 +210,9 @@ impl DesktopView {
             _proxy_configuration_subscription,
             _configuration_subscription,
             _business_subscriptions,
-        }
+        };
+        view.sync_request_lock(cx);
+        view
     }
 
     fn run_core_operation(
@@ -204,6 +229,7 @@ impl DesktopView {
                     || self.rules.read(cx).dirty()
                     || self.scripts.read(cx).dirty()
                     || self.mitm.read(cx).dirty()
+                    || self.requests.read(cx).dirty()
             }
             CoreOperationKind::Stop => !self.core_running,
         };
@@ -217,6 +243,7 @@ impl DesktopView {
             || self.rules.read(cx).busy()
             || self.scripts.read(cx).busy()
             || self.mitm.read(cx).busy()
+            || self.requests.read(cx).busy()
             || !self.core.is_configured()
             || invalid_state
         {
@@ -228,6 +255,7 @@ impl DesktopView {
         self.proxy
             .update(cx, |view, cx| view.set_running(false, cx));
         self.core_busy = Some(kind);
+        self.sync_request_lock(cx);
         self.configuration
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.subscriptions
@@ -303,6 +331,7 @@ impl DesktopView {
                     this.rules.update(cx, |view, cx| {
                         view.set_locked(this.core_running || this.closing, cx)
                     });
+                    this.sync_request_lock(cx);
                     cx.notify();
                 })
                 .ok();
@@ -337,6 +366,22 @@ impl DesktopView {
         )
     }
 
+    fn sync_request_lock(&mut self, cx: &mut Context<Self>) {
+        let locked = self.closing
+            || self.core_running
+            || self.core_busy.is_some()
+            || self.configuration.read(cx).busy()
+            || self.subscriptions.read(cx).busy()
+            || self.profiles.read(cx).busy()
+            || self.structured.read(cx).busy()
+            || self.rules.read(cx).busy()
+            || self.scripts.read(cx).busy()
+            || self.mitm.read(cx).busy();
+        self.requests
+            .update(cx, |view, cx| view.set_locked(locked, cx));
+        cx.notify();
+    }
+
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.closing {
             return;
@@ -363,6 +408,7 @@ pub fn run() {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            appearance::initialize(&core, cx);
             config_view::init(cx);
             log_capture::install(core.logs().buffer().clone(), core.logs().disk().cloned())
                 .expect("failed to initialize experimental log capture");

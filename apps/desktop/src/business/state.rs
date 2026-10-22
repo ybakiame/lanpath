@@ -1,4 +1,7 @@
-use std::{io::Write, path::Path};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use lanpath_client::{ClientConfig, RequestProxyMode};
 use lanpath_common::{LanpathError, LanpathResult};
@@ -22,9 +25,12 @@ impl BusinessService {
         };
         if is_new {
             config.mitm_enabled = false;
+            config.request_proxy_mode = RequestProxyMode::None;
         }
-        normalize(&mut config, self);
-        persist(&path, &config)?;
+        let changed = normalize(&mut config, self);
+        if is_new || changed || !persisted_paths_match(&path, self)? {
+            persist(&path, &config)?;
+        }
         Ok(config)
     }
 
@@ -63,23 +69,58 @@ impl BusinessService {
     }
 }
 
-fn normalize(config: &mut ClientConfig, service: &BusinessService) {
-    config.data_dir = service.root.clone();
-    config.core_binary = service.binary.clone().unwrap_or_default();
-    config.mixed_port = service.bindings.mixed_port();
-    // MITM remains opt-in and is confined to the experimental root and loopback
-    // chain. Preserve saved settings; unlike system proxy and TUN it has no
-    // global effect until the user explicitly installs the generated CA.
-    config.mitm.ca_dir = service.root.join("certs");
-    config.system_proxy_enabled = false;
-    config.tun_enabled = false;
-    config.tun_auto_route = false;
-    config.clash_api_enabled = true;
-    config.clash_api_port = service.bindings.api_port();
-    config.clash_api_secret.clear();
-    config.github_proxy_prefix.clear();
-    config.request_proxy_mode = RequestProxyMode::None;
-    config.request_proxy_url.clear();
+fn normalize(config: &mut ClientConfig, service: &BusinessService) -> bool {
+    let mut changed = false;
+    macro_rules! enforce {
+        ($field:expr, $value:expr) => {{
+            let value = $value;
+            if $field != value {
+                $field = value;
+                changed = true;
+            }
+        }};
+    }
+    if config.data_dir != service.root {
+        config.data_dir.clone_from(&service.root);
+        changed = true;
+    }
+    let binary = service.binary.as_deref().unwrap_or_else(|| Path::new(""));
+    if config.core_binary != binary {
+        config.core_binary = binary.to_path_buf();
+        changed = true;
+    }
+    enforce!(config.mixed_port, service.bindings.mixed_port());
+    // MITM remains opt-in within the experimental root and loopback chain.
+    enforce!(config.mitm.ca_dir, service.root.join("certs"));
+    enforce!(config.system_proxy_enabled, false);
+    enforce!(config.tun_enabled, false);
+    enforce!(config.tun_auto_route, false);
+    enforce!(config.clash_api_enabled, true);
+    enforce!(config.clash_api_port, service.bindings.api_port());
+    if !config.clash_api_secret.is_empty() {
+        config.clash_api_secret.clear();
+        changed = true;
+    }
+    changed
+}
+
+// ClientConfig::load relocates these two paths in memory before returning.
+// Inspect their stored values as well, otherwise path-only tampering would never
+// be repaired on disk once unchanged reads stop rewriting client.json.
+fn persisted_paths_match(path: &Path, service: &BusinessService) -> LanpathResult<bool> {
+    #[derive(serde::Deserialize)]
+    struct Paths {
+        data_dir: Option<PathBuf>,
+        mitm: Option<CaPath>,
+    }
+    #[derive(serde::Deserialize)]
+    struct CaPath {
+        ca_dir: Option<PathBuf>,
+    }
+    let stored: Paths = serde_json::from_reader(std::fs::File::open(path)?)?;
+    Ok(stored.data_dir.as_deref() == Some(service.root.as_path())
+        && stored.mitm.and_then(|mitm| mitm.ca_dir).as_deref()
+            == Some(service.root.join("certs").as_path()))
 }
 
 pub(super) fn persist(path: &Path, config: &ClientConfig) -> LanpathResult<()> {

@@ -15,7 +15,7 @@ impl DesktopView {
             dialog
                 .title("放弃修改并关闭实验版？")
                 .description(
-                    "订阅、覆写、结构化配置、规则、脚本或 MITM 有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
+                    "订阅、覆写、结构化配置、规则、脚本、MITM 或网络请求有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
                 )
                 .confirm()
                 .ok_text("放弃修改并关闭")
@@ -34,6 +34,10 @@ impl DesktopView {
         self.closing = true;
         self.stats.update(cx, |view, cx| view.set_closing(true, cx));
         self.logs.update(cx, |view, cx| view.set_closing(true, cx));
+        self.requests
+            .update(cx, |view, cx| view.set_closing(true, cx));
+        self.appearance
+            .update(cx, |view, cx| view.set_closing(true, cx));
         self.configuration
             .update(cx, |view, cx| view.set_locked(true, cx));
         self.subscriptions
@@ -74,6 +78,7 @@ impl DesktopView {
                         || this.connections.read(cx).busy()
                         || this.stats.read(cx).busy()
                         || this.logs.read(cx).busy(cx)
+                        || this.requests.read(cx).busy()
                 }) else {
                     return;
                 };
@@ -91,6 +96,7 @@ impl DesktopView {
                     || this.rules.read(cx).dirty()
                     || this.scripts.read(cx).dirty()
                     || this.mitm.read(cx).dirty()
+                    || this.requests.read(cx).dirty()
             }) else {
                 return;
             };
@@ -101,6 +107,11 @@ impl DesktopView {
                         this.stats
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.logs.update(cx, |view, cx| view.set_closing(false, cx));
+                        this.requests
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.appearance
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.sync_request_lock(cx);
                         this.configuration
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));
                         this.subscriptions
@@ -149,6 +160,11 @@ impl DesktopView {
                         this.stats
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.logs.update(cx, |view, cx| view.set_closing(false, cx));
+                        this.requests
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.appearance
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.sync_request_lock(cx);
                         this.core_error = Some(error);
                         this.configuration
                             .update(cx, |view, cx| view.set_locked(this.core_running, cx));

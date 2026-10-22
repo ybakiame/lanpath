@@ -36,7 +36,6 @@ fn client_state_persists_selection_but_forces_experimental_network_boundaries() 
     assert_eq!(normalized.clash_api_port, 19090);
     assert!(!normalized.tun_enabled);
     assert!(!normalized.system_proxy_enabled);
-    assert_eq!(normalized.request_proxy_mode, RequestProxyMode::None);
 }
 
 #[test]
