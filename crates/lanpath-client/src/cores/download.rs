@@ -20,6 +20,11 @@ pub(super) fn extract_tgz(
         let path = entry.path()?;
         let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if file_name == target_name || file_name == format!("{target_name}.exe") {
+            if !entry.header().entry_type().is_file() {
+                return Err(super::safety::invalid(
+                    "Core archive binary must be a regular file",
+                ));
+            }
             let dest = dest_dir.join(binary_name_on_disk());
             entry.unpack(&dest)?;
             return Ok(dest);
@@ -51,6 +56,15 @@ pub(super) fn extract_zip(
         if file_name.eq_ignore_ascii_case(target_name)
             || file_name.eq_ignore_ascii_case(&format!("{target_name}.exe"))
         {
+            if entry.is_dir()
+                || entry
+                    .unix_mode()
+                    .is_some_and(|mode| mode & 0o170000 == 0o120000)
+            {
+                return Err(super::safety::invalid(
+                    "Core archive binary must be a regular file",
+                ));
+            }
             let dest = dest_dir.join(binary_name_on_disk());
             let mut out = std::fs::File::create(&dest)?;
             std::io::copy(&mut entry, &mut out)?;
@@ -161,4 +175,37 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Lanpat
         file.write_all(&chunk).await?;
     }
     Ok(())
+}
+
+/// Publish a verified core without replacing an installed binary or removing
+/// other files left in an older, incomplete version directory.
+pub(super) fn publish_core(staging: &Path, destination: &Path) -> LanpathResult<PathBuf> {
+    let name = binary_name_on_disk();
+    let binary = destination.join(&name);
+    if !destination.exists() {
+        std::fs::rename(staging, destination)?;
+        return Ok(binary);
+    }
+    super::safety::unlinked_path(destination)?;
+    if !destination.is_dir() {
+        return Err(super::safety::invalid(
+            "Core version path is not a directory",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        let library = staging.join("wintun.dll");
+        let installed = destination.join("wintun.dll");
+        if library.is_file()
+            && !installed.exists()
+            && let Err(error) =
+                tempfile::TempPath::try_from_path(library)?.persist_noclobber(installed)
+        {
+            tracing::warn!(error = %error.error, "wintun.dll 发布失败，TUN 模式将不可用");
+        }
+    }
+    tempfile::TempPath::try_from_path(staging.join(name))?
+        .persist_noclobber(&binary)
+        .map_err(|error| error.error)?;
+    Ok(binary)
 }

@@ -50,7 +50,7 @@ export default function CoreManagement({ settings }: CoreManagementProps) {
   const invalidateCoreQueries = async () => {
     await queryClient.invalidateQueries({ queryKey: CORES_LIST_KEY });
     await queryClient.invalidateQueries({ queryKey: CORES_KEY });
-    // 下载成功后后端会把新核心自动选为 active（auto_select_downloaded_core）。
+    // 共享核心服务在下载、版本校验和选择保存全部完成后才报告成功。
     await queryClient.invalidateQueries({ queryKey: CONFIG_KEY });
   };
 

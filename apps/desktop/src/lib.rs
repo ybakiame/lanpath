@@ -1,3 +1,4 @@
+mod about_view;
 mod appearance;
 mod appearance_view;
 mod business;
@@ -6,7 +7,10 @@ mod config_view;
 mod configuration;
 mod connection_list;
 mod connections_view;
+mod core_lifecycle;
+mod core_management_view;
 mod data_root;
+mod diagnostics_view;
 mod disk_log_writer;
 mod log_buffer;
 mod log_capture;
@@ -25,18 +29,22 @@ mod runtime;
 mod scripts_view;
 mod shell_view;
 mod shutdown_view;
+mod startup;
 mod stats_list;
 mod stats_view;
 mod subscriptions_view;
 #[cfg(windows)]
 mod windows_file;
 
+use about_view::AboutView;
 use appearance_view::AppearanceView;
 use std::sync::Arc;
 
 use config_slices_view::{ConfigSlicesChanged, ConfigSlicesView};
 use config_view::{ConfigEvent, ConfigView};
 use connections_view::ConnectionsView;
+use core_management_view::{CoreManagementView, CoreSelectionChanged};
+use diagnostics_view::DiagnosticsView;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, Subscription, Task, TitlebarOptions, Window, WindowOptions,
@@ -73,6 +81,9 @@ enum Page {
     Logs,
     Requests,
     Appearance,
+    Cores,
+    Diagnostics,
+    About,
 }
 
 struct DesktopView {
@@ -91,6 +102,12 @@ struct DesktopView {
     logs: Entity<LogsView>,
     requests: Entity<RequestSettingsView>,
     appearance: Entity<AppearanceView>,
+    cores: Entity<CoreManagementView>,
+    diagnostics: Entity<DiagnosticsView>,
+    about: Entity<AboutView>,
+    startup_status: String,
+    business_locked: bool,
+    _startup_task: Task<()>,
     closing: bool,
     close_task: Option<Task<()>>,
     core_running: bool,
@@ -169,6 +186,37 @@ impl DesktopView {
         let logs = cx.new(|cx| LogsView::new(core.clone(), window, cx));
         let requests = cx.new(|cx| RequestSettingsView::new(core.clone(), window, cx));
         let appearance = cx.new(|cx| AppearanceView::new(window, cx));
+        let cores = cx.new(|cx| CoreManagementView::new(core.clone(), window, cx));
+        let diagnostics = cx.new(|cx| DiagnosticsView::new(core.clone(), window, cx));
+        let about = cx.new(|cx| AboutView::new(core.clone(), cx));
+        _business_subscriptions.push(cx.subscribe_in(
+            &cores,
+            window,
+            |this, _, _: &CoreSelectionChanged, window, cx| {
+                this.sync_request_lock(cx);
+                this.about.update(cx, |view, cx| view.refresh(cx));
+                this.configuration
+                    .update(cx, |view, cx| view.refresh(window, cx));
+                cx.notify();
+            },
+        ));
+        let mut startup = core.startup();
+        let startup_task = cx.spawn(async move |this, cx| {
+            while startup.changed().await.is_ok() {
+                let progress = startup.borrow_and_update().clone();
+                if this
+                    .update(cx, |this, cx| {
+                        this.startup_status = progress.summary();
+                        this.cores
+                            .update(cx, |view, cx| view.set_startup(progress, cx));
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         _business_subscriptions.extend([
             cx.observe(&configuration, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&subscriptions, |this, _, cx| this.sync_request_lock(cx)),
@@ -177,7 +225,10 @@ impl DesktopView {
             cx.observe(&rules, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&scripts, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&mitm, |this, _, cx| this.sync_request_lock(cx)),
-            cx.observe(&requests, |_, _, cx| cx.notify()),
+            cx.observe(&requests, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&cores, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&diagnostics, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&proxy, |this, _, cx| this.sync_request_lock(cx)),
         ]);
         let view = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
@@ -201,6 +252,12 @@ impl DesktopView {
             logs,
             requests,
             appearance,
+            cores,
+            diagnostics,
+            about,
+            startup_status: "正在开始启动".into(),
+            business_locked: false,
+            _startup_task: startup_task,
             closing: false,
             close_task: None,
             core_running: false,
@@ -215,170 +272,58 @@ impl DesktopView {
         view
     }
 
-    fn run_core_operation(
-        &mut self,
-        kind: CoreOperationKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let invalid_state = match kind {
-            CoreOperationKind::Start => {
-                self.core_running
-                    || !self.configuration.read(cx).ready_for_start()
-                    || self.structured.read(cx).dirty()
-                    || self.rules.read(cx).dirty()
-                    || self.scripts.read(cx).dirty()
-                    || self.mitm.read(cx).dirty()
-                    || self.requests.read(cx).dirty()
-            }
-            CoreOperationKind::Stop => !self.core_running,
-        };
-        if self.core_busy.is_some()
-            || self.closing
-            || self.proxy.read(cx).busy()
-            || self.configuration.read(cx).busy()
-            || self.subscriptions.read(cx).busy()
-            || self.profiles.read(cx).busy()
-            || self.structured.read(cx).busy()
-            || self.rules.read(cx).busy()
-            || self.scripts.read(cx).busy()
-            || self.mitm.read(cx).busy()
-            || self.requests.read(cx).busy()
-            || !self.core.is_configured()
-            || invalid_state
-        {
-            return;
-        }
-
-        self.connections
-            .update(cx, |view, cx| view.set_running(false, cx));
-        self.proxy
-            .update(cx, |view, cx| view.set_running(false, cx));
-        self.core_busy = Some(kind);
-        self.sync_request_lock(cx);
-        self.configuration
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.subscriptions
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.profiles
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.structured
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.rules.update(cx, |view, cx| view.set_locked(true, cx));
-        self.scripts
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.scripts
-            .update(cx, |view, cx| view.set_running(false, cx));
-        self.mitm.update(cx, |view, cx| {
-            view.set_locked(true, cx);
-            view.set_running(false, cx);
-        });
-        self.core_error = None;
-        self.core_task = None;
-        let service = self.core.clone();
-        let task = cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    match kind {
-                        CoreOperationKind::Start => service.start(),
-                        CoreOperationKind::Stop => service.stop(),
-                    }
-                })
-                .await;
-            let _ = cx.update(|window, cx| {
-                this.update(cx, |this, cx| {
-                    let succeeded = result.is_ok();
-                    match result {
-                        Ok(()) => {
-                            this.core_running = matches!(kind, CoreOperationKind::Start);
-                        }
-                        Err(error) => {
-                            this.core_error = Some(error);
-                        }
-                    }
-                    let children_running = this.core_running && !this.closing;
-                    this.proxy
-                        .update(cx, |view, cx| view.set_running(children_running, cx));
-                    this.connections
-                        .update(cx, |view, cx| view.set_running(children_running, cx));
-                    this.stats
-                        .update(cx, |view, cx| view.set_running(children_running, cx));
-                    this.logs.update(cx, |view, cx| view.refresh(cx));
-                    this.scripts.update(cx, |view, cx| {
-                        view.set_running(children_running, cx);
-                        view.set_locked(this.core_running || this.closing, cx);
-                    });
-                    this.mitm.update(cx, |view, cx| {
-                        view.set_running(children_running, cx);
-                        view.set_locked(this.core_running || this.closing, cx);
-                    });
-                    this.core_busy = None;
-                    this.configuration.update(cx, |view, cx| {
-                        view.set_locked(this.core_running || this.closing, cx);
-                        if succeeded && matches!(kind, CoreOperationKind::Stop) {
-                            view.refresh(window, cx);
-                        }
-                    });
-                    this.subscriptions.update(cx, |view, cx| {
-                        view.set_locked(this.core_running || this.closing, cx)
-                    });
-                    this.profiles.update(cx, |view, cx| {
-                        view.set_locked(this.core_running || this.closing, cx)
-                    });
-                    this.structured.update(cx, |view, cx| {
-                        view.set_locked(this.core_running || this.closing, cx)
-                    });
-                    this.rules.update(cx, |view, cx| {
-                        view.set_locked(this.core_running || this.closing, cx)
-                    });
-                    this.sync_request_lock(cx);
-                    cx.notify();
-                })
-                .ok();
-            });
-        });
-        self.core_task = Some(task);
-        cx.notify();
-    }
-
-    fn core_status(&self) -> String {
-        if self.closing {
-            return "正在停止日志、连接跟踪与实验核心…".to_string();
-        }
-        if let Some(kind) = self.core_busy {
-            return match kind {
-                CoreOperationKind::Start => "正在生成、校验配置并启动实验核心…".to_string(),
-                CoreOperationKind::Stop => "正在停止核心…".to_string(),
-            };
-        }
-        if let Some(error) = &self.core_error {
-            return format!("核心错误：{error}");
-        }
-        if self.core_running {
-            return format!("核心运行中 · 127.0.0.1:{}", self.core.port());
-        }
-        if self.core.is_configured() {
-            return format!("核心已停止 · 隔离端口 {}", self.core.port());
-        }
-        format!(
-            "核心未配置 · {}",
-            self.core.configuration_error().unwrap_or("不可用")
-        )
-    }
-
     fn sync_request_lock(&mut self, cx: &mut Context<Self>) {
-        let locked = self.closing
-            || self.core_running
-            || self.core_busy.is_some()
-            || self.configuration.read(cx).busy()
+        let lifecycle = self.closing || self.core_busy.is_some();
+        let core_work = self.cores.read(cx).busy();
+        let diagnosing = self.diagnostics.read(cx).busy();
+        let config_work = self.configuration.read(cx).busy()
             || self.subscriptions.read(cx).busy()
             || self.profiles.read(cx).busy()
             || self.structured.read(cx).busy()
             || self.rules.read(cx).busy()
             || self.scripts.read(cx).busy()
             || self.mitm.read(cx).busy();
-        self.requests
-            .update(cx, |view, cx| view.set_locked(locked, cx));
+        let peer_work = config_work || self.requests.read(cx).busy() || self.proxy.read(cx).busy();
+        self.requests.update(cx, |view, cx| {
+            view.set_locked(
+                lifecycle || self.core_running || config_work || core_work || diagnosing,
+                cx,
+            )
+        });
+        self.cores.update(cx, |view, cx| {
+            view.set_locked(
+                lifecycle || self.core_running || peer_work || diagnosing,
+                cx,
+            )
+        });
+        self.diagnostics.update(cx, |view, cx| {
+            view.set_locked(lifecycle || peer_work || core_work, cx)
+        });
+        self.about.update(cx, |view, cx| {
+            view.set_locked(lifecycle || peer_work || core_work || diagnosing, cx)
+        });
+        self.proxy.update(cx, |view, cx| {
+            view.set_locked(lifecycle || core_work || diagnosing, cx)
+        });
+        // Older peers notify even on equal lock values. Publish a transition
+        // once, not another notification loop through their observers.
+        let locked = lifecycle || self.core_running || core_work || diagnosing;
+        if self.business_locked != locked {
+            self.business_locked = locked;
+            self.configuration
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.subscriptions
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.profiles
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.structured
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.rules
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.scripts
+                .update(cx, |view, cx| view.set_locked(locked, cx));
+            self.mitm.update(cx, |view, cx| view.set_locked(locked, cx));
+        }
         cx.notify();
     }
 
@@ -398,6 +343,11 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_active(page == Page::Scripts, cx));
         self.mitm
             .update(cx, |view, cx| view.set_active(page == Page::Mitm, cx));
+        if page == Page::Cores {
+            self.cores.update(cx, |view, cx| view.refresh(cx));
+        } else if page == Page::About {
+            self.about.update(cx, |view, cx| view.refresh(cx));
+        }
         cx.notify();
     }
 }

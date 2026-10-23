@@ -12,14 +12,16 @@ use super::BusinessService;
 
 impl BusinessService {
     pub(crate) async fn build_config(&self, download_rule_sets: bool) -> LanpathResult<Value> {
-        self.build_config_with_chain(download_rule_sets, None).await
+        self.build_config_report(download_rule_sets, None)
+            .await
+            .map(|(value, _)| value)
     }
 
-    pub(crate) async fn build_config_with_chain(
+    pub(crate) async fn build_config_report(
         &self,
         download_rule_sets: bool,
         mitm_chain: Option<MitmChain>,
-    ) -> LanpathResult<Value> {
+    ) -> LanpathResult<(Value, Vec<String>)> {
         let config = self.client_config()?;
         let selected_id = config
             .active_subscription_id
@@ -100,7 +102,7 @@ impl BusinessService {
         if !report.missing_tags.is_empty() {
             tracing::warn!(missing = ?report.missing_tags, "实验内置规则集缺失，按共享降级规则合成");
         }
-        Ok(value)
+        Ok((value, report.missing_tags))
     }
 
     pub(crate) async fn preview_config(&self) -> LanpathResult<String> {
@@ -108,7 +110,7 @@ impl BusinessService {
         // path as start; otherwise a newly referenced remote rule set would make
         // preview fail before start gets a chance to download it.
         let value = self.build_config(true).await?;
-        self.validator().validate_value(&value).await?;
+        self.validator()?.validate_value(&value).await?;
         Ok(serde_json::to_string_pretty(&value)?)
     }
 }

@@ -33,8 +33,16 @@ impl BusinessService {
         }
     }
 
-    pub(crate) fn validator(&self) -> crate::configuration::ConfigValidator {
-        crate::configuration::ConfigValidator::new(&self.root, self.binary.clone(), self.bindings)
+    pub(crate) fn validator(
+        &self,
+    ) -> lanpath_common::LanpathResult<crate::configuration::ConfigValidator> {
+        let config = self.client_config()?;
+        let binary = self.binary.clone().unwrap_or(config.core_binary);
+        Ok(crate::configuration::ConfigValidator::new(
+            &self.root,
+            (!binary.as_os_str().is_empty()).then_some(binary),
+            self.bindings,
+        ))
     }
 
     pub(crate) fn data_dir(&self) -> &Path {
@@ -42,6 +50,8 @@ impl BusinessService {
     }
 }
 
+#[cfg(test)]
+mod core_selection_tests;
 #[cfg(test)]
 mod mitm_tests;
 #[cfg(test)]

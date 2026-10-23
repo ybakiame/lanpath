@@ -182,6 +182,7 @@ async fn fetched_remote_task_runs_while_real_core_is_live() {
     let generated = service.build_config(false).await.unwrap();
     service
         .validator()
+        .unwrap()
         .validate_value(&generated)
         .await
         .unwrap();

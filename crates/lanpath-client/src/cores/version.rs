@@ -11,7 +11,7 @@ pub(super) fn binary_name() -> &'static str {
 }
 
 /// On-disk binary file name (append `.exe` on Windows).
-pub(super) fn binary_name_on_disk() -> String {
+pub(crate) fn binary_name_on_disk() -> String {
     let base = binary_name();
     if std::env::consts::OS == "windows" {
         format!("{base}.exe")
@@ -36,7 +36,7 @@ pub fn infer_core_type(path: &Path) -> Option<CoreType> {
 }
 
 /// Current platform asset hint: `("os-arch", is_windows)`.
-pub(super) fn target_spec() -> LanpathResult<(&'static str, bool)> {
+pub(crate) fn target_spec() -> LanpathResult<(&'static str, bool)> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok(("linux-amd64", false)),
         ("linux", "aarch64") => Ok(("linux-arm64", false)),
@@ -73,7 +73,7 @@ pub(super) fn ext_ok(is_windows: bool, name: &str) -> bool {
 ///
 /// sing-box 1.14+ removed `--version` flag, using `version` subcommand instead. Unified probing
 /// order: `version` → `--version` → `-v`, compatible with both old and new cores.
-pub(super) fn binary_output(binary: &Path) -> String {
+pub(crate) fn binary_output(binary: &Path) -> String {
     for arg in ["version", "--version", "-v"] {
         if let Ok(output) = lanpath_common::no_window(Command::new(binary).arg(arg)).output() {
             let text = format!(
@@ -94,7 +94,7 @@ pub(super) fn binary_output(binary: &Path) -> String {
 /// sing-box: `sing-box version 1.13.15`; `version` subcommand output may contain multiple lines
 /// (first line `sing-box version 1.14.0-beta.4` + environment info), take first line containing
 /// "version".
-pub(super) fn parse_version_from_output(output: &str) -> Option<String> {
+pub(crate) fn parse_version_from_output(output: &str) -> Option<String> {
     let re = regex::Regex::new(r"sing-box\s+version\s+v?([0-9][0-9A-Za-z.\-]*)").ok()?;
     // Subcommand output may contain multiple lines: prefer first line containing "version"
     // (sing-box 1.14+), fallback to full text match.
@@ -108,13 +108,11 @@ pub(super) fn parse_version_from_output(output: &str) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Verify version probe output contains target version (allow `v` prefix, or parsed version equal).
-pub(super) fn verify_version(binary: &Path, version: &str) -> LanpathResult<()> {
+/// Verify the parsed sing-box version exactly matches the requested identity.
+pub(crate) fn verify_version(binary: &Path, version: &str) -> LanpathResult<()> {
     let text = binary_output(binary);
     let parsed = parse_version_from_output(&text).unwrap_or_default();
-    if !version.is_empty()
-        && (text.contains(version) || text.contains(&format!("v{version}")) || parsed == version)
-    {
+    if !version.is_empty() && parsed == version {
         return Ok(());
     }
     Err(LanpathError::Core(format!(
@@ -130,7 +128,7 @@ pub(super) fn verify_version(binary: &Path, version: &str) -> LanpathResult<()> 
 ///   (`1.14.0-beta.4` < `1.14.0`);
 /// - Strings that cannot be parsed into version segments (e.g. `unknown`) are treated as empty
 ///   segments → oldest.
-pub(super) fn compare_core_versions(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn compare_core_versions(a: &str, b: &str) -> std::cmp::Ordering {
     let (a_pre, a_core) = split_version_identity(a);
     let (b_pre, b_core) = split_version_identity(b);
 

@@ -582,6 +582,7 @@ async fn generated_subscription_pipeline_starts_real_core() {
     );
     service
         .validator()
+        .unwrap()
         .validate_value(&generated)
         .await
         .unwrap();

@@ -32,6 +32,7 @@ pub(crate) struct ProxyView {
     mode: String,
     running: bool,
     closing: bool,
+    locked: bool,
     loaded: bool,
     generation: u64,
     operation: Option<Operation>,
@@ -71,6 +72,7 @@ impl ProxyView {
             mode,
             running: false,
             closing: false,
+            locked: false,
             loaded: false,
             generation: 0,
             operation: None,
@@ -84,6 +86,13 @@ impl ProxyView {
 
     pub(crate) fn busy(&self) -> bool {
         self.operation.is_some()
+    }
+
+    pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        if self.locked != locked {
+            self.locked = locked;
+            cx.notify();
+        }
     }
 
     pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
@@ -139,7 +148,7 @@ impl ProxyView {
     }
 
     fn select_group(&mut self, name: String, cx: &mut Context<Self>) {
-        if self.operation.is_some() {
+        if self.locked || self.operation.is_some() {
             return;
         }
         let group = self.groups.iter().find(|group| group.name == name).cloned();
@@ -188,7 +197,7 @@ impl ProxyView {
     }
 
     fn select_proxy(&mut self, name: String, cx: &mut Context<Self>) {
-        if !self.running || self.closing || self.operation.is_some() {
+        if !self.running || self.closing || self.locked || self.operation.is_some() {
             self.reset_list_selection(cx);
             return;
         }
@@ -238,7 +247,7 @@ impl ProxyView {
     }
 
     fn test_selected(&mut self, cx: &mut Context<Self>) {
-        if !self.running || self.closing || self.operation.is_some() {
+        if !self.running || self.closing || self.locked || self.operation.is_some() {
             return;
         }
         let Some(name) = self.list.read(cx).delegate().selected_member() else {
@@ -289,7 +298,7 @@ impl ProxyView {
     }
 
     fn test_group(&mut self, cx: &mut Context<Self>) {
-        if !self.running || self.closing || self.operation.is_some() {
+        if !self.running || self.closing || self.locked || self.operation.is_some() {
             return;
         }
         let Some(group) = self.list.read(cx).delegate().group_name() else {
@@ -338,7 +347,7 @@ impl ProxyView {
     }
 
     fn set_mode(&mut self, mode: &'static str, cx: &mut Context<Self>) {
-        if self.closing || self.operation.is_some() || self.mode == mode {
+        if self.closing || self.locked || self.operation.is_some() || self.mode == mode {
             return;
         }
         self.operation = Some(Operation::SetMode);

@@ -37,13 +37,17 @@ nix develop --no-pure-eval -c cargo build --manifest-path apps/desktop/Cargo.tom
 ```
 
 本机 Windows 原生验证使用已授权的 Rust 1.98.0/MSVC/Windows SDK/CMake，不授权安装或升级组件。
-在具备这些工具的 x64 开发终端、Windows 本地源码副本中运行；先在下面位置准备单独复制的
-sing-box，不指向现行应用正在使用的核心文件：
+在具备这些工具的 x64 开发终端、Windows 本地源码副本中运行。正常启动不需要核心环境变量；
+在“核心”页检查通道、下载并选中实验目录内的 sing-box，再生成预览和启动：
 
 ```powershell
-$env:LANPATH_DESKTOP_CORE_BINARY = Join-Path $env:LOCALAPPDATA 'LanpathExperimentalCore\sing-box.exe'
+Remove-Item Env:LANPATH_DESKTOP_CORE_BINARY -ErrorAction SilentlyContinue
 cargo run --release --manifest-path apps/desktop/Cargo.toml --locked
 ```
+
+`LANPATH_DESKTOP_CORE_BINARY` 仅保留为显式测试覆盖：可指向单独复制的真实核心，但不得指向现行
+应用正在使用的核心。覆盖只作用于检查器和运行时，不改写已保存的库存选择；界面会提示覆盖，
+并锁定下载、选择和删除。Windows 程序使用 GUI 子系统，不随应用另开控制台。
 
 `LANPATH_DESKTOP_DATA_DIR` 可显式指定实验数据根；未设置时 Windows 使用
 `%LOCALAPPDATA%\LanpathExperimental`，非 Windows 使用
@@ -127,6 +131,29 @@ GitHub 镜像沿用共享域名白名单和前缀拼接规则；内置规则集�
 启动首窗前应用保存偏好，跟随系统由保留的窗口外观订阅更新。选择先保存成功再应用；读写失败
 明确显示错误，损坏文件不自动覆盖，修复后可显式“重新载入外观”。
 
+“核心”与现行 Tauri 共用 `CoreManagementService`，展示本地版本和 stable/beta/prerelease 的
+实际远端结果。下载复用已保存的请求策略与 GitHub 镜像；解压至隔离 staging，版本探测精确匹配后
+才发布并原子合并 `core_binary`。失败不改变原选择或覆盖既有核心；旧未完成版本目录可补齐，
+但不删除其中其他文件。staging 不作为已安装库存，实验分支不下载尚未启用的 TUN 专用 DLL。
+选择仅接受自身 `cores/sing-box/<version>/<平台文件名>` 下无链接且可执行的库存；删除需确认，
+且不能删除当前选中项。运行或启停、其他配置操作、诊断及退出期间锁定核心修改。
+下载只有连接和元数据请求超时，没有归档传输总超时；正常退出等待已接受的核心操作结束。
+
+每次启动重新读取持久核心选择，不复用窗口创建时的管理器。界面通过 watch 通道显示实际经过的
+读取选择、运行数据、端口预检、MITM、合成与资源、核心校验、脚本任务、进程、API、选择恢复、
+统计与日志阶段；保留本次会话最近一次启动的完成/失败/警告与实际耗时，不估算百分比。
+失败后回收已启动服务和核心；重试建立新记录，不保留上一次失败作为当前阶段。
+
+“诊断”以接受运行时的已保存实验配置和实际进程状态调用共享分步探测，支持 Enter 和按钮提交，
+显示目标、序号、各步状态/耗时/摘要/详情与失败总数；调用失败保留旧报告并明确其目标。
+缺失资源结合启动物化报告与当前运行配置中本地 backing files 的实时检查；文件缺失不等于核心
+已丢失内存中的规则，不声称自动修复或全部路由已降级。诊断会实际执行系统 DNS、直连 TCP、
+已配置 DNS、实验 mixed/API 路径，不等同于全局请求代理测试，也不能证明 TUN 或其他应用流量正常。
+表单和报告由同一页面滚动区承载，放大和缩小窗口后仍可到达；正常关窗等待已接受诊断完成。
+
+“关于”显示真实构建版本、OS/架构、租用的数据目录与当前持久库存选择，可显式重载；
+不在渲染时执行核心、不提供安装更新或系统设置操作。选中信息是库存快照，不是运行状态证明。
+
 生成配置仍固定 mixed 为 `127.0.0.1:17899`、Clash API 为 `127.0.0.1:19090`，MITM 生效时
 另使用 `127.0.0.1:17900` 回流端口；占用则失败，
 不接管占用进程。拒绝额外监听、TUN、系统代理/时钟改写及未审定能力；资源必须落在实验根内，
@@ -136,7 +163,7 @@ GitHub 镜像沿用共享域名白名单和前缀拼接规则；内置规则集�
 可用 `LANPATH_TEST_SING_BOX` 显式选择真实核心，单独执行普通套件跳过的生成配置与生命周期回归：
 
 ```powershell
-$env:LANPATH_TEST_SING_BOX = $env:LANPATH_DESKTOP_CORE_BINARY
+$env:LANPATH_TEST_SING_BOX = Join-Path $env:LOCALAPPDATA 'LanpathExperimentalCore\sing-box.exe'
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::scripts_tests::fetched_remote_task_runs_while_real_core_is_live -- --ignored --exact
 cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::mitm_tests::generated_pipeline_records_real_mitm_traffic -- --ignored --exact --nocapture

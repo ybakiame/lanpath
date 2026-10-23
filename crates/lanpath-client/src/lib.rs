@@ -12,6 +12,7 @@ pub mod config_slices;
 pub mod connections;
 pub mod core_config;
 pub mod core_engine;
+pub mod core_management;
 pub mod cores;
 pub mod diagnose;
 pub mod dns_probe;

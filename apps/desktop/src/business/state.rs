@@ -18,7 +18,7 @@ impl BusinessService {
                 self.root.clone(),
                 String::new(),
                 String::new(),
-                self.binary.clone().unwrap_or_default(),
+                PathBuf::new(),
             )
         } else {
             ClientConfig::load(&self.root)?
@@ -84,9 +84,15 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) -> bool {
         config.data_dir.clone_from(&service.root);
         changed = true;
     }
-    let binary = service.binary.as_deref().unwrap_or_else(|| Path::new(""));
-    if config.core_binary != binary {
-        config.core_binary = binary.to_path_buf();
+    if !config.core_binary.as_os_str().is_empty()
+        && lanpath_client::core_management::CoreManagementService::validate_managed_binary(
+            &service.root,
+            &config.core_binary,
+        )
+        .is_err()
+    {
+        // A missing or escaped managed core cannot become an executable fallback.
+        config.core_binary.clear();
         changed = true;
     }
     enforce!(config.mixed_port, service.bindings.mixed_port());

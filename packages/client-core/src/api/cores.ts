@@ -1,13 +1,13 @@
 /**
  * Core (binary) management API types and functions.
  *
- * Aligned with Rust-side `LocalCoreView`.
+ * Aligned with Rust-side `core_management::ManagedCore`.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import type { CoreChannel } from "../coreChannels";
 
-/** Local core view (aligned with Rust `LocalCoreView`; 仅 sing-box 单核心). */
+/** Local core view (aligned with Rust `ManagedCore`; 仅 sing-box 单核心). */
 export interface LocalCoreView {
   version: string;
   path: string;
@@ -15,7 +15,7 @@ export interface LocalCoreView {
   active: boolean;
 }
 
-/** Remote channel latest version view (aligned with Rust `RemoteChannelView`). */
+/** Remote channel latest version view (aligned with Rust `RemoteChannel`). */
 export interface RemoteCoreChannel {
   channel: CoreChannel;
   version: string;

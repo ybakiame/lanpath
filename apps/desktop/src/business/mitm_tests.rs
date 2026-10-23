@@ -77,12 +77,13 @@ async fn generated_pipeline_records_real_mitm_traffic() {
         .await
         .unwrap()
         .expect("saved whitelist should start MITM");
-    let generated = business
-        .build_config_with_chain(false, Some(session.chain()))
+    let (generated, _) = business
+        .build_config_report(false, Some(session.chain()))
         .await
         .unwrap();
     business
         .validator()
+        .unwrap()
         .validate_value(&generated)
         .await
         .unwrap();

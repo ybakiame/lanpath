@@ -38,21 +38,14 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.appearance
             .update(cx, |view, cx| view.set_closing(true, cx));
-        self.configuration
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.subscriptions
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.profiles
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.structured
-            .update(cx, |view, cx| view.set_locked(true, cx));
-        self.rules.update(cx, |view, cx| view.set_locked(true, cx));
-        self.scripts
-            .update(cx, |view, cx| view.set_locked(true, cx));
+        self.cores.update(cx, |view, cx| view.set_closing(true, cx));
+        self.diagnostics
+            .update(cx, |view, cx| view.set_closing(true, cx));
+        self.about.update(cx, |view, cx| view.set_closing(true, cx));
+        self.sync_request_lock(cx);
         self.scripts
             .update(cx, |view, cx| view.set_running(false, cx));
         self.mitm.update(cx, |view, cx| {
-            view.set_locked(true, cx);
             view.set_running(false, cx);
         });
         self.proxy.update(cx, |view, cx| view.set_closing(true, cx));
@@ -79,6 +72,8 @@ impl DesktopView {
                         || this.stats.read(cx).busy()
                         || this.logs.read(cx).busy(cx)
                         || this.requests.read(cx).busy()
+                        || this.cores.read(cx).busy()
+                        || this.diagnostics.read(cx).busy()
                 }) else {
                     return;
                 };
@@ -110,6 +105,12 @@ impl DesktopView {
                         this.requests
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.appearance
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.cores
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.diagnostics
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.about
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.configuration
@@ -163,6 +164,12 @@ impl DesktopView {
                         this.requests
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.appearance
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.cores
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.diagnostics
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.about
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.core_error = Some(error);

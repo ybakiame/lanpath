@@ -7,7 +7,7 @@ use super::ProxyView;
 
 impl Render for ProxyView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let busy = self.closing || self.operation.is_some();
+        let busy = self.closing || self.locked || self.operation.is_some();
         let selected_member = self.list.read(cx).delegate().selected_member().is_some();
         let has_group = self.active_group.is_some();
         let groups = self.groups.clone();

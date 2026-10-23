@@ -26,10 +26,11 @@ use crate::config::ClientConfig;
 
 mod channel;
 mod download;
+pub(crate) mod safety;
 mod seed;
 #[cfg(test)]
 mod tests;
-mod version;
+pub(crate) mod version;
 
 pub use channel::{CoreChannel, RemoteChannelVersion, channel_of_version};
 pub use seed::seed_bundled_core;
@@ -59,7 +60,25 @@ pub struct ClientCoreInventory {
     api_base: String,
 }
 
+/// Actual installation stages; observers must not perform blocking work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreDownloadStage {
+    ResolvingRelease,
+    Downloading,
+    Extracting,
+    Verifying,
+    Selecting,
+}
+
 impl ClientCoreInventory {
+    /// No legacy-directory migration is allowed in a leased experimental root.
+    pub(crate) fn for_experiment(data_dir: PathBuf, api_base: Option<&str>) -> Self {
+        Self {
+            data_dir,
+            api_base: api_base.unwrap_or("https://api.github.com").into(),
+        }
+    }
+
     /// Create inventory based on data directory (GitHub API uses `https://api.github.com`).
     pub fn new(data_dir: PathBuf) -> Self {
         Self::with_api_base(data_dir, "https://api.github.com")
@@ -131,6 +150,10 @@ impl ClientCoreInventory {
                     continue;
                 }
                 let version = entry.file_name().to_string_lossy().into_owned();
+                // Interrupted installations are staging, not installed versions.
+                if version.starts_with(".core-download-") {
+                    continue;
+                }
                 let bin = path.join(version::binary_name_on_disk());
                 if bin.is_file() {
                     out.push(LocalCore { version, path: bin });
@@ -157,28 +180,52 @@ impl ClientCoreInventory {
     ///
     /// Reuses existing download if same version already present; after download extracts,
     /// chmod 755, and verifies version probe output (`version` / `--version` / `-v` tried in
-    /// sequence) contains target version.
+    /// sequence) exactly matches the target version.
     pub async fn download(&self, version: &str) -> LanpathResult<LocalCore> {
-        let version = version.strip_prefix('v').unwrap_or(version).to_string();
+        self.download_with_tun(version, true, &|_| {}).await
+    }
+
+    /// Experimental shells that cannot enable TUN do not fetch its optional DLL.
+    pub(crate) async fn download_with_tun(
+        &self,
+        version: &str,
+        _include_tun: bool,
+        progress: &(dyn Fn(CoreDownloadStage) + Send + Sync),
+    ) -> LanpathResult<LocalCore> {
+        let version = safety::normalized_version(version)?.to_string();
         let tag = version::github_tag(&version);
         let (arch_hint, is_windows) = version::target_spec()?;
 
         let dir = self.core_dir(&version);
         let on_disk = dir.join(version::binary_name_on_disk());
 
-        // Reuse if already downloaded and version verification passes.
-        if on_disk.is_file() && version::verify_version(&on_disk, &version).is_ok() {
+        safety::unlinked_path(&dir)?;
+        safety::unlinked_path(&on_disk)?;
+        // Never overwrite a previously installed binary, including a broken active selection.
+        if on_disk.exists() {
+            progress(CoreDownloadStage::Verifying);
+            safety::executable(&on_disk)?;
+            version::verify_version(&on_disk, &version)?;
             return Ok(LocalCore {
                 version,
                 path: on_disk,
             });
         }
-
-        tokio::fs::create_dir_all(&dir).await?;
+        let parent = dir
+            .parent()
+            .ok_or_else(|| safety::invalid("Invalid core directory"))?;
+        std::fs::create_dir_all(parent)?;
+        let staging = tempfile::Builder::new()
+            .prefix(".core-download-")
+            .tempdir_in(parent)?;
+        let destination = dir;
+        let dir = staging.path().to_path_buf();
 
         // Match current platform asset via GitHub Release API (real naming may deviate from
         // convention, do not construct URL directly).
+        progress(CoreDownloadStage::ResolvingRelease);
         let (asset_url, asset_name) = self.resolve_asset_url(&tag, arch_hint, is_windows).await?;
+        safety::asset_name(&asset_name)?;
         // Asset download initial URL is `github.com/<owner>/<repo>/releases/download/...`,
         // wrapped by configured proxy prefix; 302 redirect to `objects.githubusercontent.com`
         // is followed by the gh proxy side (not wrapped again here).
@@ -190,8 +237,10 @@ impl ClientCoreInventory {
         );
 
         let tmp_archive = dir.join(format!(".download-{asset_name}"));
+        progress(CoreDownloadStage::Downloading);
         self.download_to(&asset_url, &tmp_archive).await?;
 
+        progress(CoreDownloadStage::Extracting);
         let binary_inside = version::binary_name();
         let (dir_clone, archive_clone) = (dir.clone(), tmp_archive.clone());
         let result = tokio::task::spawn_blocking(move || {
@@ -217,16 +266,14 @@ impl ClientCoreInventory {
         // 核心下载成功后随附下载对应架构的 wintun.dll；失败不阻塞核心安装（TUN
         // 启动时会报「Unable to load library」，错误信息足够明确）。
         #[cfg(target_os = "windows")]
-        if let Err(e) = download::ensure_wintun(&self.http_client()?, &dir).await {
+        if _include_tun && let Err(e) = download::ensure_wintun(&self.http_client()?, &dir).await {
             tracing::warn!(error = %e, "wintun.dll 下载失败，TUN 模式将不可用");
         }
 
-        // Version probe verification: output must contain target version; on failure clean up
-        // directory to avoid leaving partial artifacts.
-        if let Err(e) = version::verify_version(&path, &version) {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(e);
-        }
+        progress(CoreDownloadStage::Verifying);
+        safety::executable(&path)?;
+        version::verify_version(&path, &version)?;
+        let path = download::publish_core(&dir, &destination)?;
 
         tracing::info!(
             version = %version,
@@ -369,6 +416,7 @@ impl ClientCoreInventory {
                 && version::ext_ok(is_windows, name)
                 && let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str())
             {
+                safety::asset_name(name)?;
                 return Ok((url.to_string(), name.to_string()));
             }
         }

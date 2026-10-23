@@ -39,7 +39,9 @@ impl Render for DesktopView {
             || self.rules.read(cx).busy()
             || self.scripts.read(cx).busy()
             || self.mitm.read(cx).busy()
-            || self.requests.read(cx).busy();
+            || self.requests.read(cx).busy()
+            || self.cores.read(cx).busy()
+            || self.diagnostics.read(cx).busy();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
@@ -55,6 +57,9 @@ impl Render for DesktopView {
             Page::Mitm => self.mitm.clone().into_any_element(),
             Page::Requests => self.requests.clone().into_any_element(),
             Page::Appearance => self.appearance.clone().into_any_element(),
+            Page::Cores => self.cores.clone().into_any_element(),
+            Page::Diagnostics => self.diagnostics.clone().into_any_element(),
+            Page::About => self.about.clone().into_any_element(),
         };
         let sidebar = Sidebar::new("desktop-navigation")
             .collapsible(false)
@@ -77,6 +82,7 @@ impl Render for DesktopView {
                     (Page::Connections, "连接"),
                     (Page::Stats, "统计"),
                     (Page::Logs, "日志"),
+                    (Page::Diagnostics, "诊断"),
                 ],
                 cx,
             ))
@@ -87,7 +93,12 @@ impl Render for DesktopView {
             ))
             .child(self.navigation_group(
                 "设置",
-                &[(Page::Requests, "网络请求"), (Page::Appearance, "外观")],
+                &[
+                    (Page::Cores, "核心"),
+                    (Page::Requests, "网络请求"),
+                    (Page::Appearance, "外观"),
+                    (Page::About, "关于"),
+                ],
                 cx,
             ));
 
