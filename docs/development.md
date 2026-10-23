@@ -191,6 +191,13 @@ cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib busi
 
 Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。
 
+第 12 单位目前仅有 [ADR-0013 中的系统集成设计草案](adr/0013-gpui-experimental-parallel-migration.md)，
+不表示功能已迁移或权限架构已采纳。实施顺序为设置/绑定、系统代理会话、经单独决策的 TUN、
+证书与真实 HTTPS 验收；当前固定端口、能力拒绝和不自动安装证书的行为不变。
+系统代理应用与归还、UAC/TUN/路由/DNS、临时 CA 安装及移除分别需要明确许可，
+并在无生产实例的专用 Windows 环境验证；发现生产代理或身份冲突应拒绝接管，
+不能自行停止生产程序。源码调查和只读状态核验不能替代这些系统效果验收。
+
 ## Android
 
 ADB 已连接设备的选择、按授权安装、日志采集和原生行为验收见 [Android 调试 skill](../.agents/skills/lanpath-android-debug/SKILL.md)。
