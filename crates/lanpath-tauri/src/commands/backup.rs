@@ -2,6 +2,7 @@
 use crate::state::AppState;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use lanpath_client::backup::{self, Appearance, BackupSummary};
+use lanpath_common::LanpathError;
 #[cfg(not(target_os = "android"))]
 use tauri::Manager;
 use tauri::State;
@@ -13,6 +14,16 @@ fn unpack(content: &str) -> Result<Vec<u8>, String> {
     STANDARD
         .decode(content)
         .map_err(|_| "备份文件编码无效".into())
+}
+
+// These read/acknowledgement commands historically expose the underlying message.
+fn read_error(error: LanpathError) -> String {
+    match error {
+        LanpathError::Client(message) => message,
+        LanpathError::Io(error) => error.to_string(),
+        LanpathError::Serialization(error) => error.to_string(),
+        error => error.to_string(),
+    }
 }
 
 #[tauri::command]
@@ -27,15 +38,12 @@ pub async fn backup_export(
     password: String,
     appearance: Option<Appearance>,
 ) -> Result<String, String> {
-    let dir = state.data_dir.clone();
+    let service = std::sync::Arc::clone(&state.backup);
     // Capture and scrypt are blocking work, never performed on the IPC event loop.
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let snapshot = backup::capture(&dir, appearance)?;
-        backup::encode(&snapshot, &password)
-    })
-    .await
-    .map_err(|_| "备份任务未能完成".to_string())?
-    .map_err(|e| e.to_string())?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || service.export(&password, appearance))
+        .await
+        .map_err(|_| "备份任务未能完成".to_string())?
+        .map_err(|e| e.to_string())?;
     let filename = format!("Lanpath-backup-{}.zip.age", uuid::Uuid::new_v4());
     #[cfg(target_os = "android")]
     {
@@ -71,11 +79,11 @@ pub async fn backup_preview(
     content: String,
     password: String,
 ) -> Result<backup::BackupPreview, String> {
-    let cache = std::sync::Arc::clone(&state.backup_previews);
-    let work_cache = std::sync::Arc::clone(&cache);
+    let service = std::sync::Arc::clone(&state.backup);
+    let work_service = std::sync::Arc::clone(&service);
     let preview = tauri::async_runtime::spawn_blocking(move || {
         let bytes = unpack(&content)?;
-        work_cache
+        work_service
             .inspect(&bytes, password)
             .map_err(|_| "备份无法解密或校验：请检查密码、文件完整性和备份版本".to_string())
     })
@@ -84,7 +92,7 @@ pub async fn backup_preview(
     let id = preview.preview_id.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        cache.discard(&id);
+        service.discard(&id);
     });
     Ok(preview)
 }
@@ -96,8 +104,8 @@ pub async fn backup_prepare_restore(
     appearance: Option<Appearance>,
 ) -> Result<String, String> {
     let prepared = state
-        .backup_previews
-        .take(&preview_id)
+        .backup
+        .take_preview(&preview_id)
         .map_err(|e| e.to_string())?;
     let mut lock = state.client.lock().await;
     if let Some(client) = lock.as_mut() {
@@ -114,30 +122,12 @@ pub async fn backup_prepare_restore(
 /// Read-only startup result; frontend acknowledges after applying appearance.
 #[tauri::command]
 pub fn backup_restored(state: State<'_, AppState>) -> Result<Option<BackupSummary>, String> {
-    if state.data_dir.join(".backup-failed").exists() {
-        return Err("恢复未完成，原配置已保留。请重新选择备份并导入".into());
-    }
-    let file = state.data_dir.join(".backup-applied.json");
-    if !file.exists() {
-        return Ok(None);
-    }
-    serde_json::from_slice(&std::fs::read(file).map_err(|e| e.to_string())?)
-        .map(Some)
-        .map_err(|e| e.to_string())
+    state.backup.restored().map_err(read_error)
 }
 
 #[tauri::command]
 pub fn backup_acknowledge(state: State<'_, AppState>) -> Result<(), String> {
-    let failure = state.data_dir.join(".backup-failed");
-    if failure.exists() {
-        std::fs::remove_file(failure).map_err(|e| e.to_string())?;
-    }
-
-    let file = state.data_dir.join(".backup-applied.json");
-    if file.exists() {
-        std::fs::remove_file(file).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    state.backup.acknowledge().map_err(read_error)
 }
 
 #[tauri::command]
@@ -145,7 +135,7 @@ pub async fn backup_restart(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if !state.data_dir.join(".backup-pending").exists() {
+    if !state.backup.is_pending() {
         return Err("没有待恢复的配置".into());
     }
     #[cfg(target_os = "android")]
@@ -166,34 +156,17 @@ pub async fn backup_restart(
 
 #[tauri::command]
 pub fn backup_pending(state: State<'_, AppState>) -> bool {
-    state.data_dir.join(".backup-pending").exists()
+    state.backup.is_pending()
 }
 
 #[tauri::command]
 pub async fn backup_previous(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let dir = state.data_dir.join("backup-history");
+    let service = std::sync::Arc::clone(&state.backup);
     tauri::async_runtime::spawn_blocking(move || {
-        if !dir.exists() {
-            return Ok(None);
-        }
-        let mut files = std::fs::read_dir(dir)
-            .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .filter(|e| {
-                e.file_type().is_ok_and(|t| t.is_file())
-                    && e.file_name().to_string_lossy().ends_with(".zip.age")
-            })
-            .collect::<Vec<_>>();
-        files.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-        let Some(last) = files.last() else {
-            return Ok(None);
-        };
-        if last.metadata().map_err(|e| e.to_string())?.len() > backup::MAX_ARCHIVE as u64 {
-            return Err("回滚文件过大".into());
-        }
-        std::fs::read(last.path())
-            .map(|b| Some(STANDARD.encode(b)))
-            .map_err(|e| e.to_string())
+        service
+            .previous()
+            .map(|bytes| bytes.map(|bytes| STANDARD.encode(bytes)))
+            .map_err(read_error)
     })
     .await
     .map_err(|_| "无法读取恢复前备份".to_string())?

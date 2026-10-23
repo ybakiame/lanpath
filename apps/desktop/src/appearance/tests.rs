@@ -36,6 +36,7 @@ fn invalid_scale_save_leaves_valid_file_and_live_preferences_unchanged() {
         preferences: previous,
         store: Some(store.clone()),
         load_error: None,
+        restore_warning: None,
     };
     for percent in [0, 74, 151, u16::MAX] {
         assert!(state.save(previous.with_scale_percent(percent)).is_err());
@@ -87,6 +88,7 @@ fn reload_failure_retains_last_applied_preferences_until_explicit_repair() {
         preferences,
         store: Some(store),
         load_error: None,
+        restore_warning: None,
     };
     let path = root.path().join("appearance.json");
     std::fs::write(&path, "broken").unwrap();

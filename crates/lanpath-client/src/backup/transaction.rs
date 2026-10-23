@@ -153,6 +153,13 @@ fn recover(dir: &Path) -> LanpathResult<()> {
         remove(&dir.join(".backup-applied.json"))?;
     } else {
         remove(&dir.join(PENDING))?;
+        // A committed retry supersedes an unacknowledged earlier failure.
+        // Also run during post-crash committed-journal cleanup.
+        match std::fs::remove_file(dir.join(".backup-failed")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
     }
     remove(&work)?;
     remove(&dir.join(JOURNAL))?;

@@ -21,8 +21,8 @@ pub struct AppState {
     pub client: Arc<Mutex<Option<ClientState>>>,
     /// 数据目录（配置、证书、核心二进制统一存放于此）。
     pub data_dir: PathBuf,
-    /// 单槽、短期、一次性内存预览，不持久化密码。
-    pub backup_previews: Arc<lanpath_client::backup::PreviewCache>,
+    /// 共享备份服务：单槽、短期、一次性预览，不持久化密码。
+    pub backup: Arc<lanpath_client::backup::BackupService>,
     /// 覆盖授权与启动全程；重复请求立即拒绝，不排队。
     pub start_gate: Mutex<()>,
     /// Readable while startup holds the client lock; never persisted.
@@ -41,9 +41,9 @@ impl AppState {
     pub fn new(data_dir: PathBuf, log_guard: WorkerGuard) -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
+            backup: Arc::new(lanpath_client::backup::BackupService::new(data_dir.clone())),
             data_dir,
             stats: tokio::sync::OnceCell::new(),
-            backup_previews: Arc::new(Default::default()),
             start_gate: Mutex::new(()),
             startup_progress: Default::default(),
             _log_guard: log_guard,

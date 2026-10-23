@@ -1,3 +1,4 @@
+mod backup;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -156,6 +157,7 @@ pub(crate) struct AppearanceState {
     preferences: AppearancePreferences,
     store: Option<AppearanceStore>,
     load_error: Option<String>,
+    restore_warning: Option<String>,
 }
 
 impl Global for AppearanceState {}
@@ -166,6 +168,9 @@ impl AppearanceState {
     }
     pub(crate) fn load_error(&self) -> Option<&str> {
         self.load_error.as_deref()
+    }
+    pub(crate) fn restore_warning(&self) -> Option<&str> {
+        self.restore_warning.as_deref()
     }
 
     pub(crate) fn save(&mut self, preferences: AppearancePreferences) -> LanpathResult<()> {
@@ -212,8 +217,10 @@ pub(crate) fn initialize(core: &DesktopRuntime, cx: &mut App) {
         preferences: AppearancePreferences::default(),
         store,
         load_error: None,
+        restore_warning: None,
     };
     let _ = state.reload();
+    backup::restore_at_startup(core, &mut state);
     let preferences = state.preferences;
     cx.set_global(state);
     apply(preferences, cx.window_appearance(), cx);

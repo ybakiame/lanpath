@@ -5,13 +5,17 @@ use std::collections::BTreeMap;
 
 mod archive;
 mod preview;
+mod service;
+#[cfg(test)]
+mod service_tests;
 mod snapshot;
 #[cfg(test)]
 mod tests;
 mod transaction;
 
 pub use archive::{decode, encode, generate_password};
-pub use preview::{BackupPreview, PreviewCache};
+pub use preview::{BackupPreview, PreviewCache, RestoreInput};
+pub use service::BackupService;
 pub use snapshot::capture;
 pub use transaction::{apply_pending, apply_pending_at_startup, prepare_restore};
 

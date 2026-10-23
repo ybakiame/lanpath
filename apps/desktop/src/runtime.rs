@@ -1,3 +1,4 @@
+mod backup;
 mod diagnostics;
 mod lifecycle;
 
@@ -43,6 +44,7 @@ pub(crate) struct DesktopRuntime {
     missing_rule_sets: Mutex<RunResources>,
     observations: Option<ObservationService>,
     business: Option<BusinessService>,
+    backup: Option<Arc<lanpath_client::backup::BackupService>>,
     logs: LogService,
     mitm: tokio::sync::Mutex<Option<MitmSession>>,
     mitm_service: Option<MitmService>,
@@ -62,7 +64,12 @@ impl DesktopRuntime {
             ))),
             None => default_data_dir(),
         }
-        .and_then(|path| DataRoot::open(&path));
+        .and_then(|path| DataRoot::open(&path))
+        .and_then(|root| {
+            // The exclusive lease precedes recovery; no stores or writers exist yet.
+            lanpath_client::backup::apply_pending_at_startup(root.path())?;
+            Ok(root)
+        });
         let data_root = match root {
             Ok(root) => Some(root),
             Err(error) => {
@@ -108,6 +115,11 @@ impl DesktopRuntime {
             .as_ref()
             .map(|root| BusinessService::new(root.path(), binary.clone(), bindings));
         let mitm_service = data_root.as_ref().map(|root| MitmService::new(root.path()));
+        let backup = data_root.as_ref().map(|root| {
+            Arc::new(lanpath_client::backup::BackupService::new(
+                root.path().to_path_buf(),
+            ))
+        });
         let logs = LogService::new(data_root.as_ref().map(|root| root.path()));
         Self {
             manager: tokio::sync::Mutex::new(None),
@@ -116,6 +128,7 @@ impl DesktopRuntime {
             missing_rule_sets: Mutex::new(RunResources::default()),
             observations,
             business,
+            backup,
             logs,
             script_tasks: tokio::sync::Mutex::new(None),
             mitm: tokio::sync::Mutex::new(None),
@@ -176,6 +189,12 @@ impl DesktopRuntime {
 
     pub(crate) fn business(&self) -> Result<&BusinessService, String> {
         self.business
+            .as_ref()
+            .ok_or_else(|| self.unavailable_data_error())
+    }
+
+    pub(crate) fn backup(&self) -> Result<&Arc<lanpath_client::backup::BackupService>, String> {
+        self.backup
             .as_ref()
             .ok_or_else(|| self.unavailable_data_error())
     }

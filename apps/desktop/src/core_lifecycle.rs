@@ -32,6 +32,8 @@ impl DesktopView {
             || self.requests.read(cx).busy()
             || self.cores.read(cx).busy()
             || self.diagnostics.read(cx).busy()
+            || self.backups.read(cx).busy()
+            || self.backups.read(cx).is_pending()
             || !self.core.is_configured()
             || invalid_state
         {

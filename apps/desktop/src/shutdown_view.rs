@@ -42,6 +42,8 @@ impl DesktopView {
         self.diagnostics
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.about.update(cx, |view, cx| view.set_closing(true, cx));
+        self.backups
+            .update(cx, |view, cx| view.set_closing(true, cx));
         self.sync_request_lock(cx);
         self.scripts
             .update(cx, |view, cx| view.set_running(false, cx));
@@ -74,6 +76,8 @@ impl DesktopView {
                         || this.requests.read(cx).busy()
                         || this.cores.read(cx).busy()
                         || this.diagnostics.read(cx).busy()
+                        || this.backups.read(cx).busy()
+                        || this.restore_task.is_some()
                 }) else {
                     return;
                 };
@@ -85,13 +89,14 @@ impl DesktopView {
                     .await;
             }
             let Ok(dirty) = this.update(cx, |this, cx| {
-                this.subscriptions.read(cx).dirty()
-                    || this.profiles.read(cx).dirty()
-                    || this.structured.read(cx).dirty()
-                    || this.rules.read(cx).dirty()
-                    || this.scripts.read(cx).dirty()
-                    || this.mitm.read(cx).dirty()
-                    || this.requests.read(cx).dirty()
+                !this.backups.read(cx).is_pending()
+                    && (this.subscriptions.read(cx).dirty()
+                        || this.profiles.read(cx).dirty()
+                        || this.structured.read(cx).dirty()
+                        || this.rules.read(cx).dirty()
+                        || this.scripts.read(cx).dirty()
+                        || this.mitm.read(cx).dirty()
+                        || this.requests.read(cx).dirty())
             }) else {
                 return;
             };
@@ -111,6 +116,8 @@ impl DesktopView {
                         this.diagnostics
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.about
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.backups
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.configuration
@@ -138,6 +145,7 @@ impl DesktopView {
                         this.stats
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
                         this.confirm_discard_close(window, cx);
+                        this.sync_request_lock(cx);
                         cx.notify();
                     })
                     .ok();
@@ -171,6 +179,8 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.about
                             .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.backups
+                            .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.core_error = Some(error);
                         this.configuration
@@ -197,6 +207,7 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
                         this.stats
                             .update(cx, |view, cx| view.set_running(this.core_running, cx));
+                        this.sync_request_lock(cx);
                         cx.notify();
                     }
                 })

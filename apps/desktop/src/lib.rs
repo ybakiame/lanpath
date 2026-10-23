@@ -1,6 +1,8 @@
 mod about_view;
 mod appearance;
 mod appearance_view;
+mod backup_lifecycle;
+mod backup_view;
 mod business;
 mod config_slices_view;
 mod config_view;
@@ -24,6 +26,7 @@ mod proxy_list;
 mod proxy_service;
 mod proxy_view;
 mod request_settings_view;
+mod restart;
 mod rules_view;
 mod runtime;
 mod scripts_view;
@@ -38,6 +41,7 @@ mod windows_file;
 
 use about_view::AboutView;
 use appearance_view::AppearanceView;
+use backup_view::{BackupEvent, BackupView};
 use std::sync::Arc;
 
 use config_slices_view::{ConfigSlicesChanged, ConfigSlicesView};
@@ -83,6 +87,7 @@ enum Page {
     Appearance,
     Cores,
     Diagnostics,
+    Backup,
     About,
 }
 
@@ -105,6 +110,8 @@ struct DesktopView {
     cores: Entity<CoreManagementView>,
     diagnostics: Entity<DiagnosticsView>,
     about: Entity<AboutView>,
+    backups: Entity<BackupView>,
+    restore_task: Option<Task<()>>,
     startup_status: String,
     business_locked: bool,
     _startup_task: Task<()>,
@@ -189,6 +196,18 @@ impl DesktopView {
         let cores = cx.new(|cx| CoreManagementView::new(core.clone(), window, cx));
         let diagnostics = cx.new(|cx| DiagnosticsView::new(core.clone(), window, cx));
         let about = cx.new(|cx| AboutView::new(core.clone(), cx));
+        let backups = cx.new(|cx| BackupView::new(core.clone(), window, cx));
+        _business_subscriptions.push(cx.subscribe_in(
+            &backups,
+            window,
+            |this, _, event: &BackupEvent, window, cx| match event {
+                BackupEvent::RestoreRequested { preview_id } => {
+                    this.request_restore(preview_id.clone(), window, cx);
+                }
+                BackupEvent::RestartRequested => this.restart_restored(window, cx),
+                BackupEvent::StartupNotice => this.set_page(Page::Backup, cx),
+            },
+        ));
         _business_subscriptions.push(cx.subscribe_in(
             &cores,
             window,
@@ -228,6 +247,7 @@ impl DesktopView {
             cx.observe(&requests, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&cores, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&diagnostics, |this, _, cx| this.sync_request_lock(cx)),
+            cx.observe(&backups, |this, _, cx| this.sync_request_lock(cx)),
             cx.observe(&proxy, |this, _, cx| this.sync_request_lock(cx)),
         ]);
         let view = cx.weak_entity();
@@ -255,6 +275,8 @@ impl DesktopView {
             cores,
             diagnostics,
             about,
+            backups,
+            restore_task: None,
             startup_status: "正在开始启动".into(),
             business_locked: false,
             _startup_task: startup_task,
@@ -273,7 +295,8 @@ impl DesktopView {
     }
 
     fn sync_request_lock(&mut self, cx: &mut Context<Self>) {
-        let lifecycle = self.closing || self.core_busy.is_some();
+        let backup_work = self.backups.read(cx).busy() || self.backups.read(cx).is_pending();
+        let lifecycle = self.closing || self.core_busy.is_some() || backup_work;
         let core_work = self.cores.read(cx).busy();
         let diagnosing = self.diagnostics.read(cx).busy();
         let config_work = self.configuration.read(cx).busy()
@@ -284,6 +307,15 @@ impl DesktopView {
             || self.scripts.read(cx).busy()
             || self.mitm.read(cx).busy();
         let peer_work = config_work || self.requests.read(cx).busy() || self.proxy.read(cx).busy();
+        self.backups.update(cx, |view, cx| {
+            view.set_locked(
+                self.closing || self.core_busy.is_some() || peer_work || core_work || diagnosing,
+                cx,
+            )
+        });
+        self.appearance.update(cx, |view, cx| {
+            view.set_closing(self.closing || backup_work, cx)
+        });
         self.requests.update(cx, |view, cx| {
             view.set_locked(
                 lifecycle || self.core_running || config_work || core_work || diagnosing,
@@ -347,12 +379,15 @@ impl DesktopView {
             self.cores.update(cx, |view, cx| view.refresh(cx));
         } else if page == Page::About {
             self.about.update(cx, |view, cx| view.refresh(cx));
+        } else if page == Page::Backup {
+            self.backups.update(cx, |view, cx| view.refresh(cx));
         }
         cx.notify();
     }
 }
 
 pub fn run() {
+    restart::wait_for_parent().expect("failed to receive experimental restore restart handoff");
     let core = Arc::new(DesktopRuntime::from_env());
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)

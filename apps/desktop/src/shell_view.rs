@@ -41,7 +41,9 @@ impl Render for DesktopView {
             || self.mitm.read(cx).busy()
             || self.requests.read(cx).busy()
             || self.cores.read(cx).busy()
-            || self.diagnostics.read(cx).busy();
+            || self.diagnostics.read(cx).busy()
+            || self.backups.read(cx).busy()
+            || self.backups.read(cx).is_pending();
         let core_status: gpui_kit::SharedString = self.core_status().into();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
@@ -59,6 +61,7 @@ impl Render for DesktopView {
             Page::Appearance => self.appearance.clone().into_any_element(),
             Page::Cores => self.cores.clone().into_any_element(),
             Page::Diagnostics => self.diagnostics.clone().into_any_element(),
+            Page::Backup => self.backups.clone().into_any_element(),
             Page::About => self.about.clone().into_any_element(),
         };
         let sidebar = Sidebar::new("desktop-navigation")
@@ -97,6 +100,7 @@ impl Render for DesktopView {
                     (Page::Cores, "核心"),
                     (Page::Requests, "网络请求"),
                     (Page::Appearance, "外观"),
+                    (Page::Backup, "备份"),
                     (Page::About, "关于"),
                 ],
                 cx,

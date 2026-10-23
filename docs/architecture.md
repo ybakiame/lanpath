@@ -35,9 +35,10 @@ YAML/JSON/分享链接分别导出 yaml/json/txt，桌面与 Android 均写入�
 客户端订阅、远程资源与核心下载共用 request_network 的四种请求代理策略；GitHub 镜像仅改写 URL。
 配置与 IPC 统一使用 request_proxy_mode/request_proxy_url，旧布尔开关备份后一次性迁移，见 ADR-0007。
 
-备份由 lanpath-client::backup 负责白名单快照、age 加密与启动恢复事务；lanpath-tauri 提供
-摘要/准备/导出命令，UI 经 client-core 调用。恢复在平台组装的状态初始化前应用，Android 仅适配
-密文文件导出到 MediaStore，配置不进入 Go 桥。见 ADR-0008。
+备份由 lanpath-client::backup 负责白名单快照、age 加密与启动恢复事务；共享 BackupService
+提供密文导出、一次性预览、历史与恢复结果编排。lanpath-tauri 提供平台/IPC 适配，现行 UI 经
+client-core 调用；GPUI 直接复用该服务，只捕获和恢复租用的实验根。恢复在平台状态/存储初始化前
+应用，Android 仅适配密文文件导出到 MediaStore，配置不进入 Go 桥。见 ADR-0008、ADR-0013。
 
 备份 v2 额外迁移 rulesets 文件并兼容 v1；启动阶段由独立内存状态提供，
 client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。
