@@ -22,6 +22,10 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 
 ## Windows GPUI 实验性并行
 
+并行期间，GPUI 使用独立配置目录，Tauri 沿用现有标准目录；两者不共享可写根、不自动双写，
+当前不搬迁或覆盖 Tauri 数据。正式切换时再将 GPUI 交接到 Tauri 的标准配置目录，
+通过停机、迁移预览、事务应用与可恢复回退完成；并行版本不提前切换默认目录或放宽旧根保护。
+
 入口为独立 Cargo 项目 `apps/desktop`，程序名 `lanpath-desktop-experimental`、窗口名
 “Lanpath 实验版（GPUI）”。这是 [ADR-0013](adr/0013-gpui-experimental-parallel-migration.md)
 批准的并行开发目标，不替换现行应用，也不改变安装器、updater、签名或 Android 入口。
