@@ -110,8 +110,7 @@ impl LogsView {
 
     pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
         self.disk.update(cx, |disk, cx| {
-            disk.set_closing(closing);
-            cx.notify();
+            disk.set_closing(closing, cx);
         });
     }
 

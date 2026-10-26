@@ -134,6 +134,11 @@ impl StatsView {
     }
 
     pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        // Parent observers propagate the current lock repeatedly. Equal state
+        // must not refresh or enqueue another notification back to the parent.
+        if self.closing == closing {
+            return;
+        }
         self.closing = closing;
         if !closing {
             self.refresh(cx);

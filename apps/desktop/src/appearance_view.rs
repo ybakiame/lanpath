@@ -121,6 +121,9 @@ impl AppearanceView {
     }
 
     pub(crate) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        if self.closing == closing {
+            return;
+        }
         self.closing = closing;
         cx.notify();
     }

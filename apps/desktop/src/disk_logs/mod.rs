@@ -92,8 +92,11 @@ impl DiskLogsView {
         self.busy || self.reading
     }
 
-    pub(super) fn set_closing(&mut self, closing: bool) {
-        self.closing = closing;
+    pub(super) fn set_closing(&mut self, closing: bool, cx: &mut Context<Self>) {
+        if self.closing != closing {
+            self.closing = closing;
+            cx.notify();
+        }
     }
 
     pub(super) fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
