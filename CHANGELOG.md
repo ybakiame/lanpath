@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Android AAR 构建将固定版本的 gomobile/gobind 配对缓存在当前检出，并按 Go 版本隔离，避免误用共享 GOPATH 中已存在但不匹配的工具；不覆盖共享工具或升级 fork。移除会打印进程环境的详细命令跟踪，保留构建进度与错误。
 - 开发环境从 Flake 包装切换为独立 devenv CLI 2.4.0，显式固定匹配的模块输入，使用 devenv.yaml 与唯一 devenv.lock，删除旧 Flake 入口；保留原有工具版本。SDK 改用内置 Android 集成，JDK 17 交由 Java 模块管理，不启用模拟器或额外 LSP，并保留既有 debug keystore 位置。Linux/Android CI 及发布验证统一使用 devenv shell，Windows 原生构建、签名身份与发布门禁不变；文档及 skills 同步迁移，Husky 仍是唯一提交检查入口。
 - 共享核心恢复记录绑定 OS 创建身份及可执行路径，拒绝 PID 重用或不可证明身份，记录失败会回收新建子进程。补齐 macOS 微秒创建身份采集，保留普通自有子进程启停；存活孤儿恢复暂不支持且失败关闭、保留记录，不退回 PID／名称强杀。交叉检查不代表 macOS 原生验收。
 

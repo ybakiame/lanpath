@@ -61,6 +61,11 @@ SDK 包增删走声明配置和输入锁定，不在不可变的 Nix store 中�
 当前 cmdline-tools 的 `sdkmanager --list_installed` 也会转交新 Android CLI 并尝试写 SDK 内的
 `.sdk`，在 Nix store 下会拒绝写入；组件核对使用安装元数据与实际编译/资源工具，不据此更改 store 权限。
 
+`lanpath-build-aar` 使用当前检出 `.devenv/state/gomobile/<fork版本>/<Go版本>/bin`
+下的 `gomobile`/`gobind` 配对工具，缺失时按脚本固定版本安装，不借用或覆盖共享 GOPATH
+中的已安装工具。工具升级仍是独立任务；不能因共享缓存存在更新版本而静默采用。
+绑定构建保留包级进度和错误输出，不开启可能打印完整进程环境的 `-x` 跟踪。
+
 首次准备可能下载 Android SDK/NDK、CLI 辅助程序和其他 Nix 构建依赖。项目配置使用 `cache.nixos.org` 与 devenv 官方签名缓存；缓存未命中时仍可能从源码构建。standalone CLI 管理输入锁定与求值缓存，但实际命中、下载量及耗时取决于配置和缓存状态，不承诺固定体积、时长或编译加速。
 
 WSL GUI 仍依赖现有 WSLg/宿主图形能力；ADB 设备选择、授权和连接排错按 [Android 调试 skill](.agents/skills/lanpath-android-debug/SKILL.md) 执行，不因进入环境擅自重启宿主 ADB server。

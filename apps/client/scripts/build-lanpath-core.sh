@@ -80,27 +80,30 @@ esac
 
 export GOPATH
 export ANDROID_HOME ANDROID_NDK_HOME
-export PATH="$GOPATH/bin:$JAVA_HOME/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$PATH"
 
 echo "==> 输出: $OUTPUT_AAR"
 echo "==> Go: $("$GO_BIN" version)"
 echo "==> JDK: $(javac -version 2>&1)"
 
-# 1. 安装 SagerNet gomobile fork（含 gobind）
-if ! command -v gomobile >/dev/null 2>&1 || ! command -v gobind >/dev/null 2>&1; then
-    echo "==> 安装 sagernet/gomobile@$GOMOBILE_TAG ..."
-    "$GO_BIN" install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_TAG"
-    "$GO_BIN" install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_TAG"
+# 1. 使用当前检出私有的固定版本工具，避免共享 GOPATH 中的 gomobile/gobind 混用。
+GO_VERSION="$("$GO_BIN" env GOVERSION)"
+GOMOBILE_BIN_DIR="$REPO_ROOT/.devenv/state/gomobile/$GOMOBILE_TAG/$GO_VERSION/bin"
+export PATH="$GOMOBILE_BIN_DIR:$PATH"
+if [[ ! -x "$GOMOBILE_BIN_DIR/gomobile" || ! -x "$GOMOBILE_BIN_DIR/gobind" ]]; then
+    echo "==> 安装 sagernet/gomobile@$GOMOBILE_TAG（$GO_VERSION）..."
+    GOBIN="$GOMOBILE_BIN_DIR" "$GO_BIN" install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_TAG"
+    GOBIN="$GOMOBILE_BIN_DIR" "$GO_BIN" install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_TAG"
 fi
-command -v gomobile >/dev/null 2>&1 || { echo "error: gomobile 安装失败" >&2; exit 1; }
-command -v gobind >/dev/null 2>&1 || { echo "error: gobind 安装失败" >&2; exit 1; }
-gomobile init
+[[ -x "$GOMOBILE_BIN_DIR/gomobile" ]] || { echo "error: gomobile 安装失败" >&2; exit 1; }
+[[ -x "$GOMOBILE_BIN_DIR/gobind" ]] || { echo "error: gobind 安装失败" >&2; exit 1; }
+"$GOMOBILE_BIN_DIR/gomobile" init
 
 # 2. 构建 AAR（bind libbox，参数对齐 build_libbox）
-echo "==> 构建 lanpathcore.aar（libbox，多 ABI，耗时较长）..."
+echo "==> 构建 lanpathcore.aar（libbox，Android arm64）..."
 mkdir -p "$(dirname "$OUTPUT_AAR")"
 cd "$REPO_ROOT/apps/client/lanpath-core"
-gomobile bind -v -x \
+"$GOMOBILE_BIN_DIR/gomobile" bind -v \
     -target android/arm64 \
     -androidapi 33 \
     -javapkg com.ybakiame.lanpath.core \

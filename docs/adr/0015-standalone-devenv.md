@@ -51,7 +51,7 @@
 - 内置 Android 环境中已编译并运行 Java 17 程序；NDK 编译对象及 Go/CGo 共享库
   均验证为 AArch64，后者具备预期 C ABI 导出。平台 35/36 与 build-tools 35/36
   元数据保持一致；使用 API 36 实际编译/链接资源并核对包名、minSdk 33 和应用标签。
-  这不是完整产品 AAR/APK、模拟器或真机运行验收，也未生成或安装产品证书。
+  这些基础探针不代替产品 AAR/APK 或设备验收；后续实际产品构建结果见下节。未生成或安装产品证书。
 - `devenv shell -- lanpath-verify-rust` 完整通过 workspace 构建、fmt、严格 Clippy、
   888 项单元测试、3 项集成测试、1 项文档测试，以及独立 Tauri host Clippy 和 Android
   target check；4 项显式忽略的副作用用例/文档示例未执行，原有条件编译警告未抑制。
@@ -67,6 +67,25 @@
 环境恢复期间，现有 Rust 工具链的链接器包装器仍引用已缺失的旧 Nix 包。
 从官方签名缓存恢复准确依赖并保留与该工具链关联的间接 GC root，未重装或升级 Rust。
 当前 Android CLI 的不可变 SDK 管理边界见[环境指南](../../devenv.md)；不修改 store 权限绕过。
+
+### Android 产品构建补充验证
+
+- `lanpath-build-aar` 已在当前检出生成实际 `lanpathcore.aar`，包含 Java 绑定与
+  `jni/arm64-v8a/libgojni.so`。发现共享 GOPATH 中的 gomobile/gobind 版本不一致后，
+  改为当前检出私有缓存；两个工具均确认使用固定 fork v0.1.12、由 Go 1.26.8 编译，
+  没有覆盖共享工具或升级依赖。绑定命令不再开启可能打印完整进程环境的 `-x` 跟踪。
+- `lanpath-build-android-debug` 已实际完成 Android 前端、aarch64 Rust 库及 Gradle
+  Kotlin/资源构建，生成 debug APK 与 AAB。使用项目 Gradle 9.6.1 wrapper、JDK 17、
+  声明式 SDK/NDK，以及当前检出内的 Cargo target 目录，没有借用其他检出的产品 AAR。
+- 已执行与 Android CI debug 分支相同的 `scripts/stage-android-apk.sh`。
+  APK v2 签名验证通过，签名证书与既有 debug keystore 的公开证书一致，staging 前后
+  SHA-256 相同。包标识为 `com.ybakiame.lanpath`，版本为 `0.1.4-beta.1`，
+  minSdk 33、targetSdk 36，唯一 ABI 为 arm64-v8a；实际包含 Go 与 Rust 两个原生库。
+  本地产物为 `dist/Lanpath_0.1.4-beta.1_android_arm64-debug.apk`。
+- 原有 Android 条件编译警告与 AGP 旧 DSL/实验性 AAPT2 override 警告未抑制。
+  这次构建不代表 AGP 后续主版本兼容性；依赖升级另行处理。
+- 没有创建新签名身份、使用发布签名、远程运行 CI/CD、上传制品、安装 APK 或启动设备 VPN。
+  本节证明现有 Android 壳在新环境中的构建链，不是 Rust 移动 UI 迁移或真机行为验收。
 
 ## 分阶段集成
 
