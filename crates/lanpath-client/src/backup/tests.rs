@@ -323,3 +323,74 @@ fn interrupted_v2_transaction_rolls_back_ruleset_files() {
         b"original"
     );
 }
+
+#[test]
+fn restore_relocates_file_references_without_changing_credentials_or_script_data() {
+    let (source, _) = fixture();
+    let target = tempfile::tempdir().unwrap();
+    let secret = source
+        .path()
+        .join("literal-secret")
+        .to_string_lossy()
+        .into_owned();
+    let mut config = crate::ClientConfig::load(source.path()).unwrap();
+    config.clash_api_secret = secret.clone();
+    config.sub_token = "$LANPATH_DATA/not-a-file-reference".into();
+    config.save().unwrap();
+    let resource = source.path().join("rulesets/customer.pem");
+    std::fs::create_dir_all(resource.parent().unwrap()).unwrap();
+    std::fs::write(&resource, b"local certificate resource").unwrap();
+    let cache = crate::subscription::CachedSubscriptionContent {
+        format: crate::SubFormat::SingBoxJson,
+        singbox_nodes: vec![serde_json::json!({
+            "type": "trojan", "server": "example.test", "server_port": 443,
+            "password": secret,
+            "transport": {"type": "ws", "path": secret},
+            "tls": {"enabled": true, "certificate_path": [resource]}
+        })],
+    };
+    let cached = "subscription_cache/00000000-0000-0000-0000-000000000000.json";
+    std::fs::write(
+        source.path().join(cached),
+        serde_json::to_vec(&cache).unwrap(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(source.path().join("script_store")).unwrap();
+    let store = serde_json::to_vec(&serde_json::json!({
+        "token": secret, "literal": "$LANPATH_DATA/opaque-script-value"
+    }))
+    .unwrap();
+    std::fs::write(source.path().join("script_store/surge.json"), &store).unwrap();
+
+    let snapshot = capture(source.path(), None).unwrap();
+    prepare_restore(target.path(), snapshot, "restore-regression-password", None).unwrap();
+    apply_pending(target.path()).unwrap();
+    let restored = crate::ClientConfig::load(target.path()).unwrap();
+    assert_eq!(restored.clash_api_secret, secret);
+    assert_eq!(restored.sub_token, "$LANPATH_DATA/not-a-file-reference");
+    let restored: crate::subscription::CachedSubscriptionContent =
+        serde_json::from_slice(&std::fs::read(target.path().join(cached)).unwrap()).unwrap();
+    let node = &restored.singbox_nodes[0];
+    assert_eq!(node["password"], secret);
+    assert_eq!(node["transport"]["path"], secret);
+    let certificate = node["tls"]["certificate_path"][0].as_str().unwrap();
+    assert_eq!(
+        std::path::Path::new(certificate),
+        target.path().join("rulesets/customer.pem")
+    );
+    assert!(std::path::Path::new(certificate).is_file());
+    let restored_store: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(target.path().join("script_store/surge.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        restored_store,
+        serde_json::from_slice::<serde_json::Value>(&store).unwrap()
+    );
+    assert_eq!(
+        crate::ClientConfig::load(source.path())
+            .unwrap()
+            .clash_api_secret,
+        secret
+    );
+}

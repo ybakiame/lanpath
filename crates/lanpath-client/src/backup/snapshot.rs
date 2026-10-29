@@ -29,11 +29,14 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     cfg.core_binary = Default::default();
     cfg.mitm.ca_dir = Default::default();
     files.insert("client.json".into(), serde_json::to_vec(&cfg)?);
+    let source = dir.to_string_lossy();
     for (name, bytes) in &mut files {
-        if name.ends_with(".json") && !name.starts_with("rulesets/") {
+        if path_relocation::document_has_paths(name) {
             let mut value: serde_json::Value = serde_json::from_slice(bytes)?;
-            rewrite_paths(&mut value, &dir.to_string_lossy(), "$LANPATH_DATA");
-            *bytes = serde_json::to_vec(&value)?;
+            if path_relocation::relocate_document_paths(name, &mut value, &source, "$LANPATH_DATA")
+            {
+                *bytes = serde_json::to_vec(&value)?;
+            }
         }
     }
     let mut snapshot = Snapshot {
@@ -90,32 +93,6 @@ fn collect(dir: &Path, name: &str, files: &mut BTreeMap<String, Vec<u8>>) -> Lan
         return Err(invalid("备份包含特殊文件"));
     }
     Ok(())
-}
-
-pub(super) fn rewrite_paths(value: &mut serde_json::Value, from: &str, to: &str) {
-    if from.is_empty() {
-        return;
-    }
-    match value {
-        serde_json::Value::String(s)
-            if s == from
-                || s.strip_prefix(from)
-                    .is_some_and(|r| r.starts_with(['/', '\\'])) =>
-        {
-            *s = format!("{to}{}", s[from.len()..].replace('\\', "/"));
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                rewrite_paths(item, from, to);
-            }
-        }
-        serde_json::Value::Object(items) => {
-            for item in items.values_mut() {
-                rewrite_paths(item, from, to);
-            }
-        }
-        _ => {}
-    }
 }
 
 pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
@@ -181,11 +158,18 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
 }
 
 pub(super) fn relocate(snapshot: &mut Snapshot, dir: &Path) -> LanpathResult<()> {
+    let destination = dir.to_string_lossy();
     for (name, bytes) in &mut snapshot.files {
-        if name.ends_with(".json") && !name.starts_with("rulesets/") {
+        if path_relocation::document_has_paths(name) {
             let mut value: serde_json::Value = serde_json::from_slice(bytes)?;
-            rewrite_paths(&mut value, "$LANPATH_DATA", &dir.to_string_lossy());
-            *bytes = serde_json::to_vec(&value)?;
+            if path_relocation::relocate_document_paths(
+                name,
+                &mut value,
+                "$LANPATH_DATA",
+                &destination,
+            ) {
+                *bytes = serde_json::to_vec(&value)?;
+            }
         }
     }
     let current = crate::ClientConfig::load_for_requests(dir)?;

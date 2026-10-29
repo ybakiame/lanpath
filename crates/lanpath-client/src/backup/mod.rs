@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod archive;
+pub mod path_relocation;
 mod preview;
 mod service;
 #[cfg(test)]
