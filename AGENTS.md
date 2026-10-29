@@ -29,11 +29,12 @@ apps/desktop 为 ADR-0013 授权的 Windows GPUI 实验性并行目标，保持�
 
 Skills 为操作指引，不替代本文件、docs 或实际脚本；不增加门禁或扩大任务授权。
 
-本地编译/运行一律先进入本仓 nix develop --no-pure-eval（devenv Flake 集成）；Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
+本地编译/运行一律先从仓库根进入 `devenv shell`；非交互使用 `devenv shell -- COMMAND ...`。Go、Bun、Rust、SDK/NDK/JDK 由本仓环境提供。
 Gradle 使用项目 wrapper，不使用宿主 Gradle。现行应用的环境例外：用户已授权 Windows CI
 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 Nix。
 ADR-0012/0013 另授权上述 GPUI 实验目标在本机使用现有原生 Windows Rust/MSVC/CMake；
 该例外不授权安装或升级宿主组件，不扩展到其他应用或发布路径。
+standalone devenv 2.4.0 的固定安装入口见 [环境指南](devenv.md)；`devenv.yaml` 声明输入，`devenv.lock` 是唯一项目环境锁文件。仅在明确的工具链更新任务中修改输入并使用 `devenv update`；不因排错擅自更新锁定版本。见 [ADR-0015](docs/adr/0015-standalone-devenv.md)。
 代理可在 Nix 链接失败时设置 http_proxy/https_proxy 为 http://127.0.0.1:7899 后重试。
 
 前端改动执行受影响包 verify：lanpath-app、@lanpath/client-core、@lanpath/ui。

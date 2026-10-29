@@ -6,7 +6,7 @@ description: 在 ADB 已连接的 Android 设备上调试 Lanpath，选择设备
 # Lanpath Android 设备调试
 
 先读取 [AGENTS.md](../../../AGENTS.md) 和 [开发文档](../../../docs/development.md) 的 Android 与相关领域验收项。
-本地命令在 `nix develop --no-pure-eval` 中执行；工具不可用时参考 [环境 skill](../lanpath-environment/SKILL.md)。
+本地命令先从仓库根进入 `devenv shell`，或使用 `devenv shell -- COMMAND ...`；工具不可用时参考 [环境 skill](../lanpath-environment/SKILL.md)。
 构建及静态检查参考 [构建验证 skill](../lanpath-build-verify/SKILL.md)，不重复定义工具链或签名流程。
 
 ## 确认设备与测试范围

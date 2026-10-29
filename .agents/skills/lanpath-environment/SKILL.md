@@ -8,26 +8,36 @@ description: 准备或排查 Lanpath 本地开发环境，涵盖 Nix/devenv、�
 ## 先确认项目事实
 
 从当前检出根目录读取 [AGENTS.md](../../../AGENTS.md) 和 [开发文档](../../../docs/development.md) 的环境、Android 章节。
-工具及命令以 [devenv.nix](../../../devenv.nix)、[nix](../../../nix/) 和 [flake.lock](../../../flake.lock) 为准；不要把本 skill 中的示例当成版本来源。
+工具及命令以 [devenv.nix](../../../devenv.nix)、[devenv.yaml](../../../devenv.yaml)、[nix](../../../nix/) 和唯一环境锁文件 [devenv.lock](../../../devenv.lock) 为准；不要把本 skill 中的示例当成版本来源。
 
 检查工作区状态、当前平台、Nix 是否可用，以及任务需要桌面还是 Android。不读取或输出私钥、个人配置和完整环境变量。
 公开源码构建可跳过私有协议子模块；不要把无法访问协议仓库误判为构建依赖缺失。
 
 ## 准备所需环境
 
-在仓库根目录进入环境：
+先确认 Nix 与 CLI 可用。
+
+Nix 已就绪但缺少 CLI 时，按当前任务授权安装固定的 devenv 2.4.0：
 
 ```bash
-nix develop --no-pure-eval
+nix profile add --accept-flake-config github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv
 ```
 
-非交互执行可使用 `nix develop --no-pure-eval --command <命令> [参数...]`。
+完整前置与输入更新边界见 [环境指南](../../../devenv.md) 和 [ADR-0015](../../../docs/adr/0015-standalone-devenv.md)；本环境准备流程不升级工具或输入。
+
+然后从仓库根目录进入环境：
+
+```bash
+devenv shell
+```
+
+非交互执行从仓库根使用 `devenv shell -- COMMAND ...`。
 后续本地编译、运行及项目验证都在该环境中执行；进入 shell 本身不会安装依赖、构建 AAR 或启动代理。
 
 - 需要前端依赖时执行 `lanpath-install`，使用根 Bun workspace 和锁文件。
 - 需要 Android Rust target 时执行 `lanpath-rust-targets`，并检查 SDK/NDK/JDK 环境；不使用宿主 Gradle，使用项目 wrapper。
 - 需要运行或打包 Android 时，确认当前检出的 Go 桥已生成对应 AAR；构建顺序和验证范围见 [构建验证 skill](../lanpath-build-verify/SKILL.md)。
-- `.envrc` 的 direnv 支持是可选入口，不额外创建 devenv.yaml/devenv.lock。
+- `.envrc` 的 direnv 支持是可选入口，使用已提交的 standalone devenv 配置；不生成另一份项目环境锁文件。
 
 若宿主缺少 Nix，先说明缺少的前提和对应平台的准备方式；安装系统组件、修改宿主配置应遵循当前任务授权，不通过安装宿主 Bun/Rust/Go 绕过项目环境。
 Windows CI 使用原生锁定工具链是已有 CI 例外，不能扩展成本地开发例外。

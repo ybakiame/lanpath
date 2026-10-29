@@ -1,6 +1,6 @@
 # 验证
 
-在本仓 nix develop 内运行：
+先从仓库根进入 `devenv shell`，再运行以下检查；非交互形式为 `devenv shell -- COMMAND ...`。环境入口与唯一 devenv.lock 的迁移见 [ADR-0015](adr/0015-standalone-devenv.md)。这些是执行指引，不表示本次已经运行；docs/testing/ 下的历史记录仍保留当时实际入口和结果。
 
 ~~~bash
 bun run --filter lanpath-app verify

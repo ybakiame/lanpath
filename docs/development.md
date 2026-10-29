@@ -4,13 +4,13 @@ Agent 可按任务读取仓库内的 [环境准备 skill](../.agents/skills/lanp
 [构建验证 skill](../.agents/skills/lanpath-build-verify/SKILL.md)。入口见 AGENTS.md，工具未自动发现时可直接读取。
 Skills 只组织既有流程；命令以 nix/commands.nix、包脚本和构建脚本为准，项目约束仍以 AGENTS 与本文为准。
 
-先 git submodule update --init --recursive，再 nix develop --no-pure-eval；根目录运行 lanpath-install。
+先 git submodule update --init --recursive，再从仓库根进入 `devenv shell`；根目录运行 lanpath-install。非交互命令使用 `devenv shell -- COMMAND ...`。
 协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
-本仓 flake/lock 独立，避免使用宿主工具链；Windows CI 例外见 ADR，GPUI 本机实验例外见下节。
-主 nixpkgs 使用 nixos-26.05 并由 flake.lock 固定提交；Bun 1.4.2 通过官方归档与 SHA256 固定，避免稳定源自带版本与 Windows CI 不一致。Rust 仍由 rust-toolchain.toml 固定；Android SDK 输入保持独立锁定，此阶段不更新其传递 nixpkgs。更新主源使用 `nix flake update nixpkgs`，随后执行双端完整验证，见 ADR-0004。
-devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不维护 devenv.yaml/devenv.lock。配置入口为 devenv.nix，工具、桌面、Android 和共用命令位于 nix/；可用 direnv allow 启用已提交的 .envrc。进入 shell 仅初始化环境，不安装依赖、不构建 AAR、不启动代理。
+本仓使用独立的 standalone devenv 配置，避免使用宿主工具链；Windows CI 例外见 ADR，GPUI 本机实验例外见下节。
+主 nixpkgs 保持 nixos-26.05 的 `a033e66ab94a6bedf2c3d58d93a36319d3cbbbaf` 快照，Android SDK 输入保持 `b3c4566d2d946a76082ce9be34640d24f7eec477`；均由 devenv.yaml 声明并由唯一项目环境锁 devenv.lock 固定，迁移不升级输入。Bun 1.4.2 通过官方归档与 SHA256 固定，Rust 仍由 rust-toolchain.toml 固定。输入升级须单独授权：先明确修改 devenv.yaml 中的目标 revision，再用 `devenv update nixpkgs` 等定向更新锁文件；不以无参数 `devenv update` 顺带更新全部输入。随后执行受影响目标的完整验证，见 [环境指南](../devenv.md)。
+CLI 固定为 devenv 2.4.0：`nix profile add --accept-flake-config github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv`。配置入口为 devenv.nix，工具、桌面、Android 和共用命令位于 nix/；可用 direnv allow 启用已提交的 .envrc。进入 shell 仅初始化环境，不安装项目依赖、不构建 AAR、不启动代理。入口与锁定机制取代关系见 [ADR-0015](adr/0015-standalone-devenv.md)。
 本地及 CI 共用 lanpath-install、lanpath-rust-targets、lanpath-verify-frontend、lanpath-verify-rust、lanpath-test-tools、lanpath-build-aar 和 lanpath-build-android-debug/release；这些命令可从仓库子目录调用，失败立即退出。仍可在 shell 中直接使用原 Bun/Cargo 命令。发布签名只由既有 release 工作流显式注入，Husky 继续作为唯一提交检查入口。
-初次构建使用 cache.nixos.org 与 devenv 官方签名缓存；devenv 任务辅助程序有独立的上游锁定构建快照，不替换项目工具链，缓存未命中时可从源码构建。不承诺 Flake 集成具有 devenv CLI 的全部评估缓存和性能特性。见 ADR-0005。
+初次准备使用 cache.nixos.org 与 devenv 官方签名缓存；devenv CLI/辅助程序自身的上游锁定构建快照不替换项目工具链，缓存未命中时仍可能从源码构建。standalone CLI 管理输入锁定和 shell 求值缓存；实际缓存命中与耗时受配置、依赖及本地状态影响，不承诺具体加速，也不将 shell 准备成功当作应用构建证据。
 前端运行 bun run --filter lanpath-app dev 或 dev:android。
 浏览器使用 http://localhost:1420/?browser-debug=1；mock 不能证明真实 IPC/设备行为。
 移动端预览使用 Android mode 的 http://localhost:1430/?browser-debug=1。连接卡片水面仅为装饰，
@@ -38,10 +38,10 @@ devenv 通过 Flake 模块接入，固定版本由同一 flake.lock 管理，不
 从仓库根在 Nix 环境分别执行独立项目检查；根 `verify:rust` 不覆盖此项目：
 
 ```sh
-nix develop --no-pure-eval -c cargo fmt --manifest-path apps/desktop/Cargo.toml --check
-nix develop --no-pure-eval -c cargo clippy --manifest-path apps/desktop/Cargo.toml --locked --all-targets -- -D warnings
-nix develop --no-pure-eval -c cargo test --manifest-path apps/desktop/Cargo.toml --locked --lib
-nix develop --no-pure-eval -c cargo build --manifest-path apps/desktop/Cargo.toml --locked
+devenv shell -- cargo fmt --manifest-path apps/desktop/Cargo.toml --check
+devenv shell -- cargo clippy --manifest-path apps/desktop/Cargo.toml --locked --all-targets -- -D warnings
+devenv shell -- cargo test --manifest-path apps/desktop/Cargo.toml --locked --lib
+devenv shell -- cargo build --manifest-path apps/desktop/Cargo.toml --locked
 ```
 
 本机 Windows 原生验证使用已授权的 Rust 1.98.0/MSVC/Windows SDK/CMake，不授权安装或升级组件。

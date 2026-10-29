@@ -6,7 +6,7 @@ description: 根据 Lanpath 改动范围选择并执行前端、Rust、桌面壳
 # Lanpath 构建与验证
 
 先读 [AGENTS.md](../../../AGENTS.md) 和 [开发工作流](../../../docs/development.md)，查看当前 diff 及任务涉及的调用链。
-本地执行命令先进入 `nix develop --no-pure-eval`；环境异常时使用 [环境 skill](../lanpath-environment/SKILL.md)。
+本地执行命令先从仓库根进入 `devenv shell`；非交互使用 `devenv shell -- COMMAND ...`，环境异常时使用 [环境 skill](../lanpath-environment/SKILL.md)。
 统一命令定义在 [nix/commands.nix](../../../nix/commands.nix)，验证内容以实际脚本为准。
 
 ## 按改动选择检查

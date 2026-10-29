@@ -19,19 +19,23 @@ jobs:
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
-            accept-flake-config = true
+            substituters = https://cache.nixos.org
             extra-substituters = https://devenv.cachix.org
             extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: Install pinned devenv CLI
+        run: |
+          nix profile add github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv
+          printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/profile/bin" "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
       - name: Install dependencies
-        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-install
+        run: devenv shell -- lanpath-install
       - name: Install project Rust targets
-        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-rust-targets
+        run: devenv shell -- lanpath-rust-targets
       - name: Frontend verification
-        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-verify-frontend
+        run: devenv shell -- lanpath-verify-frontend
       - name: Rust build and gates
-        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-verify-rust
+        run: devenv shell -- lanpath-verify-rust
       - name: Runtime cache, Portable and release tooling tests
-        run: nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command lanpath-test-tools
+        run: devenv shell -- lanpath-test-tools
   android:
     uses: ./.github/workflows/android-build.yaml
     with:

@@ -5,7 +5,7 @@
 在仓库根目录使用项目工具链：
 
 ```bash
-nix develop --command bash -c 'cd apps/client && bun run tauri icon public/brand/icons.json'
+devenv shell -- bash -c 'cd apps/client && bun run tauri icon public/brand/icons.json'
 ```
 
-品牌与兼容边界见 [品牌规范](../../../../docs/brand-guidelines.md)。
+品牌与兼容边界见 [品牌规范](../../../../../docs/brand-guidelines.md)。

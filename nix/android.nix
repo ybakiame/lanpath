@@ -1,19 +1,32 @@
-{ pkgs, inputs, ... }:
+{ pkgs, config, lib, ... }:
 let
-  sdk = inputs.android-nixpkgs.sdk.${pkgs.stdenv.hostPlatform.system} (packages: with packages; [
-    cmdline-tools-latest platform-tools
-    platforms-android-35 platforms-android-36
-    build-tools-35-0-0 build-tools-36-0-0 ndk-28-0-13004108
-  ]);
-  sdkRoot = "${sdk}/share/android-sdk";
-  ndk = "${sdkRoot}/ndk/28.0.13004108";
+  sdkRoot = config.env.ANDROID_HOME;
+  ndk = config.env.ANDROID_NDK_ROOT;
   llvm = "${ndk}/toolchains/llvm/prebuilt/linux-x86_64";
 in {
-  packages = [ sdk ];
+  android = {
+    enable = true;
+    platforms.version = [ "35" "36" ];
+    buildTools.version = [ "36.0.0" "35.0.0" ];
+    ndk = {
+      enable = true;
+      version = [ "28.0.13004108" ];
+    };
+    emulator.enable = false;
+    systemImages.enable = false;
+    sources.enable = false;
+    googleAPIs.enable = false;
+    googleTVAddOns.enable = false;
+    extras = [ ];
+    extraLicenses = [ ];
+    android-studio.enable = false;
+  };
+  languages.java = {
+    jdk.package = pkgs.jdk17;
+    lsp.enable = false;
+  };
   env = {
-    ANDROID_HOME = sdkRoot;
     ANDROID_SDK_ROOT = sdkRoot;
-    ANDROID_NDK_ROOT = ndk;
     ANDROID_NDK_HOME = ndk;
     NDK_HOME = ndk;
     ANDROID_JAR = "${sdkRoot}/platforms/android-35/android.jar";
@@ -23,8 +36,10 @@ in {
     CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${llvm}/bin/aarch64-linux-android33-clang";
     BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android = "--target=aarch64-linux-android33 --sysroot=${llvm}/sysroot -isystem ${llvm}/sysroot/usr/include";
   };
-  enterShell = ''
+  enterShell = lib.mkAfter ''
     export PATH="$ANDROID_BUILD_TOOLS:$PATH"
-    export ANDROID_DEBUG_KEYSTORE="$HOME/.android/debug.keystore"
+    export ANDROID_USER_HOME="$HOME/.android"
+    export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+    export ANDROID_DEBUG_KEYSTORE="$ANDROID_USER_HOME/debug.keystore"
   '';
 }

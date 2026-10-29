@@ -4,6 +4,7 @@
 - 日期：2026-10-18
 - 决策来源：初始用户要求在独立分支记录架构决策并开始本地验证，且不得影响现有 Tauri 分支迭代；初始范围未授权发布、全量迁移或替换现行桌面壳。用户随后明确授权本验证分支在本机使用原生 Windows Rust/MSVC 工具链。
 - 后续范围：用户已批准 [ADR-0013](0013-gpui-experimental-parallel-migration.md) 的实验性完整业务迁移开发，不含生产替换或发布。本文件保留原验证阶段的入口、命令与结果，不作为提升后的应用启动指南。
+- 环境入口已由 [ADR-0015](0015-standalone-devenv.md) 迁移至 standalone devenv；下文 `nix develop` 命令与结果保留为原验证阶段记录，不应重用为现行入口或新迁移的验证证明。当前操作指引见 [开发指南](../development.md)。
 
 ## 背景
 
@@ -56,7 +57,7 @@ GPUI Kit 已提供桌面窗口、组件、编辑器和测试能力，但移动�
 - 核心启停使旧请求代数失效并清空快照；旧会话结果不能回写新会话。关闭成功与后续刷新失败分别展示。
 - 交互采用“选中行 + 关闭所选连接”，不是现行 Tauri 页的逐行关闭按钮；当前会话关闭缓冲和持久统计见下文。过滤、排序与详情仍未迁移，不宣称 Connections 全量等价。
 
-检查命令：
+当时的检查命令（历史记录，非现行入口）：
 
 ```sh
 nix develop --no-pure-eval --command cargo fmt --manifest-path apps/gpui-validation/Cargo.toml -- --check

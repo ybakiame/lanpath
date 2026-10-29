@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # android-ndk-env.sh — CI runner 的 Android 交叉编译工具链环境变量。
 #
-# nix dev shell 已由 flake.nix 导出同一组变量（nix store NDK），本脚本只服务于
-# CI runner；本地开发统一进入仓库 nix develop：从 ANDROID_NDK_HOME / NDK_HOME /
+# devenv shell 已由 nix/android.nix 导出同一组变量（Nix store NDK），本脚本只服务于
+# 缺少交叉编译变量的 CI runner；本地开发统一从仓库根进入 devenv shell：从 ANDROID_NDK_HOME / NDK_HOME /
 # $ANDROID_HOME/ndk/<最新版本> 推导 NDK 位置，导出 cc-rs（CC/AR）、最终链接
 # （CARGO_TARGET_*_LINKER）与 rquickjs-sys bindgen（BINDGEN_EXTRA_CLANG_ARGS_*）
 # 所需的变量。mobile 仅发布 arm64，故只导出 aarch64 一套。
 #
 # 用法（必须 source，让变量进入当前 shell）：
 #   CI runner: source apps/client/scripts/android-ndk-env.sh
-#   本地开发: nix develop
+#   本地开发（仓库根目录）: devenv shell
 
 # 1) 定位 NDK
 _NDK="${ANDROID_NDK_HOME:-${NDK_HOME:-}}"

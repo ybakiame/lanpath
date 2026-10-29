@@ -1,6 +1,8 @@
 # ADR-0005 devenv Flake 集成与共用命令
 
-状态：Accepted · 日期：2026-10-15
+状态：Superseded（入口与锁定机制由 [ADR-0015](0015-standalone-devenv.md) 取代；模块拆分、共用命令与安全边界保留） · 日期：2026-10-15
+
+以下是 Flake 集成阶段的历史决定及性能边界，不是当前操作指引。当前使用 standalone `devenv shell`、`devenv.yaml` 与唯一 `devenv.lock`；不再维护项目 Flake，也不以本 ADR 的旧验证记录证明新入口已验证。
 
 ## 背景
 

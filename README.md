@@ -9,12 +9,12 @@ Windows 提供 x64/arm64 安装版与 Portable；Android 提供 arm64 release �
 
 ## 开发
 
-本地构建、运行和资源生成统一使用本仓 Nix 配置。Windows CI 原生工具链例外由维护者明确授权，版本锁定。
+本地构建、运行和资源生成统一使用本仓 standalone devenv（底层为 Nix）。先按 [环境指南](devenv.md) 安装固定的 devenv 2.4.0；Windows CI 原生工具链例外由维护者明确授权，版本锁定。
 协议子模块为私有治理资源，维护者需单独访问权限；公开源码编译可跳过下面的子模块初始化。
 
 ~~~bash
 git submodule update --init --recursive
-nix develop --no-pure-eval
+devenv shell
 bun install --frozen-lockfile
 bun run --filter lanpath-app verify
 bun run verify:rust
@@ -25,6 +25,8 @@ bun run tauri dev
 Android：先在 Nix 环境运行 bash apps/client/scripts/build-lanpath-core.sh，
 然后进入 apps/client 运行 bun run tauri android dev --target aarch64。
 前端热更新用于调试，不需要反复生成 APK。完整说明见 [开发指南](docs/development.md)。
+
+非交互命令从仓库根执行 `devenv shell -- COMMAND ...`；项目输入由 `devenv.yaml` 声明并仅由 `devenv.lock` 锁定。入口与锁文件迁移见 [ADR-0015](docs/adr/0015-standalone-devenv.md)。
 
 首次 Android 安装采用新包名 com.ybakiame.lanpath，与旧包不能覆盖升级；不要先卸载旧包。
 桌面新安装使用 ~/.lanpath，已有旧数据且新目录不存在时沿用 ~/.proxy-panel-client。

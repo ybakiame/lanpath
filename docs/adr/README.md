@@ -5,8 +5,8 @@
 - [0001 独立仓库与正式身份](0001-independent-client.md) — Accepted
 - [0002 桌面产品数据目录与便携分发](0002-desktop-portable-storage.md) — Accepted
 - [0003 首次公开发版与签名身份](0003-first-public-release.md) — Accepted
-- [0004 主开发环境迁至稳定 Nixpkgs](0004-stable-nixpkgs.md) — Accepted
-- [0005 devenv Flake 集成与共用命令](0005-devenv-flake-integration.md) — Accepted
+- [0004 主开发环境迁至稳定 Nixpkgs](0004-stable-nixpkgs.md) — Accepted（入口与锁定机制由 ADR-0015 取代）
+- [0005 devenv Flake 集成与共用命令](0005-devenv-flake-integration.md) — Superseded（入口与锁定机制由 ADR-0015 取代，其余边界保留）
 
 - [0006 订阅原文与仪表盘覆写配置](0006-subscription-source-and-dashboard-overrides.md) — Accepted
 
@@ -23,6 +23,8 @@
 - [0012 GPUI 桌面壳本地验证](0012-gpui-desktop-local-validation.md) — Proposed
 
 - [0013 Windows GPUI 实验性并行迁移](0013-gpui-experimental-parallel-migration.md) — Accepted（仅实验性开发）
+
+- [0015 standalone devenv 与唯一环境锁](0015-standalone-devenv.md) — Accepted
 
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 

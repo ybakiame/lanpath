@@ -9,7 +9,7 @@ set -euo pipefail
 # 用法:
 #   ./apps/client/scripts/build-lanpath-core.sh [OUTPUT_AAR]
 #
-# 环境要求：先进入仓库 nix develop；Go/JDK/Android SDK/NDK 均由 flake 提供。
+# 环境要求：先从仓库根进入 devenv shell；Go/JDK/Android SDK/NDK 均由项目 devenv 提供。
 # 不探测 ~/go-sdk、GO_ROOT 或主机 Android SDK。GOPATH 只用于缓存与工具安装。
 # SagerNet gomobile fork 固定为 v0.1.12，对齐 sing-box 1.15.0-alpha.5。
 #
@@ -53,13 +53,13 @@ OUTPUT_AAR="${1:-$REPO_ROOT/apps/client/src-tauri/gen/android/app/libs/lanpathco
 # 环境默认值
 GOPATH="${GOPATH:-$HOME/go-work}"
 GOMOBILE_TAG="v0.1.12"
-: "${ANDROID_HOME:?请先进入仓库 nix develop（SDK 由 flake 提供）}"
+: "${ANDROID_HOME:?请先从仓库根进入 devenv shell（SDK 由项目 devenv 提供）}"
 SING_BOX_VERSION="v1.15.0-alpha.5"
 SING_BOX_VERSION_NUM="${SING_BOX_VERSION#v}"
 
 # 只使用开发环境 PATH 中的 Go，不回退宿主机 SDK。
 GO_BIN="$(command -v go)"
-[[ -x "$GO_BIN" ]] || { echo "error: 请先进入仓库 nix develop" >&2; exit 1; }
+[[ -x "$GO_BIN" ]] || { echo "error: 请先从仓库根进入 devenv shell" >&2; exit 1; }
 
 # 检查环境变量
 : "${JAVA_HOME:?请设置 JAVA_HOME（JDK 17 或 21）}"

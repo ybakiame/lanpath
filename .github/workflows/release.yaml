@@ -65,16 +65,20 @@ jobs:
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
-            accept-flake-config = true
+            substituters = https://cache.nixos.org
             extra-substituters = https://devenv.cachix.org
             extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: Install pinned devenv CLI
+        run: |
+          nix profile add github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv
+          printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/profile/bin" "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
       - name: Generate signed updater manifest
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_REPOSITORY: ${{ github.repository }}
         run: |
-          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command bun scripts/verify-release-signatures.ts dist
-          nix develop --no-pure-eval --option substituters https://cache.nixos.org --option extra-substituters https://devenv.cachix.org --command bun scripts/release-manifest.ts dist
+          devenv shell -- bun scripts/verify-release-signatures.ts dist
+          devenv shell -- bun scripts/release-manifest.ts dist
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag }}

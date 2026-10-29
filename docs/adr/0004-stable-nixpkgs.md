@@ -2,6 +2,8 @@
 
 状态：Accepted · 日期：2026-10-15
 
+入口与锁定机制已由 [ADR-0015](0015-standalone-devenv.md) 取代：当前使用 standalone `devenv shell` 与唯一 `devenv.lock`。下文保留 2026-10-15 的历史决定，`flake.lock`/`nix develop` 不再是现行指令；稳定主源、固定工具版本与平台边界仍保留。
+
 ## 背景
 
 用户决定逐步从 unstable 迁至 26.05，并在后续阶段引入 devenv 整理环境与 CI。先独立验证主源兼容性，避免环境组织和依赖版本同时变化。
