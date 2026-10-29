@@ -6,18 +6,17 @@
 //!   `start` 前 [`reap_stale`] 收割上次实例遗留的孤儿进程。
 
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
+#[cfg(all(test, unix))]
+use std::path::PathBuf;
 
 use lanpath_common::LifecycleGuard;
 use tokio::process::{ChildStderr, ChildStdout};
 
-/// PID 文件内容：pid + exe 路径（身份校验用）+ 启动时间（观测用）。
+/// Persist the original OS identity; changing the selected binary cannot redefine ownership.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PidFile {
-    pid: u32,
-    exe: PathBuf,
-    started_at_unix: u64,
+    identity: lanpath_common::ProcessIdentity,
 }
 
 /// 核心 spawn 结果：std 子进程 + 父子绑定 guard + tokio 化的 stdio。
@@ -48,7 +47,7 @@ where
     let (mut std_child, guard) = lanpath_common::spawn_guarded(&mut cmd)
         .map_err(|e| format!("failed to spawn {core}: {e}"))?;
     if !guard.is_bound() {
-        tracing::warn!("核心进程父子绑定未生效（平台不支持或挂接失败），依赖 PID 收割兜底");
+        tracing::warn!("核心进程父子绑定未生效；依赖自有 Child 停止，遗留进程恢复受平台支持限制");
     }
     // 先从 std Child 取出 stdio，再分别 tokio 化。
     let stdout = std_child.stdout.take();
@@ -69,78 +68,72 @@ where
     })
 }
 
-/// 进程身份校验（PID 复用防护）：进程 exe 与管理的二进制路径一致。
-fn exe_matches(pid: u32, binary: &Path) -> bool {
-    let Some(exe) = lanpath_common::process_exe_path(pid) else {
-        return false;
+/// Recover only the recorded original process. Unknown/mismatched identities retain the record.
+pub fn reap_stale(pid_path: &Path) -> Result<(), String> {
+    let content = match std::fs::read(pid_path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("cannot read recovery record: {e}")),
     };
-    let exe = exe.canonicalize().unwrap_or(exe);
-    let bin = binary
-        .canonicalize()
-        .unwrap_or_else(|_| binary.to_path_buf());
+    let record: PidFile = serde_json::from_slice(&content)
+        .map_err(|e| format!("invalid recovery identity; record retained: {e}"))?;
+    match lanpath_common::ProcessIdentity::capture(record.identity.pid) {
+        Ok(actual) if actual == record.identity => {
+            record
+                .identity
+                .terminate_verified()
+                .map_err(|e| format!("core recovery unresolved; record retained: {e}"))?;
+        }
+        Ok(_) => return Err("process identity mismatch; recovery record retained".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(87) => {}
+        Err(e) => {
+            return Err(format!(
+                "cannot inspect original process; record retained: {e}"
+            ));
+        }
+    }
+    std::fs::remove_file(pid_path)
+        .map_err(|e| format!("cannot remove resolved recovery record: {e}"))
+}
+
+pub fn write_pid_file(pid_path: &Path, pid: u32, binary: &Path) -> Result<(), String> {
+    let identity = lanpath_common::ProcessIdentity::capture(pid).map_err(|e| e.to_string())?;
+    let expected = binary.canonicalize().map_err(|e| e.to_string())?;
+    let actual = identity.exe.canonicalize().map_err(|e| e.to_string())?;
+    if !paths_match(&expected, &actual) {
+        return Err("spawned process image mismatch".into());
+    }
+    let bytes = serde_json::to_vec(&PidFile { identity }).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(pid_path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(&bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|e| e.to_string())
+}
+
+fn paths_match(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {
-        exe.to_string_lossy()
-            .eq_ignore_ascii_case(&bin.to_string_lossy())
+        a.to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy())
     }
     #[cfg(not(windows))]
     {
-        exe == bin
+        a == b
     }
 }
 
-/// `start` 前收割上次实例遗留的核心进程（ADR-0012 D2）。
-///
-/// pidfile 存在且进程存活且 exe 匹配时强杀；进程已死、exe 不匹配（PID 复用）
-/// 或 pidfile 损坏时仅清理 pidfile。全部失败降级为告警，不阻塞启动。
-pub fn reap_stale(pid_path: &Path, binary: &Path) {
-    let Ok(content) = std::fs::read_to_string(pid_path) else {
-        return;
-    };
-    let Ok(record) = serde_json::from_str::<PidFile>(&content) else {
-        tracing::warn!(path = %pid_path.display(), "pidfile 损坏，直接清理");
-        let _ = std::fs::remove_file(pid_path);
-        return;
-    };
-    if lanpath_common::is_process_alive(record.pid) {
-        if exe_matches(record.pid, binary) {
-            tracing::warn!(pid = record.pid, "收割遗留核心进程（上次实例未正常退出）");
-            if let Err(e) = lanpath_common::kill_process(record.pid) {
-                tracing::warn!(pid = record.pid, error = %e, "遗留核心进程强杀失败");
-            }
-        } else {
-            tracing::info!(
-                pid = record.pid,
-                "pidfile 指向的 PID 已被其他进程复用，跳过收割"
-            );
-        }
+/// Remove an ownership record only after the original process is known to have exited.
+pub fn remove_pid_file(pid_path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(pid_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("cannot remove resolved process record: {e}")),
     }
-    let _ = std::fs::remove_file(pid_path);
-}
-
-/// `start` 成功后写入 PID 文件（失败仅告警，不影响运行）。
-pub fn write_pid_file(pid_path: &Path, pid: u32, binary: &Path) {
-    let record = PidFile {
-        pid,
-        exe: binary.to_path_buf(),
-        started_at_unix: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-    };
-    match serde_json::to_string(&record) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(pid_path, json) {
-                tracing::warn!(error = %e, "PID 文件写入失败");
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "PID 文件序列化失败"),
-    }
-}
-
-/// `stop` / 进程退出后删除 PID 文件（best-effort）。
-pub fn remove_pid_file(pid_path: &Path) {
-    let _ = std::fs::remove_file(pid_path);
 }
 
 #[cfg(test)]
@@ -149,6 +142,7 @@ mod tests {
 
     /// Re-execute this test binary so the fixture has a stable native identity,
     /// independent of PATH, scripts, multicall coreutils or host wrappers.
+    #[cfg(unix)]
     fn fixture_child() -> (std::process::Child, u32) {
         let child = std::process::Command::new(fixture_binary())
             .args([
@@ -165,10 +159,12 @@ mod tests {
         (child, pid)
     }
 
+    #[cfg(unix)]
     fn fixture_binary() -> PathBuf {
         std::env::current_exe().expect("current test binary")
     }
 
+    #[cfg(unix)]
     #[test]
     fn orphan_child_fixture() {
         if std::env::var_os("LANPATH_LIFECYCLE_CHILD_FIXTURE").is_some() {
@@ -180,11 +176,11 @@ mod tests {
     fn reap_stale_no_pidfile_is_noop() {
         let dir = std::env::temp_dir().join(format!("pp-test-{}", std::process::id()));
         let pid_path = dir.join("sing-box.pid");
-        reap_stale(&pid_path, Path::new("/nonexistent"));
+        reap_stale(&pid_path).unwrap();
         assert!(!pid_path.exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn write_and_reap_kills_matching_orphan() {
         let dir = std::env::temp_dir().join(format!("pp-test-reap-{}", std::process::id()));
@@ -193,17 +189,15 @@ mod tests {
         let binary = fixture_binary();
 
         let (mut child, pid) = fixture_child();
-        assert!(
-            exe_matches(pid, &binary),
-            "fixture identity mismatch: expected {}, actual {:?}",
-            binary.display(),
-            lanpath_common::process_exe_path(pid)
+        assert_eq!(
+            lanpath_common::ProcessIdentity::capture(pid).unwrap().exe,
+            binary
         );
-        write_pid_file(&pid_path, pid, &binary);
+        write_pid_file(&pid_path, pid, &binary).unwrap();
         assert!(pid_path.exists());
         assert!(lanpath_common::is_process_alive(pid));
 
-        reap_stale(&pid_path, &binary);
+        reap_stale(&pid_path).unwrap();
 
         assert!(!pid_path.exists(), "收割后 pidfile 应删除");
         let status = child.wait().unwrap();
@@ -211,24 +205,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn live_orphan_recovery_is_unsupported_but_owned_child_can_stop() {
+        let dir = std::env::temp_dir().join(format!("pp-test-macos-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_path = dir.join("sing-box.pid");
+        let binary = fixture_binary();
+        let (mut child, pid) = fixture_child();
+        let identity = lanpath_common::ProcessIdentity::capture(pid).unwrap();
+        assert_eq!(identity.pid, pid);
+        assert_eq!(identity.exe, binary);
+        write_pid_file(&pid_path, pid, &binary).unwrap();
+        let record = std::fs::read(&pid_path).unwrap();
+
+        assert_eq!(
+            identity.terminate_verified().unwrap_err().kind(),
+            std::io::ErrorKind::Unsupported
+        );
+        let error = reap_stale(&pid_path).unwrap_err();
+        assert!(error.contains("core recovery unresolved; record retained"));
+        assert_eq!(std::fs::read(&pid_path).unwrap(), record);
+        assert!(child.try_wait().unwrap().is_none());
+
+        // The original Child remains authority for ordinary owned-child stop.
+        child.kill().unwrap();
+        child.wait().unwrap();
+        reap_stale(&pid_path).unwrap();
+        assert!(!pid_path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(unix)]
     #[test]
     fn reap_stale_skips_pid_reuse() {
-        // PID 复用防护：pidfile 记录的是测试子进程的 pid，但管理的二进制是另一个
-        // 路径 → exe 不匹配 → 不得误杀，仅清理 pidfile。
+        // A PID reused by the exact same executable is still a different process.
         let dir = std::env::temp_dir().join(format!("pp-test-reuse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let pid_path = dir.join("sing-box.pid");
-        let wrong_binary = PathBuf::from("/bin/false");
 
         let (mut child, pid) = fixture_child();
-        write_pid_file(&pid_path, pid, &wrong_binary);
-        reap_stale(&pid_path, &wrong_binary);
-
-        assert!(!pid_path.exists(), "pidfile 应清理");
+        write_pid_file(&pid_path, pid, &fixture_binary()).unwrap();
+        let mut record: PidFile =
+            serde_json::from_slice(&std::fs::read(&pid_path).unwrap()).unwrap();
+        record.identity.created += 1;
+        std::fs::write(&pid_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        assert!(reap_stale(&pid_path).is_err());
+        assert!(pid_path.exists(), "mismatched record must be retained");
         assert!(
             lanpath_common::is_process_alive(pid),
-            "exe 不匹配时不得误杀"
+            "创建身份不匹配时不得误杀"
         );
         child.kill().unwrap();
         let _ = child.wait();
@@ -244,11 +270,11 @@ mod tests {
         let binary = fixture_binary();
 
         let (mut child, pid) = fixture_child();
-        write_pid_file(&pid_path, pid, &binary);
+        write_pid_file(&pid_path, pid, &binary).unwrap();
         child.kill().unwrap();
         let _ = child.wait();
 
-        reap_stale(&pid_path, &binary);
+        reap_stale(&pid_path).unwrap();
         assert!(!pid_path.exists(), "进程已死时 pidfile 应清理");
         let _ = std::fs::remove_dir_all(&dir);
     }

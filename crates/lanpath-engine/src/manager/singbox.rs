@@ -76,9 +76,8 @@ impl CoreManager for SingBoxProcessManager {
             return Err(LanpathError::Core(msg));
         }
 
-        // ADR-0012 D2：收割上次实例遗留的核心进程（OS 级绑定未覆盖的旧版本
-        // 孤儿、macOS 等场景），避免端口被残留进程占用。
-        lifecycle::reap_stale(&self.pid_path(), &self.binary);
+        // ADR-0012 D2：按原始 OS 身份恢复遗留进程；平台不支持或身份未知时保留记录并拒绝启动。
+        lifecycle::reap_stale(&self.pid_path()).map_err(LanpathError::Core)?;
 
         // ADR-0012 D1：OS 级父子绑定 spawn（父进程死亡核心即被 OS 回收）。
         let spawn = match lifecycle::spawn_core(
@@ -120,7 +119,21 @@ impl CoreManager for SingBoxProcessManager {
                 Err(LanpathError::Core(err))
             }
             Ok(None) => {
-                lifecycle::write_pid_file(&self.pid_path(), child.id(), &self.binary);
+                if let Err(error) =
+                    lifecycle::write_pid_file(&self.pid_path(), child.id(), &self.binary)
+                {
+                    let stopped = child.kill().and_then(|()| child.wait().map(|_| ()));
+                    if let Err(stop_error) = stopped {
+                        *self.guard.write().await = Some(spawn.guard);
+                        *proc = Some(child);
+                        return Err(LanpathError::Core(format!(
+                            "identity record failed: {error}; stop unresolved: {stop_error}"
+                        )));
+                    }
+                    return Err(LanpathError::Core(format!(
+                        "identity record failed: {error}"
+                    )));
+                }
                 *self.guard.write().await = Some(spawn.guard);
                 *proc = Some(child);
                 *self.start_time.write().await = Some(Instant::now());
@@ -137,17 +150,19 @@ impl CoreManager for SingBoxProcessManager {
 
     async fn stop(&self) -> LanpathResult<()> {
         let mut proc = self.process.write().await;
-        if let Some(mut child) = proc.take() {
-            // std Child：kill 后同步 wait 收尸，避免僵尸进程。
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = proc.as_mut() {
+            if child.try_wait()?.is_none() {
+                child.kill()?;
+            }
+            child.wait()?;
+            lifecycle::remove_pid_file(&self.pid_path()).map_err(LanpathError::Core)?;
+            *proc = None;
             *self.start_time.write().await = None;
             tracing::info!("sing-box stopped");
+        } else {
+            lifecycle::reap_stale(&self.pid_path()).map_err(LanpathError::Core)?;
         }
-        // ADR-0012：释放父子绑定句柄（Windows Job 句柄关闭会确保子进程死亡）
-        // 并清理 PID 文件。
         *self.guard.write().await = None;
-        lifecycle::remove_pid_file(&self.pid_path());
         Ok(())
     }
 
@@ -167,15 +182,14 @@ impl CoreManager for SingBoxProcessManager {
                     record_exit(self.last_error.clone(), code).await;
                     *proc = None;
                     *self.guard.write().await = None;
-                    lifecycle::remove_pid_file(&self.pid_path());
+                    if let Err(error) = lifecycle::remove_pid_file(&self.pid_path()) {
+                        *self.last_error.write().await = error;
+                    }
                     false
                 }
                 Err(e) => {
                     *self.last_error.write().await =
                         format!("failed to check process status: {}", e);
-                    *proc = None;
-                    *self.guard.write().await = None;
-                    lifecycle::remove_pid_file(&self.pid_path());
                     false
                 }
             }
@@ -238,6 +252,8 @@ impl CoreManager for SingBoxProcessManager {
     }
 
     fn reap_stale(&self) {
-        lifecycle::reap_stale(&self.pid_path(), &self.binary);
+        if let Err(error) = lifecycle::reap_stale(&self.pid_path()) {
+            tracing::error!(%error, "core recovery remains unresolved");
+        }
     }
 }

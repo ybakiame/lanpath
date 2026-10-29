@@ -57,7 +57,7 @@ pub fn process_exe_path(pid: u32) -> Option<PathBuf> {
         }
         buf.truncate(ret as usize);
         let s = String::from_utf8_lossy(&buf).into_owned();
-        return Some(PathBuf::from(s));
+        Some(PathBuf::from(s))
     }
     #[cfg(not(target_os = "macos"))]
     std::fs::read_link(format!("/proc/{pid}/exe")).ok()

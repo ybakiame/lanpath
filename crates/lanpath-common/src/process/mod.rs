@@ -19,6 +19,9 @@ mod imp;
 #[path = "windows.rs"]
 mod imp;
 
+mod identity;
+pub use identity::*;
+
 /// Do not create a console window for the spawned child on Windows
 /// (`CREATE_NO_WINDOW`, `0x08000000`); no-op on other platforms.
 ///
@@ -181,8 +184,7 @@ mod tests {
         cmd.arg("30");
         let (mut child, guard) = super::spawn_guarded(&mut cmd).expect("spawn sleep");
         // macOS 无 pdeathsig，绑定跳过；其余 unix 应已绑定。
-        #[cfg(not(target_os = "macos"))]
-        assert!(guard.is_bound());
+        assert_eq!(guard.is_bound(), cfg!(not(target_os = "macos")));
         assert!(child.try_wait().unwrap().is_none(), "sleep 应存活");
         child.kill().unwrap();
         let _ = child.wait();
