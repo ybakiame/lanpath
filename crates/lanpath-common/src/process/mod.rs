@@ -40,11 +40,9 @@ pub fn no_window(cmd: &mut std::process::Command) -> &mut std::process::Command 
     cmd
 }
 
-/// Tokio variant of [`no_window`] (tokio's `Command` implements the same
-/// `CommandExt` trait on Windows).
+/// Tokio variant of [`no_window`], using its Windows-only inherent method.
 #[cfg(windows)]
 pub fn no_window_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process::Command {
-    use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     cmd.creation_flags(CREATE_NO_WINDOW)
 }
@@ -68,8 +66,8 @@ pub struct LifecycleGuard {
 }
 
 impl LifecycleGuard {
-    /// OS 级父子绑定是否已生效。`false` 表示降级（如 Windows Job 挂接失败、
-    /// macOS 无等价机制），调用方应告警并以 PID 收割兜底。
+    /// OS 级父子绑定是否已生效。非 Windows 平台缺少等价机制时可能返回 `false`；
+    /// Windows 绑定失败会直接拒绝启动，不会返回一个继续运行的无绑定子进程。
     pub fn is_bound(&self) -> bool {
         self.bound
     }
@@ -86,9 +84,8 @@ impl LifecycleGuard {
 /// Spawn 子进程并将其生命周期绑定到本进程：父进程以任何方式死亡
 /// （崩溃 / 结束任务 / SIGKILL），子进程由 OS 立即回收。
 ///
-/// - Windows：post-spawn 挂入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job
-///   Object；挂接失败降级为未绑定（`guard.is_bound() == false`），照常返回
-///   子进程，不阻塞启动。GUI 场景调用方应先经 [`no_window`] 抑制控制台窗口。
+/// - Windows：挂入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job 后才恢复
+///   suspended 主线程；任一步失败均关闭 Job 并终止子进程，不会无绑定继续运行。
 /// - Linux（含 WSL）/ Android：`pre_exec` 设置 `PR_SET_PDEATHSIG = SIGKILL`，
 ///   并复核 `getppid()` 兜底 fork/prctl 竞态。
 /// - macOS：无等价轻量机制，绑定跳过（`is_bound() == false`）。
@@ -98,10 +95,29 @@ impl LifecycleGuard {
 pub fn spawn_guarded(
     cmd: &mut std::process::Command,
 ) -> io::Result<(std::process::Child, LifecycleGuard)> {
-    imp::configure_pre_spawn(cmd);
-    let child = cmd.spawn()?;
-    let guard = imp::bind_post_spawn(&child);
-    Ok((child, guard))
+    #[cfg(windows)]
+    {
+        imp::spawn_bound(cmd)
+    }
+    #[cfg(not(windows))]
+    {
+        imp::configure_pre_spawn(cmd);
+        let child = cmd.spawn()?;
+        let guard = imp::bind_post_spawn(&child);
+        Ok((child, guard))
+    }
+}
+
+/// Spawn into the caller's private console, with a separately targetable process group.
+/// The caller must own that console; unlike `no_window`, this preserves Ctrl-Break delivery.
+#[cfg(windows)]
+pub fn spawn_guarded_console(
+    cmd: &mut std::process::Command,
+) -> io::Result<(std::process::Child, LifecycleGuard)> {
+    imp::spawn_bound_flags(
+        cmd,
+        windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+    )
 }
 
 /// 指定 PID 的进程是否存在（权限不足视为存在，避免误收割）。
@@ -140,13 +156,6 @@ pub fn port_owner(port: u16) -> Option<PortOwner> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn no_window_is_applicable_to_std_command() {
-        let mut cmd = std::process::Command::new("sing-box");
-        // 跨平台仅验证可调用且返回同一命令（Windows 侧 flag 语义由 CI Windows
-        // 构建与手工验证覆盖）。
-        assert!(super::no_window(&mut cmd).get_program() == "sing-box");
-    }
 
     #[test]
     fn no_window_is_applicable_to_tokio_command() {

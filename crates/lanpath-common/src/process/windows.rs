@@ -40,15 +40,70 @@ impl Drop for JobGuard {
 unsafe impl Send for JobGuard {}
 unsafe impl Sync for JobGuard {}
 
-/// spawn 前配置：Windows 无 pre-spawn 动作（Job 挂接在 post-spawn 完成）。
-pub fn configure_pre_spawn(_cmd: &mut std::process::Command) {}
+/// Start suspended, contain before the executable can run, then resume its only thread.
+pub fn spawn_bound(
+    cmd: &mut std::process::Command,
+) -> io::Result<(std::process::Child, super::LifecycleGuard)> {
+    spawn_bound_flags(cmd, windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+}
 
-/// post-spawn 绑定：将子进程挂入 KILL_ON_JOB_CLOSE 的 Job Object。
-/// 挂接失败（如外层 Job 限制嵌套）降级为未绑定，由 PID 收割兜底。
-pub fn bind_post_spawn(child: &std::process::Child) -> super::LifecycleGuard {
-    match bind_to_job(child) {
-        Ok(job) => super::LifecycleGuard::new(true, Some(job)),
-        Err(_) => super::LifecycleGuard::new(false, None),
+pub fn spawn_bound_flags(
+    cmd: &mut std::process::Command,
+    flags: u32,
+) -> io::Result<(std::process::Child, super::LifecycleGuard)> {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::{Diagnostics::ToolHelp::*, Threading::*};
+    cmd.creation_flags(CREATE_SUSPENDED | flags);
+    let mut child = cmd.spawn()?;
+    let result = (|| {
+        let job = bind_to_job(&child)?;
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+        entry.dwSize = size_of::<THREADENTRY32>() as u32;
+        let mut threads = Vec::new();
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) };
+        while more != 0 {
+            if entry.th32OwnerProcessID == child.id() {
+                threads.push(entry.th32ThreadID);
+            }
+            more = unsafe { Thread32Next(snapshot, &mut entry) };
+        }
+        unsafe {
+            CloseHandle(snapshot);
+        }
+        if threads.len() != 1 {
+            return Err(io::Error::other(
+                "suspended process has ambiguous primary thread",
+            ));
+        }
+        let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, threads[0]) };
+        if thread.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let previous = unsafe { ResumeThread(thread) };
+        unsafe {
+            CloseHandle(thread);
+        }
+        if previous != 1 {
+            return Err(io::Error::other("failed to resume contained process"));
+        }
+        Ok(super::LifecycleGuard::new(true, Some(job)))
+    })();
+    match result {
+        Ok(guard) => Ok((child, guard)),
+        Err(error) => {
+            let killed = child.kill();
+            let waited = child.wait();
+            if killed.is_err() || waited.is_err() {
+                return Err(io::Error::other(format!(
+                    "containment failed: {error}; termination unresolved"
+                )));
+            }
+            Err(error)
+        }
     }
 }
 
@@ -86,12 +141,13 @@ fn bind_to_job(child: &std::process::Child) -> io::Result<JobGuard> {
 pub fn is_process_alive(pid: u32) -> bool {
     unsafe {
         // SAFETY: 仅查询打开随即关闭。
-        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | 0x0010_0000, 0, pid);
         if h.is_null() {
-            return false;
+            return io::Error::last_os_error().raw_os_error() != Some(87);
         }
+        let state = windows_sys::Win32::System::Threading::WaitForSingleObject(h, 0);
         CloseHandle(h);
-        true
+        state != windows_sys::Win32::Foundation::WAIT_OBJECT_0
     }
 }
 
