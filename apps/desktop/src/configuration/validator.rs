@@ -31,7 +31,7 @@ impl ConfigValidator {
     }
 
     pub(crate) async fn validate_value(&self, value: &Value) -> LanpathResult<()> {
-        policy::check(&self.root, value, self.bindings)?;
+        policy::check(&self.root, value, &self.bindings)?;
         let binary = self.binary.as_deref().ok_or_else(|| {
             LanpathError::Core(
                 "no sing-box binary selected; install/select the real core before checking".into(),

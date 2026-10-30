@@ -1,7 +1,7 @@
 //! Parsing utilities shared across import dialects.
 
 #[cfg(feature = "mitm")]
-use regex::Regex;
+use lanpath_mitm::Pattern;
 #[cfg(feature = "mitm")]
 use std::collections::HashMap;
 
@@ -12,11 +12,15 @@ pub(super) fn compile_pattern(
     cfg: &mut super::ImportedConfig,
     section: &str,
     line: &str,
-) -> Option<Regex> {
-    match Regex::new(src) {
+) -> Option<Pattern> {
+    match Pattern::new(src) {
         Ok(re) => Some(re),
-        Err(e) => {
-            cfg.warn(section, line, &format!("invalid regex: {e}"));
+        Err(error) => {
+            cfg.warn(
+                section,
+                line,
+                &format!("regular expression not activated: {error}"),
+            );
             None
         }
     }
@@ -25,7 +29,8 @@ pub(super) fn compile_pattern(
 /// Whether the string is a remote http(s) script URL; others (local paths, etc.) are not supported.
 #[cfg(feature = "mitm")]
 pub(super) fn is_remote_url(s: &str) -> bool {
-    s.starts_with("http://") || s.starts_with("https://")
+    reqwest::Url::parse(s)
+        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
 }
 
 /// Derive task name from script URL: take the last path segment filename (strip `.js` suffix),
@@ -65,24 +70,6 @@ pub(super) fn parse_bool(v: Option<&String>) -> bool {
     )
 }
 
-/// Surge `max-size` unlimited value mapped approximate upper bound (10MB).
-///
-/// In Surge semantics `max-size=-1` / `max-size=0` means "unlimited body size";
-/// lanpath-mitm's `max_size` is `usize`, mapping `usize::MAX` directly would break internal buffering
-/// semantics, so mapped to 10MB upper bound (sufficient for绝大多数 real response bodies).
-#[cfg(feature = "mitm")]
-const MAX_SIZE_UNLIMITED: usize = 10 * 1024 * 1024;
-
-/// Parse Surge `max-size`: `-1` / `0` (unlimited) → [`MAX_SIZE_UNLIMITED`], normal numbers parsed as-is.
-#[cfg(feature = "mitm")]
-pub(super) fn parse_max_size(v: Option<&String>) -> Option<usize> {
-    let s = v?.trim();
-    match s {
-        "-1" | "0" => Some(MAX_SIZE_UNLIMITED),
-        s => s.parse::<usize>().ok(),
-    }
-}
-
 /// Split by commas in `key=value` / `key:value` segments, but skip commas inside quotes and
 /// `[` `]` / `{` `}` (`Types:"Translate,External"`, `argument=[{a},{b}]`, regex quantifiers
 /// `\d{1,2}` are not mistakenly split).
@@ -90,8 +77,14 @@ pub(super) fn split_kv_segments(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
+    let mut escaped = false;
     let mut depth = 0i32;
     for c in input.chars() {
+        if in_quotes && (escaped || c == '\\') {
+            current.push(c);
+            escaped = !escaped;
+            continue;
+        }
         match c {
             '"' => {
                 in_quotes = !in_quotes;
@@ -119,19 +112,23 @@ pub(super) fn split_kv_segments(input: &str) -> Vec<String> {
 
 /// Parse comma-separated `key=value` parameter list; keys normalized to lowercase, values unquoted.
 #[cfg(feature = "mitm")]
-pub(super) fn parse_kv_params(input: &str) -> HashMap<String, String> {
+pub(super) fn parse_kv_params(input: &str) -> Option<HashMap<String, String>> {
     let mut map = HashMap::new();
     for pair in split_kv_segments(input) {
         let pair = pair.trim();
         if pair.is_empty() {
             continue;
         }
-        let Some((k, v)) = pair.split_once('=') else {
-            continue;
-        };
-        map.insert(k.trim().to_lowercase(), strip_quotes(v.trim()).to_string());
+        let (key, value) = pair.split_once('=')?;
+        let key = key.trim().to_lowercase();
+        if key.is_empty()
+            || key.chars().any(char::is_whitespace)
+            || map.insert(key, strip_quotes(value).to_owned()).is_some()
+        {
+            return None;
+        }
     }
-    map
+    Some(map)
 }
 
 /// Split by whitespace but preserve whitespace inside double quotes (e.g., `data="hello world"`).
@@ -140,7 +137,13 @@ pub(super) fn split_tokens_keep_quoted(line: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
+    let mut escaped = false;
     for c in line.chars() {
+        if in_quotes && (escaped || c == '\\') {
+            current.push(c);
+            escaped = !escaped;
+            continue;
+        }
         match c {
             '"' => {
                 in_quotes = !in_quotes;
@@ -158,40 +161,6 @@ pub(super) fn split_tokens_keep_quoted(line: &str) -> Vec<String> {
         tokens.push(current);
     }
     tokens
-}
-
-/// Percent-decode (Loon `argument=` values are frequently URL-encoded JSON).
-///
-/// 无 `%` 时原样返回；非法序列按字节原样保留；结果按 UTF-8 lossy 转换。
-#[cfg(feature = "mitm")]
-pub(super) fn percent_decode(s: &str) -> String {
-    if !s.contains('%') {
-        return s.to_string();
-    }
-    fn hex_val(b: u8) -> Option<u8> {
-        match b {
-            b'0'..=b'9' => Some(b - b'0'),
-            b'a'..=b'f' => Some(b - b'a' + 10),
-            b'A'..=b'F' => Some(b - b'A' + 10),
-            _ => None,
-        }
-    }
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
-        {
-            out.push(h * 16 + l);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Comment (`#` / `;` prefix) or blank line.

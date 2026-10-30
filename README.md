@@ -37,12 +37,20 @@ Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，�
 
 ## Windows GPUI 实验版
 
-`apps/desktop` 已进入实验性并行迁移，独立程序名为 `lanpath-desktop-experimental`；
-现行 Tauri 桌面与 Android 保持不变，尚未批准生产替换或发行。
-实验版使用独立持久数据根与 loopback 核心/API，不接管系统代理或 TUN，不自动导入生产数据。
-实验版已接入真实订阅、覆写模板、结构化配置、路由规则/规则集与 v2 配置合成，生成只读最终配置后
-启动。业务覆盖与剩余缺口见 [ADR-0013](docs/adr/0013-gpui-experimental-parallel-migration.md)，
-启动及校验命令见[开发指南](docs/development.md#windows-gpui-实验性并行)。
+`apps/desktop` 是独立 GPUI 应用，程序为 `lanpath-gpui.exe`，不依赖 WebView。
+仅分发签名 ZIP，默认便携：完整解压后保留旁边的空文件 `lanpath-gpui.portable`，
+数据写入程序目录下的 `data/`，不受终端或快捷方式工作目录影响。
+需要独立标准目录 `%LOCALAPPDATA%\LanpathGPUI` 时，正常退出后移除便携标记再重开；
+不自动搬迁数据，也不读取或覆盖 Tauri 的原目录。具体切换、更新与恢复见
+[开发指南](docs/development.md#windows-gpui-实验性并行)。
+后续 `0.2.x-rc` 桌面候选计划只发行 GPUI，成熟并完成迁移/回退验收后退役 Tauri 桌面链路；
+当前保留可用的 Android 壳，不据此宣布生产切换或批准公开发布。路线与边界见
+[ADR-0014](docs/adr/0014-gpui-native-integration-and-distribution.md)。
+
+首个 `0.2.0-rc.1` 候选以 **Windows 非 TUN** 为验收范围：用户态核心、显式 HTTP/SOCKS 代理、
+系统代理的有界接管与恢复，以及有限 Surge/Quantumult X 脚本能力。TUN 在启动准入处拒绝，
+不改写已保存选项或触发提权；最终 UI、真实数据迁移及 TUN 后置。候选通过本地验收与签名校验
+不等于已公开发布或获得其他平台运行证明。脚本支持边界见[开发指南](docs/development.md)。
 
 本仓可独立构建，不需要 ProxyPanel 检出，不作为其 submodule。
 [文档索引](docs/index.md) · [代理指南](AGENTS.md) · [来源记录](docs/source-provenance.json)。

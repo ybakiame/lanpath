@@ -8,6 +8,8 @@ const status: ClientStatus = {
   core_running: true,
   mitm_addr: null,
   system_proxy: false,
+  system_proxy_ownership: "unowned",
+  system_proxy_error: null,
   rule_mode: "rule",
   rule_count: 0,
   clash_api_url: null,

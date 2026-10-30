@@ -18,6 +18,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 sha2 = { workspace = true }
+base64 = { workspace = true }
+fs2 = "0.4"
 # rquickjs 对 android 无预生成 bindings：Android target 需 `bindgen` feature
 # （构建时用 libclang 生成）。桌面平台继续用预生成 bindings，避免引入 bindgen
 # 构建期依赖。rquickjs 的两个 target 声明各管各平台，feature 不会跨 target 合并。

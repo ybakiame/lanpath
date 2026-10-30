@@ -2,7 +2,7 @@
 //!
 //! 提供跨平台的系统 HTTP/HTTPS 代理开关：
 //! - macOS 使用 `networksetup`（作用于网络接口，默认 "Wi-Fi"）
-//! - Windows 使用 `reg add` 写 `Internet Settings`
+//! - Windows uses an owned, journaled WinINet default-LAN session
 //! - Linux 使用 `gsettings`（GNOME），未安装 `gsettings` 时报错提示
 //!
 //! 命令构造为纯函数 [`PlatformSystemProxy::build_commands`]，便于单测断言
@@ -17,7 +17,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use lanpath_common::{LanpathError, LanpathResult};
 
+mod model;
 mod platform;
+mod session;
+#[cfg(windows)]
+mod windows;
+
+pub use model::{AcquisitionPolicy, SystemProxyOwnership};
+pub use session::SystemProxySession;
 
 pub use platform::{CommandSpec, PlatformSystemProxy, TargetOs};
 
@@ -29,12 +36,26 @@ pub trait SystemProxy: Send + Sync {
     /// 禁用系统代理。
     async fn disable(&self) -> LanpathResult<()>;
     /// 系统代理当前是否处于启用状态。
-    async fn is_enabled(&self) -> bool;
+    async fn is_enabled(&self) -> LanpathResult<bool>;
+    /// Recover abandoned ownership before reaping any stale core.
+    async fn recover_abandoned(&self) -> LanpathResult<()> {
+        Ok(())
+    }
+    /// Ownership is independent from the effective enabled flag.
+    fn ownership(&self) -> LanpathResult<SystemProxyOwnership> {
+        Ok(SystemProxyOwnership::Unowned)
+    }
 }
 
 #[async_trait]
 impl SystemProxy for PlatformSystemProxy {
     async fn enable(&self, http_proxy_addr: SocketAddr) -> LanpathResult<()> {
+        if matches!(self.os, TargetOs::Windows) {
+            #[cfg(windows)]
+            return self.windows_session()?.acquire(http_proxy_addr);
+            #[cfg(not(windows))]
+            return Err(model::error("WinINet is unavailable on this platform"));
+        }
         if matches!(self.os, TargetOs::Android) {
             return Err(LanpathError::Client(
                 "当前平台（Android）不支持系统代理开关：请通过 VpnService 分流".to_string(),
@@ -45,6 +66,22 @@ impl SystemProxy for PlatformSystemProxy {
     }
 
     async fn disable(&self) -> LanpathResult<()> {
+        if matches!(self.os, TargetOs::Windows) {
+            #[cfg(windows)]
+            {
+                let session = self
+                    .session
+                    .lock()
+                    .map_err(|_| model::error("platform session lock poisoned"))?
+                    .clone();
+                return match session {
+                    Some(session) => session.restore(),
+                    None => Ok(()),
+                };
+            }
+            #[cfg(not(windows))]
+            return Err(model::error("WinINet is unavailable on this platform"));
+        }
         if matches!(self.os, TargetOs::Android) {
             return Err(LanpathError::Client(
                 "当前平台（Android）不支持系统代理开关：请通过 VpnService 分流".to_string(),
@@ -54,42 +91,58 @@ impl SystemProxy for PlatformSystemProxy {
         Ok(self.run_specs(&specs)?)
     }
 
-    async fn is_enabled(&self) -> bool {
-        if matches!(self.os, TargetOs::Android) {
-            return false;
-        }
+    async fn is_enabled(&self) -> LanpathResult<bool> {
         match self.os {
             TargetOs::Linux => {
                 let out = Command::new("gsettings")
                     .args(["get", "org.gnome.system.proxy", "mode"])
-                    .output()
-                    .ok();
-                out.map(|o| String::from_utf8_lossy(&o.stdout).trim() == "'manual'")
-                    .unwrap_or(false)
+                    .output()?;
+                if !out.status.success() {
+                    return Err(model::error("GNOME proxy query failed"));
+                }
+                Ok(String::from_utf8_lossy(&out.stdout).trim() == "'manual'")
             }
             TargetOs::MacOs => {
                 let out = Command::new("networksetup")
                     .args(["-getwebproxystate", self.interface.as_str()])
-                    .output()
-                    .ok();
-                out.map(|o| String::from_utf8_lossy(&o.stdout).contains("Enabled"))
-                    .unwrap_or(false)
+                    .output()?;
+                if !out.status.success() {
+                    return Err(model::error("macOS proxy query failed"));
+                }
+                Ok(String::from_utf8_lossy(&out.stdout).contains("Enabled"))
             }
             TargetOs::Windows => {
-                let out = lanpath_common::no_window(Command::new("reg").args([
-                    "query",
-                    Self::REG_KEY,
-                    "/v",
-                    "ProxyEnable",
-                ]))
-                .output()
-                .ok();
-                out.map(|o| String::from_utf8_lossy(&o.stdout).contains("0x1"))
-                    .unwrap_or(false)
+                #[cfg(windows)]
+                return self.windows_session()?.effective_enabled();
+                #[cfg(not(windows))]
+                Err(model::error("WinINet is unavailable on this platform"))
             }
-            // 上方 guard 已提前返回，此分支不可达（补全穷尽匹配）。
-            TargetOs::Android => false,
+            TargetOs::Android => Ok(false),
         }
+    }
+
+    async fn recover_abandoned(&self) -> LanpathResult<()> {
+        #[cfg(windows)]
+        if self.os == TargetOs::Windows {
+            self.windows_session()?.recover_abandoned()?;
+        }
+        Ok(())
+    }
+
+    fn ownership(&self) -> LanpathResult<SystemProxyOwnership> {
+        #[cfg(windows)]
+        if self.os == TargetOs::Windows {
+            let session = self
+                .session
+                .lock()
+                .map_err(|_| model::error("platform session lock poisoned"))?
+                .clone();
+            return match session {
+                Some(session) => session.status(),
+                None => Ok(SystemProxyOwnership::Unowned),
+            };
+        }
+        Ok(SystemProxyOwnership::Unowned)
     }
 }
 
@@ -149,8 +202,8 @@ impl SystemProxy for MockSystemProxy {
         Ok(())
     }
 
-    async fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::SeqCst)
+    async fn is_enabled(&self) -> LanpathResult<bool> {
+        Ok(self.enabled.load(Ordering::SeqCst))
     }
 }
 
@@ -179,41 +232,6 @@ mod tests {
         );
         assert_eq!(cmds[2].args, vec!["-setwebproxystate", "Wi-Fi", "on"]);
         assert_eq!(cmds[3].args, vec!["-setsecurewebproxystate", "Wi-Fi", "on"]);
-    }
-
-    #[test]
-    fn windows_build_commands() {
-        let p = PlatformSystemProxy::with_os(TargetOs::Windows);
-        let cmds = p.build_commands(addr());
-        assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            cmds[0].args,
-            vec![
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-                "/v",
-                "ProxyEnable",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                "1",
-                "/f",
-            ]
-        );
-        assert_eq!(
-            cmds[1].args,
-            vec![
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-                "/v",
-                "ProxyServer",
-                "/t",
-                "REG_SZ",
-                "/d",
-                "127.0.0.1:18080",
-                "/f",
-            ]
-        );
     }
 
     #[test]
@@ -251,23 +269,6 @@ mod tests {
             vec!["-setwebproxystate", "Wi-Fi", "off"]
         );
 
-        let win = PlatformSystemProxy::with_os(TargetOs::Windows);
-        let win_cmd = &win.build_disable_commands()[0];
-        assert_eq!(
-            win_cmd.args,
-            vec![
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-                "/v",
-                "ProxyEnable",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                "0",
-                "/f",
-            ]
-        );
-
         let lin = PlatformSystemProxy::with_os(TargetOs::Linux);
         assert_eq!(
             lin.build_disable_commands()[0].args,
@@ -278,15 +279,15 @@ mod tests {
     #[tokio::test]
     async fn mock_records_calls() {
         let m = MockSystemProxy::new();
-        assert!(!m.is_enabled().await);
+        assert!(!m.is_enabled().await.unwrap());
         m.enable(addr()).await.unwrap();
-        assert!(m.is_enabled().await);
+        assert!(m.is_enabled().await.unwrap());
         assert_eq!(m.calls(), vec![SysProxyCall::Enable(addr())]);
         m.disable().await.unwrap();
         assert_eq!(
             m.calls(),
             vec![SysProxyCall::Enable(addr()), SysProxyCall::Disable]
         );
-        assert!(!m.is_enabled().await);
+        assert!(!m.is_enabled().await.unwrap());
     }
 }

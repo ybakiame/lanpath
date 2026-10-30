@@ -2,6 +2,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _,
     button::{Button, ButtonVariants as _},
     input::Input,
+    scroll::ScrollableElement as _,
     switch::Switch,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
@@ -46,6 +47,7 @@ impl RulesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         Button::new("rule-add")
@@ -63,58 +65,78 @@ impl RulesView {
                             })),
                     ),
             )
-            .children(rules.iter().enumerate().map(|(index, rule)| {
-                let select_id = rule.id.clone();
-                let toggle_id = rule.id.clone();
-                let up_id = rule.id.clone();
-                let down_id = rule.id.clone();
+            .child(
                 div()
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .gap_2()
-                    .child(
-                        Button::new(format!("rule-select-{}", rule.id))
-                            .label(format!(
-                                "{}{} · {}",
-                                if rule.builtin { "内置 · " } else { "" },
-                                rule_label(rule),
-                                action_label(&rule.action)
-                            ))
-                            .selected(self.selected_rule.as_deref() == Some(rule.id.as_str()))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_rule(select_id.clone(), window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new(format!("rule-toggle-{}", rule.id))
-                            .label(if rule.enabled {
-                                "已启用"
-                            } else {
-                                "已停用"
-                            })
-                            .selected(rule.enabled)
-                            .disabled(disabled)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.toggle_rule(&toggle_id, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new(format!("rule-up-{}", rule.id))
-                            .label("上移")
-                            .disabled(disabled || index == 0)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.move_rule(&up_id, -1, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new(format!("rule-down-{}", rule.id))
-                            .label("下移")
-                            .disabled(disabled || index + 1 == rules.len())
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.move_rule(&down_id, 1, cx)),
-                            ),
-                    )
-            }))
+                    .h_auto()
+                    .min_w_0()
+                    .max_h_48()
+                    .overflow_y_scrollbar()
+                    .children(rules.iter().enumerate().map(|(index, rule)| {
+                        let select_id = rule.id.clone();
+                        let toggle_id = rule.id.clone();
+                        let up_id = rule.id.clone();
+                        let down_id = rule.id.clone();
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new(format!("rule-select-{}", rule.id))
+                                    .min_w_0()
+                                    .max_w_full()
+                                    .tooltip(format!(
+                                        "{} · {}",
+                                        rule_label(rule),
+                                        action_label(&rule.action)
+                                    ))
+                                    .label(format!(
+                                        "{}{} · {}",
+                                        if rule.builtin { "内置 · " } else { "" },
+                                        rule_label(rule),
+                                        action_label(&rule.action)
+                                    ))
+                                    .selected(
+                                        self.selected_rule.as_deref() == Some(rule.id.as_str()),
+                                    )
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_rule(select_id.clone(), window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("rule-toggle-{}", rule.id))
+                                    .label(if rule.enabled {
+                                        "已启用"
+                                    } else {
+                                        "已停用"
+                                    })
+                                    .selected(rule.enabled)
+                                    .disabled(disabled)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.toggle_rule(&toggle_id, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("rule-up-{}", rule.id))
+                                    .label("上移")
+                                    .disabled(disabled || index == 0)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_rule(&up_id, -1, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("rule-down-{}", rule.id))
+                                    .label("下移")
+                                    .disabled(disabled || index + 1 == rules.len())
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_rule(&down_id, 1, cx)
+                                    })),
+                            )
+                    })),
+            )
             .children(rules.is_empty().then(|| {
                 div()
                     .text_sm()
@@ -134,8 +156,8 @@ impl RulesView {
                         cx,
                     ))
                     .child(field("名称", &self.inputs.rule_name, disabled))
-                    .child(div().flex().gap_2().children(match_types().into_iter().map(
-                        |(kind, label)| {
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        match_types().into_iter().map(|(kind, label)| {
                             let selected = rule.match_type == kind;
                             Button::new(format!("rule-match-{label}"))
                                 .label(label)
@@ -144,8 +166,8 @@ impl RulesView {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.set_rule_match(kind.clone(), cx)
                                 }))
-                        },
-                    )))
+                        }),
+                    ))
                     .children((!is_final).then(|| {
                         div()
                             .flex()
@@ -173,7 +195,7 @@ impl RulesView {
                             .child("最终规则不需要匹配目标；首个启用的最终规则写入 route.final。")
                     }))
                     .child(
-                        div().flex().gap_2().children(
+                        div().flex().flex_wrap().gap_2().children(
                             [
                                 (RuleAction::Proxy, "代理"),
                                 (RuleAction::Direct, "直连"),
@@ -200,6 +222,7 @@ impl RulesView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_3()
                             .child(
                                 Switch::new("rule-no-resolve")

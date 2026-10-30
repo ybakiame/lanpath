@@ -61,11 +61,14 @@ pub struct DenyHttpExecutor;
 
 #[async_trait]
 impl HttpExecutor for DenyHttpExecutor {
-    async fn execute(&self, req: HttpRequestSpec) -> LanpathResult<HttpResponseData> {
-        Err(LanpathError::Client(format!(
-            "network access denied in profile JS override: {}",
-            req.url
-        )))
+    fn session(self: Arc<Self>) -> Arc<dyn HttpExecutor> {
+        self
+    }
+
+    async fn execute(&self, _req: HttpRequestSpec) -> LanpathResult<HttpResponseData> {
+        Err(LanpathError::Client(
+            "network access denied in profile JS override".into(),
+        ))
     }
 }
 
@@ -128,17 +131,35 @@ pub async fn resolve_remote_overrides(
     store_cache_dir: &Path,
     profile: &super::Profile,
 ) -> (super::EffectiveOverrides, Vec<String>) {
+    resolve_overrides(store_cache_dir, profile, None).await
+}
+
+/// Resolve with one caller-admitted policy; cache-only preparation never issues
+/// a request or replaces cached content. Local overrides still apply normally.
+pub async fn resolve_remote_overrides_with_context(
+    store_cache_dir: &Path,
+    profile: &super::Profile,
+    context: &crate::RemoteFetchContext,
+) -> (super::EffectiveOverrides, Vec<String>) {
+    resolve_overrides(store_cache_dir, profile, Some(context)).await
+}
+
+async fn resolve_overrides(
+    store_cache_dir: &Path,
+    profile: &super::Profile,
+    context: Option<&crate::RemoteFetchContext>,
+) -> (super::EffectiveOverrides, Vec<String>) {
     let mut warnings = Vec::new();
     let key = profile.id.to_string();
     let remote_yaml = match profile.yaml_url.as_deref() {
         Some(url) if !url.trim().is_empty() => {
-            fetch_remote_override(store_cache_dir, &key, url, "yaml", &mut warnings).await
+            fetch_remote_override(store_cache_dir, &key, url, "yaml", context, &mut warnings).await
         }
         _ => String::new(),
     };
     let remote_js = match profile.js_url.as_deref() {
         Some(url) if !url.trim().is_empty() => {
-            fetch_remote_override(store_cache_dir, &key, url, "js", &mut warnings).await
+            fetch_remote_override(store_cache_dir, &key, url, "js", context, &mut warnings).await
         }
         _ => String::new(),
     };
@@ -160,11 +181,33 @@ async fn fetch_remote_override(
     key: &str,
     url: &str,
     ext: &str,
+    context: Option<&crate::RemoteFetchContext>,
     warnings: &mut Vec<String>,
 ) -> String {
-    match fetch_remote_text(cache_dir, url).await {
+    if context.is_some_and(|context| !context.allows_network()) {
+        return match read_override_cache(cache_dir, key, ext) {
+            Ok(Some(text)) => text,
+            Ok(None) => {
+                warnings.push(format!(
+                    "profile remote {ext} skipped: core request proxy is unavailable and cache is missing"
+                ));
+                String::new()
+            }
+            Err(error) => {
+                warnings.push(format!(
+                    "profile remote {ext} cache unreadable; skipped: {error}"
+                ));
+                String::new()
+            }
+        };
+    }
+    let fetched = match context {
+        Some(context) => context.fetch_text(url).await,
+        None => fetch_remote_text(cache_dir, url).await,
+    };
+    match fetched {
         Ok(text) => {
-            if let Err(e) = write_override_cache(cache_dir, key, ext, &text) {
+            if let Err(e) = write_override_cache(cache_dir, key, ext, &text, context) {
                 warnings.push(format!("profile remote {ext} cache write failed: {e}"));
             }
             text
@@ -222,9 +265,14 @@ fn write_override_cache(
     key: &str,
     ext: &str,
     content: &str,
+    context: Option<&crate::RemoteFetchContext>,
 ) -> LanpathResult<()> {
+    let path = override_cache_path(cache_dir, key, ext);
+    if let Some(context) = context {
+        return crate::remote::atomic_write_with_context(&path, content.as_bytes(), Some(context));
+    }
     std::fs::create_dir_all(cache_dir)?;
-    std::fs::write(override_cache_path(cache_dir, key, ext), content)?;
+    std::fs::write(path, content)?;
     Ok(())
 }
 

@@ -150,7 +150,16 @@ impl SubscriptionsView {
             window,
             cx,
         );
-        let source = id
+        self.load_source(window, cx);
+        self.dirty = false;
+        self.error = None;
+        self.notice = None;
+        cx.notify();
+    }
+
+    fn load_source(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let source = self
+            .selected
             .and_then(|id| {
                 self.service
                     .as_ref()?
@@ -162,13 +171,12 @@ impl SubscriptionsView {
             .unwrap_or_default();
         self.source
             .update(cx, |state, cx| state.set_value(source, window, cx));
-        self.dirty = false;
-        self.error = None;
-        self.notice = None;
-        cx.notify();
     }
 
     fn request_select(&mut self, id: Option<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.locked || self.busy() {
+            return;
+        }
         if !self.dirty {
             self.select(id, window, cx);
             return;
@@ -183,7 +191,11 @@ impl SubscriptionsView {
                 .ok_text("放弃修改")
                 .cancel_text("取消")
                 .on_ok(move |_, window, cx| {
-                    let _ = view.update(cx, |view, cx| view.select(id, window, cx));
+                    let _ = view.update(cx, |view, cx| {
+                        if !view.locked && !view.busy() {
+                            view.select(id, window, cx);
+                        }
+                    });
                     true
                 })
         });
@@ -237,6 +249,9 @@ impl SubscriptionsView {
     }
 
     fn cycle_profile(&mut self, cx: &mut Context<Self>) {
+        if self.locked || self.busy() {
+            return;
+        }
         let next = match self.draft_profile {
             None => self.profiles.first().map(|profile| profile.id),
             Some(id) => self
@@ -249,6 +264,12 @@ impl SubscriptionsView {
         self.dirty = true;
         self.error = None;
         cx.notify();
+    }
+
+    pub(crate) fn save_from_shortcut(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected.is_some() && self.dirty {
+            self.run(Operation::Save, window, cx);
+        }
     }
 
     fn run(&mut self, operation: Operation, window: &mut Window, cx: &mut Context<Self>) {
@@ -346,14 +367,23 @@ impl SubscriptionsView {
                         Ok((subscriptions, active)) => {
                             this.subscriptions = subscriptions;
                             this.active = active;
-                            let next = if matches!(operation, Operation::Delete) {
-                                this.subscriptions.first().map(|item| item.id)
-                            } else {
-                                selected.or_else(|| this.subscriptions.last().map(|item| item.id))
-                            };
-                            this.select(next, window, cx);
+                            // Cache and availability commands do not commit the edit form.
+                            if matches!(operation, Operation::Save | Operation::Delete) {
+                                let next = if matches!(operation, Operation::Delete) {
+                                    this.subscriptions.first().map(|item| item.id)
+                                } else {
+                                    selected
+                                        .or_else(|| this.subscriptions.last().map(|item| item.id))
+                                };
+                                this.select(next, window, cx);
+                            } else if matches!(operation, Operation::Refresh) {
+                                this.load_source(window, cx);
+                            }
                             this.notice = Some(match operation {
                                 Operation::Save => "订阅已保存；URL 变化后需要重新刷新".into(),
+                                Operation::Refresh if this.dirty => {
+                                    "已刷新已保存 URL 的缓存；未保存的表单修改保持不变".into()
+                                }
                                 Operation::Refresh => "订阅刷新完成".into(),
                                 Operation::Activate => "已设为当前生效订阅".into(),
                                 Operation::Toggle => "订阅可用状态已更新".into(),
@@ -376,6 +406,7 @@ impl SubscriptionsView {
                 .ok()
             });
         }));
+        cx.notify();
     }
 
     fn profile_label(&self) -> String {

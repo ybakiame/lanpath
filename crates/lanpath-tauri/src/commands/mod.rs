@@ -93,8 +93,6 @@ pub fn remote_kind_str(kind: lanpath_client::RemoteKind) -> &'static str {
 }
 
 /// String representation of `ScriptDialect` (matches `RemoteResourceView.dialect` serde).
-///
-/// QX is merged into the Loon ecosystem; detected QuantumultX is mapped to `Loon`.
 pub fn script_dialect_str(dialect: ScriptDialect) -> &'static str {
     lanpath_client::script_dialect_str(dialect)
 }

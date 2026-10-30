@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "version": "1.14.2-lanpath.1",
+  "upstream_version": "1.14.2",
+  "managed_protocol": 1,
+  "go_version": "go1.26.8",
+  "tags": ["with_gvisor", "with_quic", "with_utls", "with_clash_api"],
+  "managed_files": [
+    "core/managed_windows.go",
+    "tun/managed_windows.go",
+    "tun/managed_transport_windows.go",
+    "patches/core.patch",
+    "patches/tun.patch"
+  ],
+  "modules": {
+    "core": {
+      "path": "github.com/sagernet/sing-box",
+      "version": "v1.14.2",
+      "commit": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
+      "sum": "h1:uZX7iz70o7lzoltR6sElMYP7kI7PVf23r4X0HQSozXM=",
+      "zip_sha256": "3ef2b42495d0426fcb8978d0efeff82f941ce6ec50c10b99473a4e7412bb3e5c"
+    },
+    "tun": {
+      "path": "github.com/sagernet/sing-tun",
+      "version": "v0.9.6-0.20260924001923-ddaa4ca25e3b",
+      "commit": "ddaa4ca25e3bcb776d6ce81f4477b3becb5426de",
+      "sum": "h1:tjQUA4fQi0OWDMMYfRigzvNlBTYyP/01e+P9BT/RZ4g=",
+      "zip_sha256": "9f545f362b935500212ce59ad674171339c85746e9aa783ab05ab3184844e835"
+    },
+    "pipe": {
+      "path": "github.com/tailscale/go-winio",
+      "version": "v0.0.0-20231025203758-c4f33415bf55",
+      "commit": "c4f33415bf55162f075a1e2e4c628397288ac8e6",
+      "sum": "h1:Gzfnfk2TWrk8Jj4P4c1a3CtQyMaTVCznlkLZI++hok4=",
+      "zip_sha256": "0433037071e067ec3cc0600db97a31b2296b852ade8688b4aad990f7ecbd1a37"
+    }
+  }
+}

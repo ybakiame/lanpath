@@ -9,8 +9,10 @@ pub struct ClientStatus {
     pub core_running: bool,
     /// MITM proxy listen address (`None` when not enabled).
     pub mitm_addr: Option<SocketAddr>,
-    /// Whether system proxy is currently enabled.
-    pub system_proxy: bool,
+    /// Effective enabled state; `None` means the platform read failed (not disabled).
+    pub system_proxy: Option<bool>,
+    pub system_proxy_ownership: Option<crate::sysproxy::SystemProxyOwnership>,
+    pub system_proxy_error: Option<String>,
     /// Current effective rule mode (= persisted value in client.json, illegal values normalized to `rule`).
     pub rule_mode: String,
     /// Number of rules in the composed config (sing-box takes `route.rules` array length;

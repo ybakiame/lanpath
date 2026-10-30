@@ -9,13 +9,9 @@ pub mod state;
 
 pub use state::DesktopStorage;
 
-/// 退出清理（ADR-0012 D3）：`RunEvent::ExitRequested` 时 best-effort 停止核心
-/// 并恢复系统代理（`ClientState::stop` 的完整逆序关闭）。
-///
-/// 仅覆盖正常退出路径；进程被杀（冻结后结束任务、崩溃）时收不到本事件，由
-/// lanpath-engine 的 OS 级父子绑定与 PID 收割兜底。整体 5s 超时保护，任何失败仅
-/// 告警，绝不阻塞退出。
-pub fn cleanup_on_exit(app: &tauri::AppHandle) {
+/// Normal exit is allowed only after owned proxy restoration and core shutdown.
+/// Failure/timeout keeps the application and referenced core alive for retry.
+pub fn cleanup_on_exit(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
     let state = app.state::<lanpath_tauri::state::AppState>();
     let client = state.client.clone();
@@ -24,23 +20,19 @@ pub fn cleanup_on_exit(app: &tauri::AppHandle) {
         .enable_all()
         .build();
     let Ok(runtime) = runtime else {
-        eprintln!("[lanpath-app] 退出清理：临时运行时创建失败，跳过");
-        return;
+        return Err("退出清理运行时创建失败；保留应用供重试".into());
     };
     runtime.block_on(async move {
         let cleanup = async {
             let mut lock = client.lock().await;
             if let Some(client) = lock.as_mut() {
-                client.stop().await;
+                client.stop().await.map_err(|e| e.to_string())?;
             }
+            Ok(())
         };
-        if tokio::time::timeout(std::time::Duration::from_secs(5), cleanup)
-            .await
-            .is_err()
-        {
-            tracing::warn!("退出清理超时（5s），照常退出");
-        }
-    });
+        tokio::time::timeout(std::time::Duration::from_secs(5), cleanup)
+            .await.map_err(|_| "退出清理超时；保留应用与核心供重试".to_string())?
+    })
 }
 
 /// WSL 下 WebKitGTK 兼容与 GPU 处理。

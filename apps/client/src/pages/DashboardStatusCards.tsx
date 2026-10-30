@@ -70,10 +70,26 @@ export default function DashboardStatusCards({
       <Card>
         <Card.Header>
           <Card.Title>系统代理</Card.Title>
-          <Card.Description>是否已接管系统代理</Card.Description>
+          <Card.Description>当前系统设置与本客户端所有权分别显示</Card.Description>
         </Card.Header>
-        <Card.Content>
-          {status?.system_proxy ? <Chip color="success">已启用</Chip> : <Chip color="danger">未启用</Chip>}
+        <Card.Content className="flex flex-col items-start gap-2" aria-live="polite">
+          {status?.system_proxy === true ? (
+            <Chip color="success">系统代理已启用</Chip>
+          ) : status?.system_proxy === false ? (
+            <Chip color="danger">系统代理未启用</Chip>
+          ) : (
+            <span className="text-sm text-muted">系统代理状态未知</span>
+          )}
+          <span className="text-xs text-muted">
+            {status?.system_proxy_ownership === "owned"
+              ? "本客户端持有代理设置"
+              : status?.system_proxy_ownership === "recovery_required"
+                ? "代理设置需要恢复；核心会保留运行，请解决冲突后重试停止"
+                : status?.system_proxy_ownership === "unowned"
+                  ? "本客户端未持有代理设置"
+                  : "代理所有权未知"}
+          </span>
+          {status?.system_proxy_error && <p className="break-all text-sm text-danger">{status.system_proxy_error}</p>}
         </Card.Content>
       </Card>
 

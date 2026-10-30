@@ -13,7 +13,7 @@ impl DesktopRuntime {
             .backup()?
             .take_preview(preview_id)
             .map_err(|e| e.to_string())?;
-        self.stop()?;
+        let _ = self.stop()?;
         input
             .prepare(self.business()?.data_dir(), appearance)
             .map_err(|e| e.to_string())

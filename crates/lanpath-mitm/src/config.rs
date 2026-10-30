@@ -10,6 +10,11 @@ use crate::upstream::UpstreamProxy;
 pub enum HostnameMatcher {
     /// 精确相等（如 `example.com`）。
     Exact(String),
+    /// A host pattern constrained to one destination port.
+    Port {
+        host: Box<HostnameMatcher>,
+        port: u16,
+    },
     /// 匹配裸后缀本身及其所有子域（如 `*.example.com`）。
     Suffix(String),
     /// 含任意位置 `*` 的通配模式（如 `api-*.example.com` / `*xmind.*`），
@@ -26,6 +31,10 @@ impl PartialEq for HostnameMatcher {
             (HostnameMatcher::Exact(a), HostnameMatcher::Exact(b)) => a == b,
             (HostnameMatcher::Suffix(a), HostnameMatcher::Suffix(b)) => a == b,
             (
+                HostnameMatcher::Port { host: a, port: ap },
+                HostnameMatcher::Port { host: b, port: bp },
+            ) => a == b && ap == bp,
+            (
                 HostnameMatcher::Wildcard { pattern: a, .. },
                 HostnameMatcher::Wildcard { pattern: b, .. },
             ) => a == b,
@@ -36,48 +45,73 @@ impl PartialEq for HostnameMatcher {
 impl Eq for HostnameMatcher {}
 
 impl HostnameMatcher {
-    /// 判断 `host` 是否命中该匹配器（`host` 不应携带端口，调用方先行剥离）。
-    pub fn matches(&self, host: &str) -> bool {
+    /// Match an authority (or a bare TLS hostname, whose default port is 443).
+    pub fn matches(&self, authority: &str) -> bool {
+        let (host, port) = split_authority(authority);
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
         match self {
-            HostnameMatcher::Exact(exact) => host == exact,
-            HostnameMatcher::Suffix(suffix) => {
-                host == suffix || host.ends_with(&format!(".{suffix}"))
+            HostnameMatcher::Exact(exact) => {
+                host.eq_ignore_ascii_case(exact.trim_matches(['[', ']']).trim_end_matches('.'))
             }
-            HostnameMatcher::Wildcard { regex, .. } => regex.is_match(host),
+            HostnameMatcher::Suffix(suffix) => {
+                host.eq_ignore_ascii_case(suffix)
+                    || host
+                        .strip_suffix(&suffix.to_ascii_lowercase())
+                        .is_some_and(|prefix| prefix.ends_with('.'))
+            }
+            HostnameMatcher::Wildcard { regex, .. } => regex.is_match(&host),
+            HostnameMatcher::Port {
+                host: matcher,
+                port: expected,
+            } => port.unwrap_or(443) == *expected && matcher.matches(&host),
         }
     }
 
-    /// 从通配符风格模式构造匹配器。
-    ///
-    /// - `*.example.com` → [`HostnameMatcher::Suffix`]
-    /// - 含其余位置 `*`（如 `api-*.example.com` / `*xmind.*`）→ [`HostnameMatcher::Wildcard`]
-    ///   （`*` 转 `.*`，全串锚定；无法编译时按 [`HostnameMatcher::Exact`] 兜底）
-    /// - 尾部 `:port` 一律剥离（生态 snippet 常见 `host:443` 写法，拦截判定只看主机名）
-    /// - 其余按精确主机名处理
+    /// Parse host wildcards and optional destination ports without losing their association.
     pub fn from_pattern(pattern: &str) -> Self {
-        let pattern = strip_port(pattern);
-        if let Some(suffix) = pattern.strip_prefix("*.") {
-            return HostnameMatcher::Suffix(suffix.to_string());
+        let pattern = pattern.trim().to_ascii_lowercase();
+        let (host, port) = split_authority(&pattern);
+        if let Some(port) = port {
+            return Self::Port {
+                host: Box::new(Self::from_pattern(host)),
+                port,
+            };
         }
-        if pattern.contains('*') {
-            let regex_src = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
+        let host = pattern
+            .strip_suffix(":*")
+            .unwrap_or(host)
+            .trim_end_matches('.');
+        if let Some(suffix) = host.strip_prefix("*.")
+            && !suffix.contains('*')
+        {
+            return Self::Suffix(suffix.to_string());
+        }
+        if host.contains('*') {
+            let regex_src = format!("^{}$", regex::escape(host).replace(r"\*", ".*"));
             if let Ok(regex) = regex::Regex::new(&regex_src) {
-                return HostnameMatcher::Wildcard {
-                    pattern: pattern.to_string(),
+                return Self::Wildcard {
+                    pattern: host.to_string(),
                     regex,
                 };
             }
         }
-        HostnameMatcher::Exact(pattern.to_string())
+        Self::Exact(host.to_string())
     }
 }
 
-/// 剥离主机名尾部的 `:port`（纯数字）；IPv6 字面量不处理（生态中几乎不出现）。
-fn strip_port(host: &str) -> &str {
-    match host.rsplit_once(':') {
-        Some((h, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => h,
-        _ => host,
+fn split_authority(authority: &str) -> (&str, Option<u16>) {
+    if let Some(rest) = authority.strip_prefix('[')
+        && let Some((host, suffix)) = rest.split_once(']')
+    {
+        return (host, suffix.strip_prefix(':').and_then(|p| p.parse().ok()));
     }
+    if authority.bytes().filter(|b| *b == b':').count() == 1
+        && let Some((host, port)) = authority.rsplit_once(':')
+        && let Ok(port) = port.parse()
+    {
+        return (host, Some(port));
+    }
+    (authority, None)
 }
 
 /// MITM 代理配置。
@@ -91,7 +125,8 @@ pub struct MitmConfig {
     pub hostnames: Vec<HostnameMatcher>,
     /// 主机名排除列表：命中排除的主机不拦截（优先级高于 `hostnames` 白名单）。
     pub excluded_hostnames: Vec<HostnameMatcher>,
-    /// 单个请求/响应可缓存的最大 body 字节数。
+    /// Static rewrite and recorder body cap; selected Surge scripts use their own
+    /// declared limits within a separate 32 MiB inspection envelope.
     pub max_body_size: usize,
     /// 是否启用流量记录。
     pub record_enabled: bool,
@@ -127,7 +162,7 @@ mod tests {
         assert!(!m.matches("www.example.com"));
         assert!(!m.matches("example.com.evil.com"));
         assert!(!m.matches("notexample.com"));
-        assert!(!m.matches("Example.com"));
+        assert!(m.matches("Example.com:443"));
     }
 
     #[test]
@@ -180,16 +215,18 @@ mod tests {
     }
 
     #[test]
-    fn port_suffix_is_stripped() {
-        assert_eq!(
-            HostnameMatcher::from_pattern("*.skyjos.com:58080"),
-            HostnameMatcher::Suffix("skyjos.com".to_string())
-        );
-        assert_eq!(
-            HostnameMatcher::from_pattern("example.com:443"),
-            HostnameMatcher::Exact("example.com".to_string())
-        );
-        // 非数字端口不剥离（非主机名形态，按原文精确匹配）。
+    fn port_constraints_stay_attached_to_their_host() {
+        let matcher = HostnameMatcher::from_pattern("*.skyjos.com:58080");
+        assert!(matcher.matches("api.skyjos.com:58080"));
+        assert!(!matcher.matches("api.skyjos.com:443"));
+        assert!(!matcher.matches("other.test:58080"));
+        let default_tls = HostnameMatcher::from_pattern("Example.COM:443");
+        assert!(default_tls.matches("example.com"));
+        assert!(default_tls.matches("EXAMPLE.COM.:443"));
+        assert!(!default_tls.matches("example.com:8443"));
+        assert!(HostnameMatcher::from_pattern("example.com:*").matches("example.com:8443"));
+        assert!(HostnameMatcher::from_pattern("[::1]:8443").matches("[::1]:8443"));
+        assert!(!HostnameMatcher::from_pattern("[::1]:8443").matches("[::1]:443"));
         assert_eq!(
             HostnameMatcher::from_pattern("example.com:abc"),
             HostnameMatcher::Exact("example.com:abc".to_string())

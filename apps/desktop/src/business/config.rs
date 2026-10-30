@@ -1,9 +1,9 @@
 use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
 use lanpath_client::{
-    EffectiveOverrides, PanelFeatures, ProfileStoreV2, SubscriptionStore, apply_panel_features,
-    build_core_config_v2, compose_singbox_config, core_config::MitmChain,
-    download_missing_rule_sets_warn_only, inject_local_override_warn_only,
-    resolve_remote_overrides,
+    EffectiveOverrides, PanelFeatures, ProfileStoreV2, RemoteFetchContext, RequestProxyMode,
+    SubscriptionStore, apply_panel_features, build_core_config_v2, compose_singbox_config,
+    core_config::MitmChain, inject_local_override_warn_only, prepare_missing_rule_sets_warn_only,
+    resolve_remote_overrides_with_context,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use serde_json::Value;
@@ -11,8 +11,9 @@ use serde_json::Value;
 use super::BusinessService;
 
 impl BusinessService {
+    #[cfg(test)]
     pub(crate) async fn build_config(&self, download_rule_sets: bool) -> LanpathResult<Value> {
-        self.build_config_report(download_rule_sets, None)
+        self.build_config_report(download_rule_sets, None, self.client_config()?)
             .await
             .map(|(value, _)| value)
     }
@@ -21,8 +22,11 @@ impl BusinessService {
         &self,
         download_rule_sets: bool,
         mitm_chain: Option<MitmChain>,
+        config: lanpath_client::ClientConfig,
     ) -> LanpathResult<(Value, Vec<String>)> {
-        let config = self.client_config()?;
+        // Both preview and start prepare before a core session is admitted.
+        // A saved Core port is never permission to borrow an unrelated listener.
+        let cache_only = config.request_proxy_mode == RequestProxyMode::Core;
         let selected_id = config
             .active_subscription_id
             .ok_or_else(|| LanpathError::Client("请先在订阅页选择要使用的订阅".into()))?;
@@ -39,8 +43,15 @@ impl BusinessService {
         }
         let nodes = match store.load_cached_content(selected.id) {
             Some(cached) => cached.singbox_nodes,
+            None if cache_only => {
+                return Err(LanpathError::Client(
+                    "核心请求代理尚未就绪，且所选订阅没有可用节点缓存；请先显式选择其他请求策略获取订阅，或导入已有缓存".into(),
+                ));
+            }
             None => {
-                selected = self.refresh_subscription(selected.id).await?;
+                selected = self
+                    .refresh_subscription_for_config(selected.id, &config)
+                    .await?;
                 store
                     .load_cached_content(selected.id)
                     .map(|cached| cached.singbox_nodes)
@@ -53,6 +64,14 @@ impl BusinessService {
                     })?
             }
         };
+        let slices = load_slices(&self.root);
+        let features = panel_features(self, &slices, &config);
+        let mixed_port = config.mixed_port;
+        let requests = if cache_only {
+            RemoteFetchContext::cache_only()
+        } else {
+            RemoteFetchContext::stopped(config)?
+        };
         let subscription = serde_json::json!({ "outbounds": nodes });
         let (effective, warnings) = match selected.profile_id {
             Some(profile_id) => {
@@ -63,34 +82,33 @@ impl BusinessService {
                     .ok_or_else(|| {
                         LanpathError::Client("订阅关联的覆写模板不存在，请重新关联".into())
                     })?;
-                resolve_remote_overrides(&self.root.join("profile_cache"), &profile).await
+                resolve_remote_overrides_with_context(
+                    &self.root.join("profile_cache"),
+                    &profile,
+                    &requests,
+                )
+                .await
             }
             None => (EffectiveOverrides::default(), Vec::new()),
         };
         for warning in warnings {
             tracing::warn!(%warning, "实验覆写远程资源降级");
         }
-        let slices = load_slices(&self.root);
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
-        let mut value =
-            compose_singbox_config(&profile_config, self.bindings.mixed_port(), mitm_chain)?;
+        let mut value = compose_singbox_config(&profile_config, mixed_port, mitm_chain)?;
         if download_rule_sets {
-            download_missing_rule_sets_warn_only(&self.root, &value, &|message| {
+            prepare_missing_rule_sets_warn_only(&self.root, &value, &requests, &|message| {
                 tracing::info!(%message, "实验规则集启动补齐");
             })
             .await;
         }
         inject_local_override_warn_only(&self.root, &mut value);
-        apply_panel_features(
-            &mut value,
-            &safe_features(self, &slices, config.normalized_rule_mode()),
-        );
+        apply_panel_features(&mut value, &features);
         remove_dashboard_download(&mut value);
 
         let available = if download_rule_sets {
-            lanpath_client::ruleset_manager::ensure_builtin_rule_sets(
-                &self.root,
-                &config.github_proxy_prefix,
+            lanpath_client::ruleset_manager::prepare_builtin_rule_sets(
+                &self.root, &value, &requests,
             )
             .await
         } else {
@@ -109,8 +127,10 @@ impl BusinessService {
         // Preview is the start gate, so it must exercise the same resource-fill
         // path as start; otherwise a newly referenced remote rule set would make
         // preview fail before start gets a chance to download it.
-        let value = self.build_config(true).await?;
-        self.validator()?.validate_value(&value).await?;
+        let config = self.client_config()?;
+        let validator = self.validator(&config);
+        let (value, _) = self.build_config_report(true, None, config).await?;
+        validator.validate_value(&value).await?;
         Ok(serde_json::to_string_pretty(&value)?)
     }
 }
@@ -125,25 +145,25 @@ fn load_slices(root: &std::path::Path) -> ConfigSlices {
     }
 }
 
-fn safe_features(
+fn panel_features(
     service: &BusinessService,
     slices: &ConfigSlices,
-    rule_mode: &str,
+    config: &lanpath_client::ClientConfig,
 ) -> PanelFeatures {
     PanelFeatures {
-        tun_enabled: false,
-        tun_stack: "mixed".into(),
-        tun_auto_route: false,
-        clash_api_enabled: true,
-        clash_api_port: service.bindings.api_port(),
-        clash_api_secret: String::new(),
-        clash_api_ui: "zashboard".into(),
-        rule_mode: rule_mode.to_string(),
-        ipv6_enabled: false,
-        dns_fakeip_enabled: false,
+        tun_enabled: config.tun_enabled,
+        tun_stack: config.tun_stack.clone(),
+        tun_auto_route: config.tun_auto_route,
+        clash_api_enabled: config.clash_api_enabled,
+        clash_api_port: config.clash_api_port,
+        clash_api_secret: config.clash_api_secret.clone(),
+        clash_api_ui: config.clash_api_ui.clone(),
+        rule_mode: config.normalized_rule_mode().to_owned(),
+        ipv6_enabled: config.ipv6_enabled,
+        dns_fakeip_enabled: config.dns_fakeip_enabled,
         data_dir: service.root.join("cache").to_string_lossy().into_owned(),
         dns_mode: lanpath_client::core_config::dns_mode_from_slices(slices),
-        github_proxy_prefix: String::new(),
+        github_proxy_prefix: config.github_proxy_prefix.clone(),
     }
 }
 

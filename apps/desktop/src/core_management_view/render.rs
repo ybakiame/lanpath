@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, button::Button, scroll::ScrollableElement as _,
 };
@@ -15,7 +16,11 @@ impl Render for CoreManagementView {
         let disabled = self.actions_disabled();
         let selection_disabled = self.selection_disabled();
         let startup_summary = gpui_kit::SharedString::from(self.startup.summary());
-        let empty = "尚无已安装核心。检查远端通道后下载一个版本。";
+        let empty = if cfg!(windows) {
+            "尚无已安装核心。可离线安装内置核心，或检查远端通道后下载。"
+        } else {
+            "尚无已安装核心。检查远端通道后下载一个版本。"
+        };
         let status = self
             .error
             .clone()
@@ -26,33 +31,57 @@ impl Render for CoreManagementView {
                 } else if self.locked {
                     "核心运行或其他配置操作期间不可更改核心".into()
                 } else {
-                    "核心操作就绪；下载完成并校验后会自动选中".into()
+                    "核心操作就绪；安装或下载完成并校验后会自动选中".into()
                 }
             });
+        let actions = div().flex().items_center().flex_wrap().gap_2();
+        #[cfg(windows)]
+        let actions = actions.child(
+            Button::new("core-install-bundled")
+                .accessibility_id("core-install-bundled")
+                .label("安装并选中内置核心")
+                .disabled(selection_disabled)
+                .on_click(cx.listener(|this, _, _, cx| this.install_bundled(cx))),
+        );
+        let actions = actions
+            .child(
+                Button::new("core-refresh")
+                    .accessibility_id("core-refresh")
+                    .label("刷新本地核心")
+                    .disabled(disabled)
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+            )
+            .child(
+                Button::new("core-check-remote")
+                    .accessibility_id("core-check-remote")
+                    .label("检查远端通道")
+                    .disabled(disabled)
+                    .on_click(cx.listener(|this, _, _, cx| this.check_remote(cx))),
+            );
         div().flex().flex_col().flex_1().min_h_0().min_w_0()
-            .overflow_y_scrollbar()
-            .child(div().flex().flex_col().gap_4().p_1()
-                .child(div().text_lg().child("核心"))
+            .child(div().flex().flex_col().flex_shrink_0().min_w_0().gap_3().p_1().pb_3()
+                .border_b_1().border_color(cx.theme().border)
+                .child(div().text_lg().font_semibold().child("核心"))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("仅管理实验数据目录内的 sing-box；不会修改系统代理、TUN 或现行应用。"))
                 .children(self.core.core_override().map(|path| {
                     div().id("core-test-override").accessibility_id("core-test-override")
                         .role(Role::Status).text_sm().text_color(cx.theme().warning)
-                        .child(format!("测试覆盖正在生效：{}。保存的选中项不会用于启动；覆盖期间禁止下载、选中和删除。", path.display()))
+                        .min_w_0().whitespace_normal()
+                        .child(format!("测试覆盖正在生效：{}。保存的选中项不会用于启动；覆盖期间不可安装、下载、选中或删除核心。", path.display()))
                 }))
-                .child(div().flex().items_center().flex_wrap().gap_2()
-                    .child(Button::new("core-refresh").accessibility_id("core-refresh")
-                        .label("刷新本地核心").disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))))
-                    .child(Button::new("core-check-remote").accessibility_id("core-check-remote")
-                        .label("检查远端通道").disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| this.check_remote(cx)))))
+                .child(actions)
+                .children(cfg!(windows).then(|| div().text_sm().text_color(cx.theme().muted_foreground)
+                    .child("完整 GPUI 发行包携带内置管理核心，可离线安装；受控 TUN 需要此核心。安装和选中不会接管网络。")))
                 .child(div().id("core-management-status").accessibility_id("core-management-status")
                     .role(Role::Status).aria_label(status.clone()).text_sm()
                     .text_color(if self.error.is_some() { cx.theme().danger } else { cx.theme().muted_foreground })
-                    .child(status))
-                .child(div().flex().flex_col().gap_3()
-                    .child("已安装版本")
+                    .min_w_0().max_h_16().overflow_y_scrollbar().child(status)))
+            .child(div().flex_1().min_h_0().min_w_0().overflow_y_scrollbar()
+                .child(div().flex().flex_col().flex_shrink_0().min_w_0().w_full()
+                    .max_w(gpui_kit::rems(64.0)).gap_6().p_1().pt_4()
+                .child(div().flex().flex_col().min_w_0().gap_3()
+                    .child(div().font_semibold().child("已安装版本"))
                     .children((self.local.is_empty() && self.error.is_none()).then(|| div()
                         .id("core-inventory-empty").accessibility_id("core-inventory-empty")
                         .role(Role::Status).aria_label(empty).text_sm()
@@ -69,10 +98,11 @@ impl Render for CoreManagementView {
                         div().id(gpui_kit::SharedString::from(row_id.clone())).accessibility_id(row_id)
                             .role(Role::Group).aria_label(format!("sing-box {version} · {state} · {path}"))
                             .flex().flex_col().gap_2().border_b_1().border_color(cx.theme().border).pb_3()
+                            .min_w_0().w_full()
                             .child(div().flex().items_center().flex_wrap().gap_2()
-                                .child(format!("sing-box {version}"))
-                                .children(core.is_active().then(|| div().text_sm().child("当前选中"))))
-                            .child(div().text_sm().text_color(cx.theme().muted_foreground)
+                                .child(div().font_semibold().child(format!("sing-box {version}")))
+                                .children(core.is_active().then(|| div().text_sm().text_color(cx.theme().primary).child("当前选中"))))
+                            .child(div().min_w_0().w_full().whitespace_normal().text_sm().text_color(cx.theme().muted_foreground)
                                 .child(path))
                             .child(div().flex().items_center().flex_wrap().gap_2()
                                 .child(Button::new(gpui_kit::SharedString::from(select_id.clone()))
@@ -85,7 +115,7 @@ impl Render for CoreManagementView {
                                     .on_click(cx.listener(move |this, _, window, cx| this.confirm_delete(delete_path.clone(), window, cx)))))
                     })))
                 .child(div().flex().flex_col().gap_3()
-                    .child("远端通道")
+                    .child(div().font_semibold().child("远端通道"))
                     .child(div().text_sm().text_color(cx.theme().muted_foreground)
                         .child(if self.remote_checked {
                             "以下为上次成功检查返回的实际版本；缺少的通道没有可下载版本。"
@@ -112,7 +142,7 @@ impl Render for CoreManagementView {
                         row
                     })))
                 .child(div().flex().flex_col().gap_2()
-                    .child("最近启动记录")
+                    .child(div().font_semibold().child("最近启动记录"))
                     .child(div().id("core-startup-summary").accessibility_id("core-startup-summary")
                         .role(Role::Status).aria_label(startup_summary.clone()).text_sm().child(startup_summary))
                     .children(self.startup.steps().iter().map(|step| {
@@ -127,8 +157,9 @@ impl Render for CoreManagementView {
                         let accessible = step.detail().map_or_else(|| summary.clone(), |detail| format!("{summary} · {detail}"));
                         div().id(gpui_kit::SharedString::from(id.clone())).accessibility_id(id)
                             .role(Role::Status).aria_label(accessible).flex().flex_col().gap_1().text_sm()
+                            .min_w_0().whitespace_normal()
                             .child(summary)
                             .children(step.detail().map(|detail| div().text_color(cx.theme().muted_foreground).child(detail.to_string())))
-                    })) ))
+                    })) )))
     }
 }

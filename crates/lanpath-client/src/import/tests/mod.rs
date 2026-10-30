@@ -1,433 +1,85 @@
 use super::*;
-use lanpath_mitm::RewriteKind;
+use lanpath_mitm::{RewriteAction, RewriteEngine};
 
 mod dialect_ext;
+mod surge_qx;
 
 #[test]
-fn qx_rewrite_local_all_rule_types() {
-    let content = r#"
-# 注释
-[rewrite_local]
-^https?://example\.com/api/(.*) url-and-header https://cdn.example.com/api/$1
-^https?://example\.com/redir url-307 https://target.example.com/
-^https?://example\.com/old url-302 https://new.example.com/$1
-^https?://example\.com/rsp script-response-body https://example.com/rsp.js
-^https?://example\.com/req script-request-body https://example.com/req.js
-^https?://example\.com/echo script-echo-response https://example.com/echo.js
-^https?://example\.com/block reject
-^https?://example\.com/block2 reject-200
-^https?://example\.com/block3 reject-dict
-^https?://example\.com/page url-response-body secret REDACTED
-^https?://example\.com/hdr url-request-header token MASKED
-"#;
-    let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-
-    // 8 rewrites: UrlRewrite x1, Redirect x2, Reject x3, BodyRewrite x1, HeaderBlockRewrite x1
-    assert_eq!(cfg.rewrites.len(), 8);
-    assert!(matches!(
-        cfg.rewrites[0].kind,
-        RewriteKind::UrlRewrite { .. }
-    ));
-    match &cfg.rewrites[1].kind {
-        RewriteKind::Redirect { status, target } => {
-            assert_eq!(*status, 307);
-            assert_eq!(target, "https://target.example.com/");
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    match &cfg.rewrites[2].kind {
-        RewriteKind::Redirect { status, target } => {
-            assert_eq!(*status, 302);
-            assert_eq!(target, "https://new.example.com/$1");
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    assert!(matches!(cfg.rewrites[3].kind, RewriteKind::Reject { .. }));
-    assert!(matches!(cfg.rewrites[4].kind, RewriteKind::Reject { .. }));
-    assert!(matches!(cfg.rewrites[5].kind, RewriteKind::Reject { .. }));
-    assert!(matches!(
-        cfg.rewrites[6].kind,
-        RewriteKind::BodyRewrite {
-            phase: Phase::Response,
-            ..
-        }
-    ));
-    assert!(matches!(
-        cfg.rewrites[7].kind,
-        RewriteKind::HeaderBlockRewrite {
-            phase: Phase::Request,
-            ..
-        }
-    ));
-    match &cfg.rewrites[0].kind {
-        RewriteKind::UrlRewrite { target } => {
-            assert_eq!(target, "https://cdn.example.com/api/$1")
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    match &cfg.rewrites[7].kind {
-        RewriteKind::HeaderBlockRewrite { replacement, .. } => assert_eq!(replacement, "MASKED"),
-        other => panic!("unexpected kind: {other:?}"),
-    }
-
-    // 3 script hooks
-    assert_eq!(cfg.scripts.len(), 3);
-    assert_eq!(cfg.script_urls.len(), 3);
-    assert_eq!(cfg.scripts[0].kind, ScriptKind::HttpResponse);
-    assert!(cfg.scripts[0].requires_body);
-    assert_eq!(cfg.scripts[0].max_size, 131072);
-    assert!(cfg.scripts[0].source.is_empty());
-    assert_eq!(cfg.script_urls[0].0, "hook-0");
-    assert_eq!(cfg.script_urls[0].1, "https://example.com/rsp.js");
-    assert_eq!(cfg.scripts[1].kind, ScriptKind::HttpRequest);
-    assert!(cfg.scripts[1].requires_body);
-    assert_eq!(cfg.script_urls[1].1, "https://example.com/req.js");
-    // script-echo-response 在请求阶段合成响应（不经网络），映射 HttpRequest 无需 body。
-    assert_eq!(cfg.scripts[2].kind, ScriptKind::HttpRequest);
-    assert!(!cfg.scripts[2].requires_body);
-    assert_eq!(cfg.script_urls[2].1, "https://example.com/echo.js");
-
-    // url-and-header 的 header 部分丢弃，记入偏差
-    assert!(!cfg.warnings.is_empty());
-    assert!(cfg.warnings.iter().any(|w| w.contains("url-and-header")));
-}
-
-#[test]
-fn qx_task_local_and_mitm_hostnames() {
-    let content = r#"
+fn qx_tasks_and_hostname_exclusions_keep_their_identity() {
+    let cfg = parse_import(
+        r#"
 [task_local]
-0 9 * * * https://example.com/sign.js, tag=每日签到, img-url=https://example.com/icon.png
-30 12 * * * https://example.com/clean.js
-
+0 9 * * * https://assets.invalid/task.js, tag=daily, argument="a,b", timeout=3
 [mitm]
-hostname = *.example.com, api.example2.com, -exclude.example.com
-"#;
-    let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-
-    assert_eq!(cfg.task_scripts.len(), 2);
-    let (task, url) = &cfg.task_scripts[0];
-    assert_eq!(task.name, "每日签到");
-    assert_eq!(task.cron_expr, "0 0 9 * * *");
-    assert!(task.source.is_empty());
-    assert!(task.enabled);
-    assert_eq!(task.dialect, ScriptDialect::QuantumultX);
-    assert_eq!(url, "https://example.com/sign.js");
-
-    let (task2, url2) = &cfg.task_scripts[1];
-    assert_eq!(task2.name, "clean"); // derived from URL when no tag
-    assert_eq!(task2.cron_expr, "0 30 12 * * *");
-    assert_eq!(url2, "https://example.com/clean.js");
-
-    // `-` prefix exclusions are kept with prefix in whitelist, no warning
-    assert_eq!(
-        cfg.hostnames,
-        vec![
-            "*.example.com".to_string(),
-            "api.example2.com".to_string(),
-            "-exclude.example.com".to_string()
-        ]
-    );
-    assert!(
-        !cfg.warnings
-            .iter()
-            .any(|w| w.contains("exclude.example.com"))
-    );
-}
-
-#[test]
-fn mitm_hostname_bang_prefix_normalized_to_dash() {
-    let content = r#"
-[mitm]
-hostname = *.example.com, !exclude.example.com
-"#;
-    let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-
-    // `!` prefix normalized to `-` and kept in whitelist, no exclusion warning.
-    assert_eq!(
-        cfg.hostnames,
-        vec![
-            "*.example.com".to_string(),
-            "-exclude.example.com".to_string()
-        ]
-    );
-    assert!(
-        !cfg.warnings
-            .iter()
-            .any(|w| w.contains("exclude.example.com"))
-    );
-}
-
-#[test]
-fn surge_script_url_rewrite_header_rewrite_map_local_mitm() {
-    let content = r#"
-[Script]
-json = type=http-response,pattern=^https://api\.example\.com/,script-path=https://example.com/json.js,requires-body=true,max-size=131072,timeout=10
-req = type=http-request,pattern=^https://example\.com/,script-path=https://example.com/req.js
-task = type=cron,cronexp="* * * * *",script-path=https://example.com/task.js
-
-[URL Rewrite]
-^https://old\.example\.com/ https://new.example.com/$1
-^https://old2\.example\.com/ https://new2.example.com/ request-header
-
-[Header Rewrite]
-^https://example\.com/ header-replace X-Foo bar baz
-^https://example\.com/ header-del X-Bar
-
-[Map Local]
-^https://example\.com/offline data="<h1>offline</h1>" data-type=text status-code=200
-
-[MITM]
-hostname = %APPEND% *.example.com, -exclude.example.com
-"#;
-    let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
-
-    // [Script] script hooks
-    assert_eq!(cfg.scripts.len(), 2);
-    assert_eq!(cfg.script_urls.len(), 2);
-    assert_eq!(cfg.scripts[0].name, "json");
-    assert_eq!(cfg.scripts[0].kind, ScriptKind::HttpResponse);
-    assert!(cfg.scripts[0].requires_body);
-    assert_eq!(cfg.scripts[0].max_size, 131072);
-    assert_eq!(
-        cfg.scripts[0].pattern.as_str(),
-        "^https://api\\.example\\.com/"
-    );
-    assert!(cfg.scripts[0].source.is_empty());
-    assert_eq!(
-        cfg.script_urls[0],
-        (
-            "json".to_string(),
-            "https://example.com/json.js".to_string()
-        )
-    );
-    assert_eq!(cfg.scripts[1].kind, ScriptKind::HttpRequest);
-    assert!(!cfg.scripts[1].requires_body);
-    assert_eq!(cfg.scripts[1].max_size, 131072); // default when max-size not specified
-
-    // [Script] cron → TaskScript (5-part cron padded to 6)
+hostname = %APPEND% *.example.com, !excluded.example.com
+skip_validating_cert = true
+"#,
+        ScriptDialect::QuantumultX,
+    )
+    .unwrap();
     assert_eq!(cfg.task_scripts.len(), 1);
-    let (task, url) = &cfg.task_scripts[0];
-    assert_eq!(task.name, "task");
-    assert_eq!(task.cron_expr, "0 * * * * *");
-    assert_eq!(task.dialect, ScriptDialect::Surge);
-    assert!(task.enabled);
-    assert!(task.source.is_empty());
-    assert_eq!(url, "https://example.com/task.js");
-
-    // [URL Rewrite] 2 rules
-    match &cfg.rewrites[0].kind {
-        RewriteKind::UrlRewrite { target } => {
-            assert_eq!(target, "https://new.example.com/$1")
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    assert!(matches!(
-        cfg.rewrites[1].kind,
-        RewriteKind::UrlRewrite { .. }
-    ));
-
-    // [Header Rewrite] 2 rules
-    match &cfg.rewrites[2].kind {
-        RewriteKind::HeaderRewrite {
-            phase: Phase::Request,
-            name,
-            value,
-        } => {
-            assert_eq!(name, "X-Foo");
-            assert_eq!(value.as_deref(), Some("bar baz"));
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    match &cfg.rewrites[3].kind {
-        RewriteKind::HeaderRewrite {
-            phase: Phase::Request,
-            name,
-            value,
-        } => {
-            assert_eq!(name, "X-Bar");
-            assert_eq!(value, &None);
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-
-    // [Map Local] → Mock
-    match &cfg.rewrites[4].kind {
-        RewriteKind::Mock {
-            status,
-            body,
-            headers,
-        } => {
-            assert_eq!(*status, 200);
-            assert_eq!(body, b"<h1>offline</h1>");
-            // data-type=text → Content-Type: text/plain (appended when no explicit header=)
-            assert_eq!(
-                headers,
-                &vec![("Content-Type".to_string(), "text/plain".to_string())]
-            );
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-
-    // [MITM]: %APPEND% stripped, - exclusions kept with prefix
-    assert_eq!(
-        cfg.hostnames,
-        vec![
-            "*.example.com".to_string(),
-            "-exclude.example.com".to_string()
-        ]
-    );
-    assert!(
-        !cfg.warnings
-            .iter()
-            .any(|w| w.contains("exclude.example.com"))
-    );
-    assert!(cfg.warnings.iter().any(|w| w.contains("request-header")));
-}
-
-/// iQiyi real sample: `header="Content-Type:application/json"` and `data-type=text`
-/// coexist; explicit header= takes priority (no data-type / header related warning).
-#[test]
-fn map_local_iqiyi_sample_with_explicit_header() {
-    let content = r#"
-[Map Local]
-^https?:\/\/iface2\.iqiyi\.com\/control\/3\.0\/init_proxy\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-"#;
-    let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
-
-    assert_eq!(cfg.rewrites.len(), 1);
-    match &cfg.rewrites[0].kind {
-        RewriteKind::Mock {
-            status,
-            body,
-            headers,
-        } => {
-            assert_eq!(*status, 200);
-            assert_eq!(body, b"{}");
-            assert_eq!(
-                headers,
-                &vec![("Content-Type".to_string(), "application/json".to_string())]
-            );
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    assert!(
-        cfg.warnings.is_empty(),
-        "should not produce data-type/header warnings: {:?}",
-        cfg.warnings
-    );
-}
-
-/// `header=` without colon and unknown `data-type` both record warnings;
-/// repeatable `header=` collected in order;
-/// when `header=` explicitly specifies Content-Type, `data-type` mapping is not appended
-/// (explicit takes priority).
-#[test]
-fn map_local_invalid_header_and_unknown_data_type_warn() {
-    let content = r#"
-[Map Local]
-^https?://example\.com/off data="x" data-type=text header="X-A:1" header="broken" header="Content-Type:text/html" status-code=418
-^https?://example\.com/unknown data="y" data-type=magic
-"#;
-    let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
-
-    assert_eq!(cfg.rewrites.len(), 2);
-    match &cfg.rewrites[0].kind {
-        RewriteKind::Mock {
-            status,
-            body,
-            headers,
-        } => {
-            assert_eq!(*status, 418);
-            assert_eq!(body, b"x");
-            // explicit Content-Type takes priority: data-type=text text/plain not appended;
-            // "broken" without colon is dropped.
-            assert_eq!(
-                headers,
-                &vec![
-                    ("X-A".to_string(), "1".to_string()),
-                    ("Content-Type".to_string(), "text/html".to_string()),
-                ]
-            );
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
-    match &cfg.rewrites[1].kind {
-        RewriteKind::Mock {
-            status,
-            body,
-            headers,
-        } => {
-            assert_eq!(*status, 200);
-            assert_eq!(body, b"y");
-            assert!(
-                headers.is_empty(),
-                "unknown data-type should not append Content-Type"
-            );
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
+    let task = &cfg.task_scripts[0].0;
+    assert_eq!(task.name, "daily");
+    assert_eq!(task.cron_expr, "0 0 9 * * *");
+    assert_eq!(task.argument.as_deref(), Some("a,b"));
+    assert_eq!(task.timeout_ms, Some(3000));
+    assert_eq!(task.source_id, cfg.task_scripts[0].1);
+    assert_eq!(cfg.hostnames, ["*.example.com", "-excluded.example.com"]);
     assert!(
         cfg.warnings
             .iter()
-            .any(|w| w.contains("invalid header 'broken'")),
-        "should record invalid header warning: {:?}",
-        cfg.warnings
-    );
-    assert!(
-        cfg.warnings
-            .iter()
-            .any(|w| w.contains("unknown data-type 'magic'")),
-        "should record unknown data-type warning: {:?}",
-        cfg.warnings
+            .any(|warning| warning.contains("unsupported MITM option"))
     );
 }
 
 #[test]
-fn skips_unknown_comment_blank_lines_with_warnings() {
-    let content = r#"
+fn invalid_and_unknown_directives_do_not_create_network_effects() {
+    let cfg = parse_import(
+        r#"
 [rewrite_local]
-# 注释
-; 也是注释
-
-^https?://example\.com/ok url-and-header https://ok.example.com/
-totally unknown line
-also unknown
-[task_local]
-garbage
-[mitm]
-hostname = *.example.com
-"#;
-    let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-
-    assert_eq!(cfg.rewrites.len(), 1);
-    assert_eq!(cfg.hostnames, vec!["*.example.com".to_string()]);
-    assert_eq!(cfg.task_scripts.len(), 0);
-    // Unknown lines x2, unparseable task line x1, url-and-header header 丢弃偏差 x1；
-    // comments / blank lines are silently skipped
+# Comments are not diagnostics.
+( url reject
+^https://private.invalid/ url-and-header https://secret.invalid/
+^https://private.invalid/ url invented-action secret
+[unknown]
+token=secret
+"#,
+        ScriptDialect::QuantumultX,
+    )
+    .unwrap();
+    assert!(cfg.rewrites.is_empty());
+    assert!(cfg.scripts.is_empty());
     assert_eq!(cfg.warnings.len(), 4);
+    assert!(
+        cfg.warnings
+            .iter()
+            .all(|warning| !warning.contains("secret") && !warning.contains("private.invalid"))
+    );
 }
 
 #[test]
-fn invalid_regex_skipped_with_warning() {
-    let content = r#"
-[rewrite_local]
-( url-and-header https://broken.example.com/
-^https?://ok\.example\.com/ url-and-header https://ok2.example.com/
-
-[Script]
-bad = type=http-response,pattern=(,script-path=https://example.com/bad.js
-"#;
-    let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
-
-    // Invalid regex records 1 warning each in rewrite and script, no panic
+fn map_local_invalid_headers_and_file_payloads_remain_inactive() {
+    let cfg = parse_import(
+        r#"
+[Map Local]
+^https://a\.invalid/ data-type=text data=x header="broken"
+^https://b\.invalid/ data-type=file data=private.json
+^https://c\.invalid/ data-type=text data="{}" header="Content-Type:application/json" status-code=418
+"#,
+        ScriptDialect::Surge,
+    )
+    .unwrap();
     assert_eq!(cfg.rewrites.len(), 1);
-    assert_eq!(cfg.scripts.len(), 0);
-    assert_eq!(
-        cfg.warnings
-            .iter()
-            .filter(|w| w.contains("invalid regex"))
-            .count(),
-        2
+    assert_eq!(cfg.warnings.len(), 2);
+    let engine = RewriteEngine {
+        rules: cfg.rewrites,
+    };
+    let action = engine
+        .apply_request(&mut "https://c.invalid/".into(), &mut Vec::new(), &mut None)
+        .unwrap();
+    assert!(
+        matches!(action, RewriteAction::Mock { status: 418, body, headers }
+        if body == b"{}" && headers == [("Content-Type".into(), "application/json".into())])
     );
 }
 
@@ -691,16 +343,12 @@ default = type=http-response,pattern=^https://d\.com/,script-path=https://exampl
     assert_eq!(cfg.scripts.len(), 4);
     assert_eq!(
         cfg.scripts[0].max_size,
-        10 * 1024 * 1024,
+        usize::MAX,
         "max-size=-1 → unlimited"
     );
-    assert_eq!(
-        cfg.scripts[1].max_size,
-        10 * 1024 * 1024,
-        "max-size=0 → unlimited"
-    );
+    assert_eq!(cfg.scripts[1].max_size, 0, "max-size=0 → unlimited");
     assert_eq!(cfg.scripts[2].max_size, 4096, "normal number as-is");
-    assert_eq!(cfg.scripts[3].max_size, 131072, "default fallback");
+    assert_eq!(cfg.scripts[3].max_size, 10 * 1024 * 1024, "Surge default");
 }
 
 /// ①③④ BaiDuTieBa.sgmodule real sample full assertion: naive desc, triple-brace
@@ -733,7 +381,7 @@ fn surge_script_badubatieba_sample_fixture() {
         r"^https?:\/\/(tiebac|c\.tieba)\.baidu\.com\/...$"
     );
     assert!(cfg.scripts[0].requires_body);
-    assert_eq!(cfg.scripts[0].max_size, 10 * 1024 * 1024);
+    assert_eq!(cfg.scripts[0].max_size, usize::MAX);
     assert_eq!(
         cfg.scripts[0].argument.as_deref(),
         Some("per_filter_video_thread={{{per_filter_video}}}")
@@ -840,7 +488,7 @@ http-request ^https?:\/\/spclient\.wg\.spotify\.com(:443)?\/color-lyrics\/v2\/tr
     assert_eq!(cfg.scripts[0].kind, ScriptKind::HttpResponse);
     assert_eq!(
         cfg.scripts[0].pattern.as_str(),
-        r"^https?:\/\/api\.spotify\.com\/v1\/tracks\?"
+        r"(?i)^https?://api\.spotify\.com/v1/tracks\?"
     );
     assert!(cfg.scripts[0].requires_body);
     // `argument=` preserved as-is (contains `[{key},...]` template; commas/braces not mistakenly split).
@@ -933,7 +581,7 @@ fn dualsubs_spotify_surge_sgmodule_sample_fixture() {
 #!desc = Spotify 增强及双语歌词
 #!arguments = Types:"Translate,External",Languages[0]:"AUTO",Languages[1]:"ZH",Vendor:"Google",LogLevel:"WARN"
 [Script]
-🍿️ DualSubs.Spotify.Tracks = type=http-response, pattern=^https?:\/\/api\.spotify\.com\/v1\/tracks\?, requires-body=1, engine=webview, script-path=https://example.com/r.js, argument=Types="{{{Types}}}"&Languages[0]="{{{Languages[0]}}}"&Vendor="{{{Vendor}}}"
+🍿️ DualSubs.Spotify.Tracks = type=http-response, pattern=^https?:\/\/api\.spotify\.com\/v1\/tracks\?, requires-body=1, script-path=https://example.com/r.js, argument=Types="{{{Types}}}"&Languages[0]="{{{Languages[0]}}}"&Vendor="{{{Vendor}}}"
 "#;
     let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
 

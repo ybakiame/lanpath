@@ -16,7 +16,9 @@ use tokio::sync::{mpsc, oneshot};
 use crate::engine::ScriptEngine;
 use crate::engine_quickjs::QuickJsEngine;
 use crate::host::ScriptHost;
-use crate::types::{ScriptDialect, ScriptKind, ScriptLimits, ScriptOutput};
+use crate::types::{
+    ScriptDialect, ScriptExecutionMetadata, ScriptKind, ScriptLimits, ScriptOutput,
+};
 use lanpath_common::{LanpathError, LanpathResult};
 
 /// 一条待执行脚本作业。
@@ -27,8 +29,17 @@ struct Job {
     /// Surge/Loon 模块 `argument=` 模板替换后的字符串（`None` 表示无模块参数）。
     argument: Option<String>,
     dialect: ScriptDialect,
-    script_name: String,
+    metadata: ScriptExecutionMetadata,
+    cancellation: Arc<crate::cancellation::Cancellation>,
+    deadline: std::time::Instant,
     respond: oneshot::Sender<LanpathResult<ScriptOutput>>,
+}
+
+struct CancelOnDrop(Arc<crate::cancellation::Cancellation>);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
 }
 
 /// 脚本执行 actor：专有 OS 线程 + 专用 current_thread tokio runtime。
@@ -41,6 +52,7 @@ pub struct ScriptWorker {
     tx: mpsc::Sender<Job>,
     close_tx: mpsc::Sender<()>,
     handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    limits: ScriptLimits,
 }
 
 impl ScriptWorker {
@@ -78,24 +90,51 @@ impl ScriptWorker {
                                             arg,
                                             argument,
                                             dialect,
-                                            script_name,
-                                            respond,
+                                            metadata,
+                                            cancellation,
+                                            deadline,
+                                            mut respond,
                                         }) = maybe_job
                                         else {
                                             break;
                                         };
+                                        if respond.is_closed() { continue; }
+                                        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                                        if remaining.is_zero() {
+                                            let _ = respond.send(Err(LanpathError::Script("script queue deadline exceeded".into())));
+                                            continue;
+                                        }
+                                        let job_limits = ScriptLimits {
+                                            timeout_ms: remaining.as_millis().min(u64::MAX as u128) as u64,
+                                            ..limits
+                                        };
                                         let result = execute(
                                             &host,
-                                            limits,
+                                            job_limits,
                                             &source,
                                             kind,
                                             arg,
                                             argument.as_deref(),
                                             dialect,
-                                            &script_name,
-                                        )
-                                        .await;
+                                            metadata,
+                                            cancellation.clone(),
+                                        );
+                                        tokio::pin!(result);
+                                        let mut stopping = false;
+                                        let result = tokio::select! {
+                                            result = &mut result => result,
+                                            _ = respond.closed() => {
+                                                cancellation.cancel();
+                                                result.await
+                                            },
+                                            _ = close_rx.recv() => {
+                                                stopping = true;
+                                                cancellation.cancel();
+                                                result.await
+                                            }
+                                        };
                                         let _ = respond.send(result);
+                                        if stopping { break; }
                                     }
                                     close = close_rx.recv() => {
                                         if close.is_some() {
@@ -120,6 +159,7 @@ impl ScriptWorker {
             tx,
             close_tx,
             handle: Arc::new(Mutex::new(handle)),
+            limits,
         }
     }
 
@@ -136,22 +176,64 @@ impl ScriptWorker {
         dialect: ScriptDialect,
         script_name: &str,
     ) -> LanpathResult<ScriptOutput> {
+        self.run_script_with_timeout(
+            source,
+            kind,
+            arg,
+            argument,
+            dialect,
+            ScriptExecutionMetadata {
+                name: script_name.to_owned(),
+                source_id: script_name.to_owned(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+    }
+
+    /// The wall-clock deadline includes queue admission and time waiting behind other scripts.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_script_with_timeout(
+        &self,
+        source: &str,
+        kind: ScriptKind,
+        arg: Option<serde_json::Value>,
+        argument: Option<&str>,
+        dialect: ScriptDialect,
+        metadata: ScriptExecutionMetadata,
+        timeout_ms: Option<u64>,
+    ) -> LanpathResult<ScriptOutput> {
+        let timeout_ms = timeout_ms.unwrap_or(self.limits.timeout_ms);
+        let deadline = std::time::Instant::now()
+            .checked_add(std::time::Duration::from_millis(timeout_ms))
+            .ok_or_else(|| LanpathError::Script("script timeout exceeds clock range".into()))?;
         let (respond, rx) = oneshot::channel();
+        let cancellation = Arc::new(crate::cancellation::Cancellation::default());
+        let _cancel_on_drop = CancelOnDrop(cancellation.clone());
         let job = Job {
             source: source.to_string(),
             kind,
             arg,
             argument: argument.map(str::to_string),
             dialect,
-            script_name: script_name.to_string(),
+            metadata,
+            deadline,
             respond,
+            cancellation,
         };
-        self.tx
-            .send(job)
-            .await
-            .map_err(|_| LanpathError::Script("worker died".into()))?;
-        rx.await
-            .map_err(|_| LanpathError::Script("worker died".into()))?
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+            self.tx
+                .send(job)
+                .await
+                .map_err(|_| LanpathError::Script("worker died".into()))?;
+            rx.await
+                .map_err(|_| LanpathError::Script("worker died".into()))?
+        })
+        .await
+        .map_err(|_| {
+            LanpathError::Script("script wall-clock deadline exceeded (including queue)".into())
+        })?
     }
 
     /// 关闭 worker：发送关闭消息并 join 线程。
@@ -179,10 +261,11 @@ async fn execute(
     arg: Option<serde_json::Value>,
     argument: Option<&str>,
     dialect: ScriptDialect,
-    script_name: &str,
+    metadata: ScriptExecutionMetadata,
+    cancellation: Arc<crate::cancellation::Cancellation>,
 ) -> LanpathResult<ScriptOutput> {
-    let mut engine =
-        QuickJsEngine::new(Arc::clone(host), dialect, limits, script_name.to_string())?;
+    let mut engine = QuickJsEngine::with_metadata(Arc::clone(host), dialect, limits, metadata)?;
+    engine.cancellation = cancellation;
     engine.run_script(source, kind, arg, argument).await
 }
 

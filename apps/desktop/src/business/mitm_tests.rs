@@ -71,19 +71,25 @@ async fn generated_pipeline_records_real_mitm_traffic() {
         .unwrap();
 
     let client_config = business.client_config().unwrap();
-    let mitm_service = MitmService::new(&root_path);
-    let session = mitm_service
+    let mitm_service = MitmService::new(
+        &root_path,
+        Arc::new(lanpath_client::http_exec::ReqwestHttpExecutor::for_data_dir(&root_path)),
+    );
+    let mut session = mitm_service
         .start(&client_config, Arc::new(TracingNotifier::new()))
         .await
         .unwrap()
         .expect("saved whitelist should start MITM");
     let (generated, _) = business
-        .build_config_report(false, Some(session.chain()))
+        .build_config_report(
+            false,
+            Some(session.chain()),
+            business.client_config().unwrap(),
+        )
         .await
         .unwrap();
     business
-        .validator()
-        .unwrap()
+        .validator(&business.client_config().unwrap())
         .validate_value(&generated)
         .await
         .unwrap();
@@ -149,7 +155,7 @@ async fn generated_pipeline_records_real_mitm_traffic() {
     );
 
     manager.stop().await.unwrap();
-    session.stop();
+    session.stop().await.unwrap();
     target_task.await.unwrap();
     assert!(!manager.is_running().await);
 }

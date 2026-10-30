@@ -11,7 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task, Window};
 use lanpath_client::{
     ScriptDialect,
-    mitm::{CaTrustView, DerivedHostnameView, MitmCaView},
+    mitm::{CaOwnedTrustView, DerivedHostnameView, MitmCaView},
 };
 
 use crate::{
@@ -25,6 +25,7 @@ pub(super) enum Operation {
     Save,
     Refresh,
     InstallCa,
+    RemoveCa,
 }
 
 pub(crate) struct MitmChanged;
@@ -40,7 +41,7 @@ pub(crate) struct MitmView {
     syncing: bool,
     derived: Vec<DerivedHostnameView>,
     ca: Option<MitmCaView>,
-    trust: Option<CaTrustView>,
+    trust: Option<CaOwnedTrustView>,
     mitm_addr: Option<std::net::SocketAddr>,
     locked: bool,
     active: bool,
@@ -71,7 +72,8 @@ impl MitmView {
             Err(error) => (None, Some(error)),
         };
         let hostnames = cx.new(|cx| EditorState::new(window, cx).line_number(false));
-        let traffic = cx.new(|cx| ListState::new(TrafficListDelegate::default(), window, cx));
+        let traffic =
+            cx.new(|cx| crate::keyboard::list_state(TrafficListDelegate::default(), window, cx));
         let initial = settings
             .as_ref()
             .map(|settings| settings.hostnames.join("\n"))
@@ -141,6 +143,9 @@ impl MitmView {
     }
 
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        if self.running != running {
+            self.notice = None;
+        }
         self.running = running;
         if running && self.active {
             self.refresh_metadata(cx);

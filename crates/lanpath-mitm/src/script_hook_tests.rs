@@ -1,277 +1,438 @@
-//! `script_hook` 模块测试（独立文件以满足业务文件 500 行门禁）。
-
+//! Consumer-visible hook contracts; fixtures are self-authored from public API references.
 use super::script_hook::*;
+use crate::Pattern;
 use lanpath_script::{
-    MemoryPersistentStore, MockHttpExecutor, RecordingNotifier, ScriptHost, ScriptKind,
+    MemoryPersistentStore, MockHttpExecutor, RecordingNotifier, ScriptDialect, ScriptHost,
+    ScriptKind, ScriptLimits,
 };
-use regex::Regex;
 use std::sync::Arc;
-use std::time::Instant;
-
-fn test_host() -> Arc<ScriptHost> {
-    let http = Arc::new(MockHttpExecutor::with_responses(vec![]));
-    let store = Arc::new(MemoryPersistentStore::new());
-    let notifier = Arc::new(RecordingNotifier::new());
-    Arc::new(ScriptHost::new(http, store, notifier))
-}
 
 fn rule(name: &str, kind: ScriptKind, source: &str) -> ScriptRule {
     ScriptRule {
-        name: name.to_string(),
+        name: name.into(),
         kind,
-        pattern: Regex::new(r"^https://api\.example\.com/").unwrap(),
-        requires_body: true,
+        pattern: Pattern::new(r"^https://api\.example\.com/").unwrap(),
+        requires_body: false,
         max_size: 65536,
-        source: source.to_string(),
+        source: source.into(),
         argument: None,
+        dialect: ScriptDialect::Surge,
+        mode: HookMode::Modify,
+        enabled: true,
+        timeout_ms: None,
+        binary: false,
+        full_headers: false,
+        source_id: format!("https://scripts.example/{name}.js"),
+        module_id: None,
     }
 }
 
 fn engine(rules: Vec<ScriptRule>) -> ScriptHookEngine {
-    ScriptHookEngine::new(
-        test_host(),
-        lanpath_script::ScriptDialect::Surge,
-        lanpath_script::ScriptLimits::default(),
-        rules,
-    )
+    let host = Arc::new(ScriptHost::new(
+        Arc::new(MockHttpExecutor::with_responses(vec![])),
+        Arc::new(MemoryPersistentStore::new()),
+        Arc::new(RecordingNotifier::new()),
+    ));
+    ScriptHookEngine::new(host, ScriptLimits::default(), rules)
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn surge_http_response_script_rewrites_json_body() {
-    let engine = engine(vec![rule(
-        "rewrite-json",
+fn request() -> RequestContext {
+    RequestContext {
+        id: uuid::Uuid::new_v4(),
+        url: "https://api.example.com/v1/data?x=1".into(),
+        method: "POST".into(),
+        headers: vec![("X-Request".into(), "retained".into())],
+        body: Some(b"request payload".to_vec()),
+    }
+}
+
+#[tokio::test]
+async fn response_sees_original_request_and_rewrites_json() {
+    let mut rule = rule(
+        "response",
         ScriptKind::HttpResponse,
         r#"
-            const data = JSON.parse($response.body);
-            data.a = 99;
-            $done({body: JSON.stringify(data)});
-        "#,
-    )]);
-
-    let mut status = 200u16;
-    let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
-    let mut body = Some(r#"{"a":1,"b":2}"#.to_string());
-
-    let outcome = engine
-        .run_response_hooks(
-            "https://api.example.com/v1/data",
-            &mut status,
-            &mut headers,
-            &mut body,
-        )
-        .await;
-
-    assert_eq!(outcome, HookOutcome::Continue);
-    let parsed: serde_json::Value = serde_json::from_str(body.as_deref().unwrap()).unwrap();
-    assert_eq!(parsed["a"], 99);
-    assert_eq!(parsed["b"], 2);
-    assert_eq!(status, 200);
+        const data = JSON.parse($response.body);
+        data.request = [$request.url, $request.method, $request.headers['X-Request'], $request.body];
+        data.a = 99; $done({body: JSON.stringify(data)});
+    "#,
+    );
+    rule.requires_body = true;
+    let engine = engine(vec![rule]);
+    let mut status = 200;
+    let mut headers = vec![("content-type".into(), "application/json".into())];
+    let mut body = Some(br#"{"a":1,"b":2}"#.to_vec());
     assert_eq!(
-        headers,
-        vec![("content-type".to_string(), "application/json".to_string())]
+        engine
+            .run_response_hooks(&request(), &mut status, &mut headers, &mut body)
+            .await,
+        HookOutcome::Continue
+    );
+    let result: serde_json::Value = serde_json::from_slice(body.as_deref().unwrap()).unwrap();
+    assert_eq!(result["a"], 99);
+    assert_eq!(result["b"], 2);
+    assert_eq!(
+        result["request"],
+        serde_json::json!([request().url, "POST", "retained", "request payload"])
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn request_infinite_loop_times_out_and_passes_through() {
-    let engine = ScriptHookEngine::new(
-        test_host(),
-        lanpath_script::ScriptDialect::Surge,
-        lanpath_script::ScriptLimits {
-            timeout_ms: 500,
-            ..lanpath_script::ScriptLimits::default()
-        },
-        vec![ScriptRule {
-            pattern: Regex::new(".*").unwrap(),
-            ..rule("infinite-loop", ScriptKind::HttpRequest, "while (true) {}")
-        }],
+#[tokio::test]
+async fn first_enabled_match_uses_its_own_dialect_and_argument() {
+    let mut disabled = rule(
+        "disabled",
+        ScriptKind::HttpRequest,
+        "$done({url:'https://wrong.example/'})",
     );
-
-    let mut url = "https://api.example.com/data".to_string();
-    let mut headers = vec![("x-test".to_string(), "1".to_string())];
-    let mut body = Some("payload".to_string());
-
-    let start = Instant::now();
-    let outcome = engine
-        .run_request_hooks(&mut url, "GET", &mut headers, &mut body)
-        .await;
-    let elapsed = start.elapsed();
-
-    assert_eq!(outcome, HookOutcome::Continue);
-    assert_eq!(headers, vec![("x-test".to_string(), "1".to_string())]);
-    assert_eq!(body.as_deref(), Some("payload"));
-    assert!(
-        elapsed.as_millis() < 1000,
-        "timeout did not bound execution: {elapsed:?}"
+    disabled.enabled = false;
+    let mut selected = rule(
+        "qx",
+        ScriptKind::HttpRequest,
+        r#"
+        if (typeof $task === 'undefined' || typeof $httpClient !== 'undefined') throw Error('wrong dialect');
+        $done({url:'https://api.example.com/' + $argument});
+    "#,
     );
-}
-
-/// `$argument` 透传 e2e：ScriptRule.argument 被注入为全局 `$argument`。
-#[tokio::test(flavor = "current_thread")]
-async fn script_rule_argument_injected_as_global() {
-    let engine = engine(vec![ScriptRule {
-        argument: Some("api.example.com|abc".to_string()),
-        ..rule(
-            "arg-hook",
-            ScriptKind::HttpResponse,
-            r#"
-                if (typeof $argument === "undefined") {
-                    $done({body: "UNDEFINED"});
-                } else {
-                    $done({body: $argument});
-                }
-            "#,
-        )
-    }]);
-
-    let mut status = 200u16;
-    let mut headers = Vec::new();
+    selected.dialect = ScriptDialect::QuantumultX;
+    selected.argument = Some("resource-local".into());
+    let mut later = rule(
+        "later",
+        ScriptKind::HttpRequest,
+        "$done({url:'https://wrong.example/'})",
+    );
+    later.requires_body = true;
+    let engine = engine(vec![disabled, selected, later]);
+    let mut url = request().url;
+    let mut headers = vec![];
     let mut body = None;
+    assert_eq!(engine.request_body_limit(&url).unwrap(), None);
     engine
-        .run_response_hooks(
-            "https://api.example.com/v1/data",
-            &mut status,
+        .run_request_hooks(
+            uuid::Uuid::new_v4(),
+            &mut url,
+            "GET",
             &mut headers,
             &mut body,
         )
         .await;
-    assert_eq!(body.as_deref(), Some("api.example.com|abc"));
+    assert_eq!(url, "https://api.example.com/resource-local");
 }
 
-/// `$done({url})`：请求阶段替换 URL。
-#[tokio::test(flavor = "current_thread")]
-async fn done_url_replaces_request_url() {
-    let engine = engine(vec![rule(
-        "url-rewrite",
-        ScriptKind::HttpRequest,
-        r#"$done({url: "https://api.example.com/v2/data?token=abc"});"#,
-    )]);
-
-    let mut url = "https://api.example.com/v1/data".to_string();
-    let mut headers = Vec::new();
-    let mut body = None;
-    let outcome = engine
-        .run_request_hooks(&mut url, "GET", &mut headers, &mut body)
-        .await;
-    assert_eq!(outcome, HookOutcome::Continue);
-    assert_eq!(url, "https://api.example.com/v2/data?token=abc");
+#[tokio::test]
+async fn invalid_request_url_rejects_the_whole_completion_in_supported_dialects() {
+    for dialect in [ScriptDialect::Surge, ScriptDialect::QuantumultX] {
+        for target in [
+            serde_json::json!("/relative"),
+            serde_json::json!("https://[invalid/"),
+            serde_json::json!("ftp://api.example.com/file"),
+            serde_json::json!(42),
+            serde_json::json!("https://api.example.com/changed?x=%2F"),
+        ] {
+            let mut selected = rule(
+                "url",
+                ScriptKind::HttpRequest,
+                "$done({url:JSON.parse($argument),headers:{'X-Changed':'yes'},body:'changed'})",
+            );
+            selected.dialect = dialect;
+            selected.requires_body = true;
+            selected.argument = Some(target.to_string());
+            let engine = engine(vec![selected]);
+            let mut url = request().url;
+            let original_url = url.clone();
+            let mut headers = request().headers;
+            let original_headers = headers.clone();
+            let mut body = request().body;
+            let original_body = body.clone();
+            assert_eq!(
+                engine
+                    .run_request_hooks(
+                        uuid::Uuid::new_v4(),
+                        &mut url,
+                        "POST",
+                        &mut headers,
+                        &mut body,
+                    )
+                    .await,
+                HookOutcome::Continue
+            );
+            if target == "https://api.example.com/changed?x=%2F" {
+                assert_eq!(url, target.as_str().unwrap());
+                assert_eq!(headers, vec![("X-Changed".into(), "yes".into())]);
+                assert_eq!(body.as_deref(), Some(b"changed".as_slice()));
+            } else {
+                assert_eq!(url, original_url);
+                assert_eq!(headers, original_headers);
+                assert_eq!(body, original_body);
+            }
+        }
+    }
 }
 
-/// `$done({response: {...}})`：请求阶段脚本合成响应（mock）。
-#[tokio::test(flavor = "current_thread")]
-async fn done_response_mock_short_circuits_request() {
-    let engine = engine(vec![rule(
+#[tokio::test]
+async fn qx_echo_synthesizes_status_headers_and_binary_body() {
+    let mut rule = rule(
         "echo",
         ScriptKind::HttpRequest,
-        r#"$done({response: {status: 200, headers: {"Content-Type": "application/json"}, body: "{\"ok\":true}"}});"#,
-    )]);
-
-    let mut url = "https://api.example.com/v1/data".to_string();
-    let mut headers = Vec::new();
-    let mut body = None;
+        r#"
+        $done({status:'HTTP/1.1 307 Temporary Redirect', headers:{Location:'https://target.example/', 'Set-Cookie':['a=1','b=2']}, bodyBytes:new Uint8Array([0,255,128]).buffer});
+    "#,
+    );
+    rule.dialect = ScriptDialect::QuantumultX;
+    rule.mode = HookMode::Echo;
+    let engine = engine(vec![rule]);
     let outcome = engine
-        .run_request_hooks(&mut url, "GET", &mut headers, &mut body)
+        .run_request_hooks(
+            uuid::Uuid::new_v4(),
+            &mut request().url,
+            "GET",
+            &mut vec![],
+            &mut None,
+        )
         .await;
-    let HookOutcome::Mock(mock) = outcome else {
-        panic!("expected Mock, got {outcome:?}");
+    let HookOutcome::Mock(response) = outcome else {
+        panic!("expected mock: {outcome:?}")
     };
-    assert_eq!(mock.status, 200);
-    assert_eq!(mock.body.as_deref(), Some(r#"{"ok":true}"#));
+    assert_eq!(response.status, 307);
+    assert_eq!(response.body, Some(vec![0, 255, 128]));
     assert_eq!(
-        mock.headers,
-        vec![("Content-Type".to_string(), "application/json".to_string())]
+        response
+            .headers
+            .iter()
+            .filter(|(name, _)| name == "Set-Cookie")
+            .count(),
+        2
     );
 }
 
-/// `$done({abort: true})`：中止请求。
-#[tokio::test(flavor = "current_thread")]
-async fn done_abort_returns_abort_outcome() {
+#[tokio::test]
+async fn typed_binary_body_and_full_headers_round_trip_duplicates() {
+    let mut rule = rule(
+        "binary",
+        ScriptKind::HttpResponse,
+        r#"
+        if (!($response.body instanceof Uint8Array) || !($response.bodyBytes instanceof ArrayBuffer)) throw Error('not typed binary');
+        if (!Array.isArray($response.headers)) throw Error('not full headers');
+        $response.body[1] = 254;
+        $done({headers:$response.headers, body:$response.body});
+    "#,
+    );
+    rule.requires_body = true;
+    rule.binary = true;
+    rule.full_headers = true;
+    let engine = engine(vec![rule]);
+    let mut headers = vec![
+        ("Set-Cookie".into(), "a=1".into()),
+        ("set-cookie".into(), "b=2".into()),
+    ];
+    let original = headers.clone();
+    let mut body = Some(vec![0, 255, 128]);
+    engine
+        .run_response_hooks(&request(), &mut 200, &mut headers, &mut body)
+        .await;
+    assert_eq!(headers, original);
+    assert_eq!(body, Some(vec![0, 254, 128]));
+}
+
+#[tokio::test]
+async fn ordinary_header_object_preserves_duplicate_cookie_fields() {
     let engine = engine(vec![rule(
-        "abort",
-        ScriptKind::HttpRequest,
-        "$done({abort: true});",
+        "headers",
+        ScriptKind::HttpResponse,
+        "$done({headers:$response.headers})",
     )]);
-    let mut url = "https://api.example.com/v1/data".to_string();
-    let mut headers = Vec::new();
-    let mut body = None;
-    let outcome = engine
-        .run_request_hooks(&mut url, "GET", &mut headers, &mut body)
+    let mut headers = vec![
+        ("Set-Cookie".into(), "a=1".into()),
+        ("set-cookie".into(), "b=2".into()),
+    ];
+    engine
+        .run_response_hooks(&request(), &mut 200, &mut headers, &mut None)
         .await;
-    assert_eq!(outcome, HookOutcome::Abort);
+    assert_eq!(headers.len(), 2);
+    assert_eq!(headers[0].1, "a=1");
+    assert_eq!(headers[1].1, "b=2");
 }
 
-/// QX 风格 `$done("...")`：字符串直接作为新 body。
-#[tokio::test(flavor = "current_thread")]
-async fn done_plain_string_replaces_body() {
-    let engine = ScriptHookEngine::new(
-        test_host(),
-        lanpath_script::ScriptDialect::QuantumultX,
-        lanpath_script::ScriptLimits::default(),
-        vec![rule(
-            "string-body",
-            ScriptKind::HttpResponse,
-            r#"$done("<html>replaced</html>");"#,
-        )],
+#[tokio::test]
+async fn json_looking_string_completion_is_not_parsed_as_mutation() {
+    let mut rule = rule(
+        "string",
+        ScriptKind::HttpResponse,
+        r#"$done('{"status":418,"body":"not a mutation"}')"#,
     );
-    let mut status = 200u16;
-    let mut headers = Vec::new();
-    let mut body = Some("orig".to_string());
+    rule.requires_body = true;
+    let engine = engine(vec![rule]);
+    let mut status = 200;
+    let mut body = Some(b"original".to_vec());
     engine
-        .run_response_hooks(
-            "https://api.example.com/v1/data",
-            &mut status,
-            &mut headers,
-            &mut body,
-        )
+        .run_response_hooks(&request(), &mut status, &mut vec![], &mut body)
         .await;
-    assert_eq!(body.as_deref(), Some("<html>replaced</html>"));
+    assert_eq!(status, 200);
+    assert_eq!(body.unwrap(), br#"{"status":418,"body":"not a mutation"}"#);
 }
 
-/// QX 别名：响应阶段 `$response.statusCode` 可读、`$done({statusCode})` 可写。
-#[tokio::test(flavor = "current_thread")]
-async fn qx_status_code_alias_read_write() {
-    let engine = ScriptHookEngine::new(
-        test_host(),
-        lanpath_script::ScriptDialect::QuantumultX,
-        lanpath_script::ScriptLimits::default(),
-        vec![rule(
-            "status-code",
+#[tokio::test]
+async fn completion_presence_and_dialect_control_pass_through_or_abort() {
+    for dialect in [
+        ScriptDialect::Surge,
+        ScriptDialect::QuantumultX,
+        ScriptDialect::Loon,
+        ScriptDialect::Stash,
+    ] {
+        for source in ["$done()", "$done(null)", "$done({})"] {
+            let mut rule = rule("completion", ScriptKind::HttpRequest, source);
+            rule.dialect = dialect;
+            let engine = engine(vec![rule]);
+            let outcome = engine
+                .run_request_hooks(
+                    uuid::Uuid::new_v4(),
+                    &mut request().url,
+                    "GET",
+                    &mut vec![],
+                    &mut None,
+                )
+                .await;
+            let abort = matches!(dialect, ScriptDialect::Loon | ScriptDialect::Stash)
+                && source != "$done({})";
+            assert_eq!(
+                outcome,
+                if abort {
+                    HookOutcome::Abort
+                } else {
+                    HookOutcome::Continue
+                },
+                "{dialect:?} {source}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn unavailable_oversized_or_non_utf8_text_body_skips_without_mutation() {
+    for body in [None, Some(vec![1; 9]), Some(vec![255])] {
+        let mut rule = rule(
+            "body",
             ScriptKind::HttpResponse,
-            "if ($response.statusCode === 200) { $done({statusCode: 201}); } else { $done({}); }",
-        )],
-    );
-    let mut status = 200u16;
-    let mut headers = Vec::new();
+            "$done({status:418,body:'changed'})",
+        );
+        rule.requires_body = true;
+        rule.max_size = 8;
+        let engine = engine(vec![rule]);
+        let mut actual = body.clone();
+        let mut status = 200;
+        engine
+            .run_response_hooks(&request(), &mut status, &mut vec![], &mut actual)
+            .await;
+        assert_eq!(status, 200);
+        assert_eq!(actual, body);
+    }
+}
+
+#[tokio::test]
+async fn header_only_hook_does_not_replace_unavailable_body() {
+    let engine = engine(vec![rule(
+        "headers-only",
+        ScriptKind::HttpResponse,
+        "$done({status:201,body:'must not collect/replace'})",
+    )]);
+    let mut status = 200;
     let mut body = None;
     engine
-        .run_response_hooks(
-            "https://api.example.com/v1/data",
-            &mut status,
-            &mut headers,
-            &mut body,
-        )
+        .run_response_hooks(&request(), &mut status, &mut vec![], &mut body)
         .await;
     assert_eq!(status, 201);
+    assert_eq!(body, None);
 }
 
-/// QX `$request.path`：从 URL 提取 path（含 query）。
-#[tokio::test(flavor = "current_thread")]
-async fn qx_request_path_injected() {
-    let engine = ScriptHookEngine::new(
-        test_host(),
-        lanpath_script::ScriptDialect::QuantumultX,
-        lanpath_script::ScriptLimits::default(),
-        vec![rule(
-            "path",
-            ScriptKind::HttpRequest,
-            "$done({body: $request.path});",
-        )],
-    );
-    let mut url = "https://api.example.com/v1/data?x=1".to_string();
-    let mut headers = Vec::new();
-    let mut body = None;
-    engine
-        .run_request_hooks(&mut url, "GET", &mut headers, &mut body)
+#[tokio::test]
+async fn imported_timeout_fails_open_and_next_run_survives() {
+    let mut rule = rule("timeout", ScriptKind::HttpRequest, "while(true){}");
+    rule.timeout_ms = Some(40);
+    let engine = engine(vec![rule]);
+    let started = std::time::Instant::now();
+    let mut url = request().url;
+    let original = url.clone();
+    let outcome = engine
+        .run_request_hooks(
+            uuid::Uuid::new_v4(),
+            &mut url,
+            "GET",
+            &mut vec![],
+            &mut None,
+        )
         .await;
-    assert_eq!(body.as_deref(), Some("/v1/data?x=1"));
+    assert_eq!(outcome, HookOutcome::Continue);
+    assert_eq!(url, original);
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn surge_execution_keeps_declared_names_and_source_scoped_storage_across_modules() {
+    let mut writer = rule(
+        "request-display",
+        ScriptKind::HttpRequest,
+        "$persistentStore.write($script.name); $done({})",
+    );
+    writer.source_id = "https://assets.example/shared.js".into();
+    writer.module_id = Some("request-module".into());
+    let mut reader = rule(
+        "response-display",
+        ScriptKind::HttpResponse,
+        "$done({headers:{'x-stored':$persistentStore.read(),'x-name':$script.name,'x-binary':String($script.binaryBodyMode)}})",
+    );
+    reader.source_id = writer.source_id.clone();
+    reader.module_id = Some("response-module".into());
+    let engine = engine(vec![writer, reader]);
+    let request = request();
+    assert_eq!(
+        engine
+            .run_request_hooks(
+                request.id,
+                &mut request.url.clone(),
+                "GET",
+                &mut vec![],
+                &mut None
+            )
+            .await,
+        HookOutcome::Continue
+    );
+    let mut headers = vec![];
+    assert_eq!(
+        engine
+            .run_response_hooks(&request, &mut 200, &mut headers, &mut None)
+            .await,
+        HookOutcome::Continue
+    );
+    for (name, value) in [
+        ("x-stored", "request-display"),
+        ("x-name", "response-display"),
+        ("x-binary", "false"),
+    ] {
+        assert!(
+            headers
+                .iter()
+                .any(|(field, actual)| field == name && actual == value)
+        );
+    }
+}
+
+#[tokio::test]
+async fn surge_unavailable_or_oversized_required_request_body_is_not_forwardable() {
+    let mut surge = rule("body", ScriptKind::HttpRequest, "$done({})");
+    surge.requires_body = true;
+    surge.max_size = 8;
+    let engine = engine(vec![surge]);
+    for mut body in [None, Some(vec![b'x'; 9])] {
+        assert_eq!(
+            engine
+                .run_request_hooks(
+                    request().id,
+                    &mut request().url,
+                    "POST",
+                    &mut vec![],
+                    &mut body
+                )
+                .await,
+            HookOutcome::Abort
+        );
+    }
 }

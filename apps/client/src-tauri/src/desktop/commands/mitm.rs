@@ -1,6 +1,6 @@
 //! MITM commands: traffic recording and CA certificate.
 
-use lanpath_mitm::CaTrustView;
+use lanpath_mitm::{CaOwnedTrustView, CaRemovalReceipt};
 use serde::Serialize;
 use tauri::State;
 
@@ -63,7 +63,7 @@ pub async fn get_mitm_whitelist(
     let Some(client) = lock.as_ref() else {
         return Ok(lanpath_client::mitm::MitmWhitelistView::default());
     };
-    Ok(client.mitm_service().whitelist(&client.config))
+    Ok(lanpath_client::mitm::MitmWhitelistView::load(&client.config.data_dir, &client.config))
 }
 
 /// Get MITM CA certificate (`data_dir/certs/ca.{crt,key}`).
@@ -71,17 +71,16 @@ pub async fn get_mitm_whitelist(
 pub async fn get_mitm_ca(
     state: State<'_, AppState>,
 ) -> Result<lanpath_client::mitm::MitmCaView, String> {
-    let data_dir = state.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || get_mitm_ca_impl(&data_dir))
+    let service = mitm_service(&state).await;
+    tauri::async_runtime::spawn_blocking(move || get_mitm_ca_impl(&service))
         .await
         .map_err(|e| format!("读取 CA 任务失败: {e}"))?
 }
 
-pub(crate) fn get_mitm_ca_impl(
-    data_dir: &std::path::Path,
+fn get_mitm_ca_impl(
+    service: &lanpath_client::mitm::MitmService,
 ) -> Result<lanpath_client::mitm::MitmCaView, String> {
-    lanpath_client::mitm::MitmService::new(data_dir)
-        .ca()
+    service.ca()
         .map_err(|e| format!("读取 MITM CA 失败: {e}"))
 }
 
@@ -90,11 +89,10 @@ pub(crate) fn get_mitm_ca_impl(
 /// Windows 写 CurrentUser 存储（免 UAC）；macOS / Linux 弹系统授权框。
 /// 返回安装后的信任状态（供前端直接回写缓存）。
 #[tauri::command]
-pub async fn install_mitm_ca(state: State<'_, AppState>) -> Result<CaTrustView, String> {
-    let data_dir = state.data_dir.clone();
+pub async fn install_mitm_ca(state: State<'_, AppState>, expected_sha256: String) -> Result<CaOwnedTrustView, String> {
+    let service = mitm_service(&state).await;
     tauri::async_runtime::spawn_blocking(move || {
-        lanpath_client::mitm::MitmService::new(data_dir)
-            .install_ca()
+        service.install_ca(&expected_sha256)
             .map_err(|e| format!("安装 CA 到系统信任库失败: {e}"))
     })
     .await
@@ -103,17 +101,35 @@ pub async fn install_mitm_ca(state: State<'_, AppState>) -> Result<CaTrustView, 
 
 /// Detect whether the MITM CA is trusted by the system trust store.
 ///
-/// 检测失败返回 status=unknown 而非报错。
+/// 原生检测失败保持 unknown；本地身份或回执损坏明确报错，不当作未安装。
 #[tauri::command]
-pub async fn mitm_ca_trust_status(state: State<'_, AppState>) -> Result<CaTrustView, String> {
-    let data_dir = state.data_dir.clone();
+pub async fn mitm_ca_trust_status(state: State<'_, AppState>) -> Result<CaOwnedTrustView, String> {
+    let service = mitm_service(&state).await;
     tauri::async_runtime::spawn_blocking(move || {
-        lanpath_client::mitm::MitmService::new(data_dir)
-            .trust_status()
+        service.trust_status()
             .map_err(|e| format!("查询 CA 信任状态失败: {e}"))
     })
     .await
     .map_err(|e| format!("查询 CA 信任状态任务失败: {e}"))?
+}
+
+#[tauri::command]
+pub async fn remove_mitm_ca(state: State<'_, AppState>, expected_sha256: String) -> Result<CaRemovalReceipt, String> {
+    let service = mitm_service(&state).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        service.remove_ca(&expected_sha256)
+            .map_err(|e| format!("移除拥有的 CA 信任失败: {e}"))
+    }).await.map_err(|e| format!("移除 CA 信任任务失败: {e}"))?
+}
+
+async fn mitm_service(state: &AppState) -> lanpath_client::mitm::MitmService {
+    if let Some(client) = state.client.lock().await.as_ref() {
+        return client.mitm_service().clone();
+    }
+    lanpath_client::mitm::MitmService::new(
+        &state.data_dir,
+        std::sync::Arc::new(lanpath_client::http_exec::ReqwestHttpExecutor::for_data_dir(&state.data_dir)),
+    )
 }
 
 #[cfg(test)]
@@ -149,7 +165,11 @@ mod tests {
     #[test]
     fn get_mitm_ca_generates_and_reports_path() {
         let dir = TestDir::new();
-        let view = get_mitm_ca_impl(dir.path()).unwrap();
+        let service = lanpath_client::mitm::MitmService::new(
+            dir.path(),
+            std::sync::Arc::new(lanpath_client::http_exec::ReqwestHttpExecutor::for_data_dir(dir.path())),
+        );
+        let view = get_mitm_ca_impl(&service).unwrap();
         assert!(
             view.pem.contains("BEGIN CERTIFICATE"),
             "pem should contain cert block: {}",
@@ -166,7 +186,7 @@ mod tests {
             view.path
         );
 
-        let again = get_mitm_ca_impl(dir.path()).unwrap();
+        let again = get_mitm_ca_impl(&service).unwrap();
         assert_eq!(view.pem, again.pem, "idempotent: should not regenerate");
     }
 }

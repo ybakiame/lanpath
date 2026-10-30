@@ -148,14 +148,33 @@ impl RuleSetManager {
     ///
     /// No-op for Manual sources. On failure preserves any existing file.
     pub async fn download_custom_rule_set(&self, rs: &CustomRuleSet) -> LanpathResult<()> {
+        self.download_custom_rule_set_inner(rs, None).await
+    }
+
+    pub(crate) async fn download_custom_rule_set_with_context(
+        &self,
+        rs: &CustomRuleSet,
+        context: &crate::RemoteFetchContext,
+    ) -> LanpathResult<()> {
+        self.download_custom_rule_set_inner(rs, Some(context)).await
+    }
+
+    async fn download_custom_rule_set_inner(
+        &self,
+        rs: &CustomRuleSet,
+        context: Option<&crate::RemoteFetchContext>,
+    ) -> LanpathResult<()> {
         let CustomRuleSetSource::Remote { url, format } = &rs.source else {
             return Ok(());
         };
         let path = self.custom_rule_set_file_path(&rs.id, *format);
+        if let Some(context) = context {
+            context.check_write(&path)?;
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        self.download_file(url, &path).await
+        self.download_file(url, &path, context).await
     }
 
     /// Check with origin-bound ETag/Last-Modified conditional GET; compare bytes on 200.
@@ -199,10 +218,20 @@ impl RuleSetManager {
     }
 
     /// Download a file from URL to path.
-    async fn download_file(&self, url: &str, path: &std::path::Path) -> LanpathResult<()> {
-        let bytes =
-            crate::fetch_resource_bytes(&self.data_dir, url, std::time::Duration::from_secs(60))
-                .await?;
+    async fn download_file(
+        &self,
+        url: &str,
+        path: &std::path::Path,
+        context: Option<&crate::RemoteFetchContext>,
+    ) -> LanpathResult<()> {
+        let timeout = std::time::Duration::from_secs(60);
+        let bytes = match context {
+            Some(context) => context.fetch_bytes(url, timeout).await?,
+            None => crate::fetch_resource_bytes(&self.data_dir, url, timeout).await?,
+        };
+        if let Some(context) = context {
+            return crate::remote::atomic_write_with_context(path, &bytes, Some(context));
+        }
         std::fs::write(path, bytes)?;
         Ok(())
     }

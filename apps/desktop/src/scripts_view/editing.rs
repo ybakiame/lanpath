@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use gpui_kit::{Context, Window, component::WindowExt as _};
 use lanpath_client::remote::{RemoteKind, RemoteResource, ScriptDialect};
 
+use crate::script_dialects::{is_selectable, selection_allowed, validate_selection};
+
 use super::ScriptsView;
 
 impl ScriptsView {
@@ -115,7 +117,7 @@ impl ScriptsView {
     }
 
     pub(super) fn set_dialect(&mut self, dialect: ScriptDialect, cx: &mut Context<Self>) {
-        if self.locked || self.busy() || self.dialect == dialect {
+        if self.locked || self.busy() || !is_selectable(dialect) || self.dialect == dialect {
             return;
         }
         self.dialect = dialect;
@@ -131,7 +133,7 @@ impl ScriptsView {
     }
 
     pub(super) fn set_import_dialect(&mut self, dialect: ScriptDialect, cx: &mut Context<Self>) {
-        if self.locked || self.busy() || self.import_dialect == dialect {
+        if self.locked || self.busy() || !is_selectable(dialect) || self.import_dialect == dialect {
             return;
         }
         self.import_dialect = dialect;
@@ -149,7 +151,29 @@ impl ScriptsView {
         cx.notify();
     }
 
+    fn previous_dialect(&self) -> Option<ScriptDialect> {
+        self.selected_resource()
+            .filter(|_| !self.creating)
+            .map(|resource| resource.dialect)
+    }
+
+    pub(super) fn resource_dialect_allowed(&self) -> bool {
+        selection_allowed(self.dialect, self.previous_dialect())
+    }
+
+    pub(super) fn resource_dialect_status(&self) -> Option<&'static str> {
+        if is_selectable(self.dialect) {
+            None
+        } else if self.resource_dialect_allowed() {
+            Some("当前为历史方言，暂不可选；可保留原方言保存修改，或明确选择 Surge / QX。")
+        } else {
+            Some("检测方言暂不可用，不能保存；请明确选择 Surge / QX，选择不会转换配置内容。")
+        }
+    }
+
     pub(super) fn form_resource(&self, cx: &Context<Self>) -> Result<RemoteResource, String> {
+        validate_selection(self.dialect, self.previous_dialect())
+            .map_err(|error| error.to_string())?;
         let name = self.inputs.name.read(cx).value().trim().to_string();
         if name.is_empty() {
             return Err("资源名称不能为空".into());
@@ -227,6 +251,8 @@ pub(super) fn kind_label(kind: RemoteKind) -> &'static str {
 pub(super) fn dialect_label(dialect: ScriptDialect) -> &'static str {
     match dialect {
         ScriptDialect::Surge => "Surge",
-        ScriptDialect::Loon | ScriptDialect::QuantumultX => "Loon",
+        ScriptDialect::Loon => "Loon",
+        ScriptDialect::QuantumultX => "Quantumult X",
+        ScriptDialect::Stash => "Stash",
     }
 }

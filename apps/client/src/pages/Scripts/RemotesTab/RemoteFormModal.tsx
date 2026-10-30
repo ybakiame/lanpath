@@ -268,7 +268,7 @@ export default function RemoteFormModal({
                     脚本（纯 JS）
                   </ListBox.Item>
                   <ListBox.Item id="Snippet" textValue="片段">
-                    片段（Surge / Loon 配置）
+                    片段（公开明文 Surge / Loon / QX / Stash 配置）
                   </ListBox.Item>
                 </ListBox>
               </Select.Popover>

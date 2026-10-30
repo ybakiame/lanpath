@@ -24,7 +24,7 @@ for f in "${files[@]}"; do
     esac
     # skip generated / vendored / dependency dirs
     case "$f" in
-        */target/*|*/node_modules/*|*/gen/*|*/dist/*|*/.heroui-docs/*|.reference/*) continue ;;
+        vendor/*|*/target/*|*/node_modules/*|*/gen/*|*/dist/*|*/.heroui-docs/*|.reference/*) continue ;;
     esac
     lines=$(wc -l < "$f")
     is_test=false

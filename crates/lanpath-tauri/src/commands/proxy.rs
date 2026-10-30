@@ -12,7 +12,9 @@ use crate::state::AppState;
 pub struct ClientStatusView {
     pub core_running: bool,
     pub mitm_addr: Option<String>,
-    pub system_proxy: bool,
+    pub system_proxy: Option<bool>,
+    pub system_proxy_ownership: Option<lanpath_client::sysproxy::SystemProxyOwnership>,
+    pub system_proxy_error: Option<String>,
     /// Current effective rule mode (`rule` / `global` / `direct`).
     pub rule_mode: String,
     /// Rule count of the current synthesized config (0 when not running).
@@ -29,6 +31,8 @@ impl ClientStatusView {
             core_running: status.core_running,
             mitm_addr: status.mitm_addr.map(|a| a.to_string()),
             system_proxy: status.system_proxy,
+            system_proxy_ownership: status.system_proxy_ownership.clone(),
+            system_proxy_error: status.system_proxy_error.clone(),
             rule_mode: status.rule_mode.clone(),
             rule_count: status.rule_count,
             clash_api_url: status.clash_api_url.clone(),
@@ -113,7 +117,10 @@ fn spawn_ruleset_retry(
                 return;
             }
             tracing::info!(attempt, "规则集后台重试补齐，自动重载核心恢复完整分流");
-            state.stop().await;
+            if let Err(error) = state.stop().await {
+                tracing::error!(%error, "系统代理恢复失败；保留运行核心，取消自动重载");
+                return;
+            }
             if let Err(e) = state.start().await {
                 tracing::error!(error = %e, "规则集补齐后自动重载失败");
             }
@@ -130,7 +137,10 @@ pub async fn stop_proxy(state: State<'_, AppState>) -> Result<ClientStatusView, 
     let Some(client) = lock.as_mut() else {
         return Ok(idle_status_view(&state.data_dir));
     };
-    client.stop().await;
+    client
+        .stop()
+        .await
+        .map_err(|e| format!("停止失败（核心已保留供恢复重试）: {e}"))?;
     let status = client.status().await;
     Ok(ClientStatusView::from_status(&status))
 }
@@ -151,7 +161,10 @@ pub(crate) fn idle_status_view(data_dir: &std::path::Path) -> ClientStatusView {
     ClientStatusView {
         core_running: false,
         mitm_addr: None,
-        system_proxy: false,
+        // No instance means no ownership, not a claim about global proxy settings.
+        system_proxy: None,
+        system_proxy_ownership: Some(lanpath_client::sysproxy::SystemProxyOwnership::Unowned),
+        system_proxy_error: None,
         rule_mode: ClientConfig::load(data_dir)
             .map(|c| c.normalized_rule_mode().to_string())
             .unwrap_or_else(|_| "rule".to_string()),

@@ -1,19 +1,16 @@
 use std::sync::Arc;
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
-    input::{Editor, EditorState, Input, InputEvent, InputState},
+    WindowExt as _,
+    input::{EditorState, InputEvent, InputState},
 };
-use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Task, Window, div,
-};
+use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task, Window};
 use lanpath_client::Profile;
 use uuid::Uuid;
 
 use crate::{business::BusinessService, runtime::DesktopRuntime};
+
+mod render;
 
 pub(crate) struct ProfilesChanged;
 
@@ -183,6 +180,9 @@ impl ProfilesView {
     }
 
     fn request_select(&mut self, id: Option<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.locked || self.busy() {
+            return;
+        }
         if !self.dirty {
             self.select(id, window, cx);
             return;
@@ -197,7 +197,11 @@ impl ProfilesView {
                 .ok_text("放弃修改")
                 .cancel_text("取消")
                 .on_ok(move |_, window, cx| {
-                    let _ = view.update(cx, |view, cx| view.select(id, window, cx));
+                    let _ = view.update(cx, |view, cx| {
+                        if !view.locked && !view.busy() {
+                            view.select(id, window, cx);
+                        }
+                    });
                     true
                 })
         });
@@ -225,6 +229,12 @@ impl ProfilesView {
                     true
                 })
         });
+    }
+
+    pub(crate) fn save_from_shortcut(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dirty {
+            self.run(Operation::Save, window, cx);
+        }
     }
 
     fn run(&mut self, operation: Operation, window: &mut Window, cx: &mut Context<Self>) {
@@ -294,144 +304,7 @@ impl ProfilesView {
                 .ok()
             });
         }));
-    }
-}
-
-impl Render for ProfilesView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let disabled = self.locked || self.busy();
-        let status = self
-            .error
-            .clone()
-            .or_else(|| self.notice.clone())
-            .unwrap_or_else(|| "YAML 深合并后执行 JS；远程覆写失败时使用独立目录缓存".into());
-        div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child("覆写模板")
-                    .child(
-                        Button::new("profile-new")
-                            .label("新建")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.request_select(None, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("profile-save")
-                            .label("保存")
-                            .primary()
-                            .disabled(disabled || !self.dirty)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.run(Operation::Save, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("profile-delete")
-                            .label("删除")
-                            .danger()
-                            .disabled(disabled || self.selected.is_none())
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.request_delete(window, cx)),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .id("profile-status")
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .text_color(if self.error.is_some() {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(status),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .children(self.profiles.iter().map(|profile| {
-                        let id = profile.id;
-                        Button::new(format!("profile-{id}"))
-                            .label(profile.name.clone())
-                            .selected(Some(id) == self.selected)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.request_select(Some(id), window, cx)
-                            }))
-                    })),
-            )
-            .child(
-                Input::new(&self.name)
-                    .aria_label("覆写模板名称")
-                    .disabled(disabled),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&self.yaml_url)
-                                .aria_label("远程 YAML URL")
-                                .disabled(disabled),
-                        ),
-                    )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&self.js_url)
-                                .aria_label("远程 JS URL")
-                                .disabled(disabled),
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_h_0()
-                            .gap_1()
-                            .child("YAML 深合并")
-                            .child(
-                                Editor::new(&self.yaml)
-                                    .aria_label("YAML 覆写正文")
-                                    .readonly(disabled)
-                                    .size_full(),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_h_0()
-                            .gap_1()
-                            .child("JS main(config)")
-                            .child(
-                                Editor::new(&self.js)
-                                    .aria_label("JS 覆写正文")
-                                    .readonly(disabled)
-                                    .size_full(),
-                            ),
-                    ),
-            )
+        cx.notify();
     }
 }
 

@@ -36,8 +36,8 @@ async fn start_reloads_disk_config_so_tun_toggle_takes_effect() {
 
     // Disk config: TUN is turned off (user-reported scenario).
     let capture = dir.path().join("core-config-capture.json");
-    let core_bin = fake_core_capturing_args(&dir, &capture);
-    let mut disk = ClientConfig::new(
+    let core_bin = native_core_capturing_args(&dir, &capture);
+    let mut disk = fixture_config(
         dir.path().to_path_buf(),
         format!("http://{addr}"),
         "tok",
@@ -77,7 +77,7 @@ async fn start_reloads_disk_config_so_tun_toggle_takes_effect() {
         "should not inject tun inbound when disk tun_enabled=false: {core_config}"
     );
 
-    state.stop().await;
+    state.stop().await.unwrap();
 }
 
 /// Item 2: `tun_enabled=true` but core is not authorized → start returns `tun_auth_required` error,

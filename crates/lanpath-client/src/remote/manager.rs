@@ -3,20 +3,16 @@
 use std::path::PathBuf;
 
 use lanpath_common::{LanpathError, LanpathResult};
-#[cfg(feature = "mitm")]
-use lanpath_script::ScriptDialect;
 
 #[cfg(feature = "mitm")]
 use crate::import::{ConfigMeta, ImportedConfig, parse_import};
 
-#[cfg(feature = "mitm")]
-use super::ImportSummary;
-use super::{FetchReport, MergedRemoteConfig, RemoteKind, RemoteResource, safe_name};
+use super::{FetchReport, RemoteFetchContext, RemoteKind, RemoteResource, safe_name};
 
 /// Remote resource manager: responsible for remotes manifest I/O, periodic fetching, and cache reading.
 #[derive(Debug, Clone)]
 pub struct RemoteManager {
-    data_dir: PathBuf,
+    pub(super) data_dir: PathBuf,
 }
 
 impl RemoteManager {
@@ -42,9 +38,16 @@ impl RemoteManager {
 
     /// Save remote resource manifest to `data_dir/remotes.json`.
     pub fn save(&self, remotes: &[RemoteResource]) -> LanpathResult<()> {
-        std::fs::create_dir_all(&self.data_dir)?;
+        self.save_with_context(remotes, None)
+    }
+
+    fn save_with_context(
+        &self,
+        remotes: &[RemoteResource],
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<()> {
         let text = serde_json::to_string_pretty(remotes)?;
-        std::fs::write(self.remotes_file(), text)?;
+        super::refresh::atomic_write_with_context(&self.remotes_file(), text.as_bytes(), context)?;
         Ok(())
     }
 
@@ -65,278 +68,181 @@ impl RemoteManager {
         self.save(&remotes)
     }
 
-    /// Fetch all enabled remote resources and cache to disk.
-    ///
-    /// Single resource failures are only recorded in [`FetchReport::warnings`], not affecting other resources.
+    /// Fetch enabled resources; diagnostics deliberately omit URLs and downloaded content.
     pub async fn fetch_all(&self, remotes: &[RemoteResource]) -> FetchReport {
         let mut report = FetchReport::default();
-        for remote in remotes.iter().filter(|r| r.enabled) {
-            match remote.kind {
-                RemoteKind::Script => match self.fetch_text(&remote.url).await {
-                    Ok(text) => {
-                        if let Err(e) = self.write_script(&remote.name, &text) {
-                            report.warnings.push(format!(
-                                "remote '{}': write script failed: {e}",
-                                remote.name
-                            ));
-                            continue;
-                        }
-                        report.fetched += 1;
-                        report.scripts += 1;
-                    }
-                    Err(e) => report
-                        .warnings
-                        .push(format!("remote '{}': {e}", remote.name)),
-                },
-                #[cfg(feature = "mitm")]
-                RemoteKind::Snippet => match self.fetch_snippet(remote).await {
-                    Ok(imported) => {
-                        report.rewrites += imported.rewrites.len();
-                        report.scripts += imported.scripts.len();
-                        report.tasks += imported.task_scripts.len();
-                        for w in &imported.warnings {
-                            report
-                                .warnings
-                                .push(format!("remote '{}': {w}", remote.name));
-                        }
-                        if let Err(e) = self.write_cache(&remote.name, &imported) {
-                            report
-                                .warnings
-                                .push(format!("remote '{}': write cache failed: {e}", remote.name));
-                            continue;
-                        }
-                        // Backfill arguments when resource declares none but remote meta has declarations.
-                        if let Err(e) = self.backfill_arguments(&remote.name, &imported.meta) {
-                            report.warnings.push(format!(
-                                "remote '{}': backfill arguments failed: {e}",
-                                remote.name
-                            ));
-                        }
-                        report.fetched += 1;
-                    }
-                    Err(e) => report
-                        .warnings
-                        .push(format!("remote '{}': {e}", remote.name)),
-                },
-                // scripts-only（mobile）形态：Snippet 解析依赖 lanpath-mitm，此构建不编译 import
-                // 解析路径，存量 Snippet 资源跳过并记录 warning（不阻塞其余 Script 资源）。
-                #[cfg(not(feature = "mitm"))]
-                RemoteKind::Snippet => {
-                    report.warnings.push(format!(
-                        "remote '{}': Snippet 资源类型需桌面版（mitm）支持，已跳过",
-                        remote.name
-                    ));
-                }
-            }
-            // Icon localization cache (best-effort): failure only recorded in warning, not affecting fetched count.
-            if let Some(icon_url) = &remote.icon
-                && let Err(e) = self.cache_icon(&remote.name, icon_url).await
-            {
-                report
-                    .warnings
-                    .push(format!("remote '{}': icon cache failed: {e}", remote.name));
-            }
+        for remote in remotes.iter().filter(|resource| resource.enabled) {
+            let fetched = self
+                .fetch_one(remote, None)
+                .await
+                .unwrap_or_else(|_| FetchReport {
+                    warnings: vec!["resource update refused; previous cache retained".into()],
+                    ..Default::default()
+                });
+            report.fetched += fetched.fetched;
+            report.scripts += fetched.scripts;
+            report.rewrites += fetched.rewrites;
+            report.tasks += fetched.tasks;
+            report.hostnames += fetched.hostnames;
+            report.warnings.extend(fetched.warnings);
         }
         report
     }
 
-    /// Read all Snippet caches and merge into runtime config.
-    ///
-    /// Single cache file corruption/missing only records warning and skips, not blocking other caches.
-    pub fn load_cached(&self) -> LanpathResult<MergedRemoteConfig> {
-        let cache_dir = self.data_dir.join("remote_cache");
-        let mut merged = MergedRemoteConfig::default();
-        if !cache_dir.is_dir() {
-            return Ok(merged);
-        }
-        let mut paths: Vec<PathBuf> = std::fs::read_dir(&cache_dir)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.extension()
-                    .and_then(|x| x.to_str())
-                    .is_some_and(|x| x == "json")
-            })
-            .collect();
-        paths.sort();
-        for path in paths {
-            let text = match std::fs::read_to_string(&path) {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), "read remote cache failed: {e}");
-                    continue;
-                }
-            };
-            let cached: super::CachedRemoteConfig = match serde_json::from_str(&text) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), "parse remote cache failed: {e}");
-                    continue;
-                }
-            };
-            let part = cached.into_merged();
-            #[cfg(feature = "mitm")]
-            {
-                merged.rewrites.extend(part.rewrites);
-                merged.scripts.extend(part.scripts);
-            }
-            merged.task_scripts.extend(part.task_scripts);
-            merged.metas.extend(part.metas);
-            for hostname in part.hostnames {
-                if !merged.hostnames.contains(&hostname) {
-                    merged.hostnames.push(hostname);
-                }
-            }
-        }
-        Ok(merged)
-    }
-
-    /// Merge an [`ImportedConfig`] into fixed cache `remote_cache/imported.json`.
-    ///
-    /// Script hooks / task scripts with empty `source` (not fetched) are skipped and counted in
-    /// [`ImportSummary::warnings`]; rewrite rules and hostnames are directly merged.
-    /// Repeated imports append on top of existing cache (do not overwrite).
-    #[cfg(feature = "mitm")]
-    pub fn merge_imported(&self, imported: &ImportedConfig) -> LanpathResult<ImportSummary> {
-        let mut summary = ImportSummary::default();
-        summary.warnings.extend(imported.warnings.iter().cloned());
-
-        let cache_dir = self.data_dir.join("remote_cache");
-        let cache_path = cache_dir.join("imported.json");
-        let mut cached = super::CachedRemoteConfig::default();
-        if cache_path.exists() {
-            match std::fs::read_to_string(&cache_path) {
-                Ok(text) => match serde_json::from_str::<super::CachedRemoteConfig>(&text) {
-                    Ok(c) => cached = c,
-                    Err(e) => summary.warnings.push(format!(
-                        "existing local import cache unreadable, start fresh: {e}"
-                    )),
-                },
-                Err(e) => summary.warnings.push(format!(
-                    "existing local import cache unreadable, start fresh: {e}"
-                )),
-            }
-        }
-
-        for (rule, (name, url)) in imported.scripts.iter().zip(imported.script_urls.iter()) {
-            if rule.source.is_empty() {
-                summary.warnings.push(format!(
-                    "script '{name}' source not fetched ({url}), skipped"
-                ));
-                continue;
-            }
-            cached.scripts.push(super::CachedScriptRule::from(rule));
-            summary.scripts += 1;
-        }
-        for (task, url) in &imported.task_scripts {
-            if task.source.is_empty() {
-                summary.warnings.push(format!(
-                    "task '{}' source not fetched ({url}), skipped",
-                    task.name
-                ));
-                continue;
-            }
-            cached.task_scripts.push(task.clone());
-            summary.tasks += 1;
-        }
-        cached
-            .rewrites
-            .extend(imported.rewrites.iter().map(super::CachedRewriteRule::from));
-        summary.rewrites = imported.rewrites.len();
-        for hostname in &imported.hostnames {
-            if !cached.hostnames.contains(hostname) {
-                cached.hostnames.push(hostname.clone());
-            }
-        }
-        summary.hostnames = imported.hostnames.len();
-        // Config header metadata (including `#!arguments` declarations) persisted with cache for runtime argument template replacement.
-        if imported.meta != ConfigMeta::default() {
-            cached.meta = Some(imported.meta.clone());
-        }
-
-        std::fs::create_dir_all(&cache_dir)?;
-        let text = serde_json::to_string_pretty(&cached)?;
-        std::fs::write(&cache_path, text)?;
-        Ok(summary)
-    }
-
-    /// Import a third-party config content and merge into local cache:
-    /// `parse_import` → [`Self::fill_script_sources`] (fetch script sources) → [`Self::merge_imported`].
-    ///
-    /// Single script / task script fetch failure only recorded in [`ImportSummary::warnings`] and skipped,
-    /// not blocking rewrite rules and hostnames from being merged. Returns summary containing config header
-    /// metadata and fetch statistics.
-    #[cfg(feature = "mitm")]
-    pub async fn import_content(
+    pub(super) async fn fetch_one(
         &self,
-        content: &str,
-        dialect: ScriptDialect,
-    ) -> LanpathResult<ImportSummary> {
-        let mut imported = parse_import(content, dialect)
-            .map_err(|e| LanpathError::Client(format!("imported config parse failed: {e}")))?;
-        self.fill_script_sources(&mut imported).await;
-        let mut summary = self.merge_imported(&imported)?;
-        summary.meta = imported.meta;
-        Ok(summary)
+        remote: &RemoteResource,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<FetchReport> {
+        let automatic = context.is_some();
+        self.check_publication(remote, context)?;
+        // Decoration must not consume the automatic resource's entire deadline.
+        // Icon warmup remains part of explicit save/manual-update operations.
+        let mut report = FetchReport::default();
+        // All network awaits precede the final script/snippet publication, so
+        // cancellation during an auxiliary asset request cannot publish a partial module.
+        if !automatic
+            && let Some(icon) = &remote.icon
+            && self.cache_icon(&remote.name, icon).await.is_err()
+        {
+            report
+                .warnings
+                .push("resource icon could not be cached".into());
+        }
+        match remote.kind {
+            RemoteKind::Script => match self.fetch_text_with_context(&remote.url, context).await {
+                Ok(text) => {
+                    self.check_publication(remote, context)?;
+                    match self.write_script(&remote.name, &text, context) {
+                        Ok(_) => {
+                            report.fetched += 1;
+                            report.scripts += 1;
+                        }
+                        Err(_) => report
+                            .warnings
+                            .push("script cache could not be written; resource not updated".into()),
+                    }
+                }
+                Err(_) => report
+                    .warnings
+                    .push("script download failed; previous cache retained".into()),
+            },
+            #[cfg(feature = "mitm")]
+            RemoteKind::Snippet => match self.fetch_snippet(remote, context).await {
+                Ok((imported, complete)) => {
+                    report.warnings.extend(imported.warnings.iter().cloned());
+                    if automatic && !complete {
+                        report.warnings.push(
+                            "automatic module refresh incomplete; previous complete cache retained"
+                                .into(),
+                        );
+                        if let Some(context) = context {
+                            context.check_live()?;
+                        }
+                        return Ok(report);
+                    }
+                    self.check_publication(remote, context)?;
+                    let (hostname_count, warnings) = match self
+                        .write_cache(remote, &imported, context)
+                    {
+                        Ok(result) => result,
+                        Err(_) => {
+                            report.warnings.push(
+                                "snippet cache could not be written; resource not updated".into(),
+                            );
+                            return Ok(report);
+                        }
+                    };
+                    report.rewrites += imported.rewrites.len();
+                    report.scripts += imported.scripts.iter().filter(|rule| rule.enabled).count();
+                    report.tasks += imported
+                        .task_scripts
+                        .iter()
+                        .filter(|(task, _)| task.enabled)
+                        .count();
+                    report.hostnames += hostname_count;
+                    report.warnings.extend(warnings);
+                    if self
+                        .backfill_arguments(&remote.name, &imported.meta, context)
+                        .is_err()
+                    {
+                        report
+                            .warnings
+                            .push("module parameter declarations could not be saved".into());
+                    }
+                    report.fetched += 1;
+                }
+                Err(_) => report
+                    .warnings
+                    .push("snippet download or parse failed; previous cache retained".into()),
+            },
+            #[cfg(not(feature = "mitm"))]
+            RemoteKind::Snippet => report.warnings.push(
+                "snippet parsing requires the desktop MITM feature; resource not activated".into(),
+            ),
+        }
+        if let Some(context) = context {
+            context.check_live()?;
+        }
+        Ok(report)
+    }
+
+    pub(super) fn check_publication(
+        &self,
+        remote: &RemoteResource,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<()> {
+        if let Some(context) = context {
+            context.check_write(&self.data_dir.join("remote_refresh.json"))?;
+            match remote.kind {
+                RemoteKind::Script => context.check_write(
+                    &self
+                        .data_dir
+                        .join("scripts")
+                        .join(format!("{}.js", safe_name(&remote.name))),
+                )?,
+                RemoteKind::Snippet => {
+                    context.check_write(&self.remotes_file())?;
+                    #[cfg(feature = "mitm")]
+                    context.check_write(&self.data_dir.join("remote_cache").join(format!(
+                        "{}.json",
+                        super::activation::remote_module_id(remote).replace(':', "-"),
+                    )))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Fetch single URL text content; non-2xx treated as failure.
     ///
     /// Delegates to [`crate::fetch_resource_text`]: GitHub blob/raw link normalization,
     /// GitHub proxy prefix拼接 and "use local proxy" settings are all handled uniformly (30s timeout).
-    async fn fetch_text(&self, url: &str) -> LanpathResult<String> {
+    pub(super) async fn fetch_text(&self, url: &str) -> LanpathResult<String> {
         crate::fetch_resource_text(&self.data_dir, url, std::time::Duration::from_secs(30)).await
     }
 
-    /// Backfill Snippet script hooks / task scripts' remote sources.
-    ///
-    /// Fetch scripts pointed to by [`ImportedConfig::script_urls`] and [`ImportedConfig::task_scripts`]
-    /// one by one, write back to corresponding `source` on success; failure recorded in
-    /// [`ImportedConfig::warnings`] and the script discarded, not blocking other scripts and rules.
-    #[cfg(feature = "mitm")]
-    pub async fn fill_script_sources(&self, imported: &mut ImportedConfig) {
-        let scripts = std::mem::take(&mut imported.scripts);
-        let script_urls = std::mem::take(&mut imported.script_urls);
-        let mut kept_scripts = Vec::new();
-        let mut kept_urls = Vec::new();
-        for (rule, (name, url)) in scripts.into_iter().zip(script_urls) {
-            match self.fetch_text(&url).await {
-                Ok(source) => {
-                    let mut rule = rule;
-                    rule.source = source;
-                    kept_scripts.push(rule);
-                    kept_urls.push((name, url));
-                }
-                Err(e) => imported
-                    .warnings
-                    .push(format!("hook script fetch failed: {e}")),
-            }
+    pub(super) async fn fetch_text_with_context(
+        &self,
+        url: &str,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<String> {
+        match context {
+            Some(context) => context.fetch_text(url).await,
+            None => self.fetch_text(url).await,
         }
-        // Keep scripts and script_urls aligned (only keep successfully fetched scripts)
-        imported.scripts = kept_scripts;
-        imported.script_urls = kept_urls;
-
-        let task_scripts = std::mem::take(&mut imported.task_scripts);
-        let mut kept_tasks = Vec::new();
-        for (mut task, url) in task_scripts {
-            match self.fetch_text(&url).await {
-                Ok(source) => {
-                    task.source = source;
-                    kept_tasks.push((task, url));
-                }
-                Err(e) => imported
-                    .warnings
-                    .push(format!("task '{}' script fetch failed: {e}", task.name)),
-            }
-        }
-        imported.task_scripts = kept_tasks;
     }
 
     /// Fetch backfill resource parameter declarations (auxiliary path): when manifest resource `arguments`
     /// is empty but remote meta declares parameters, backfill `arguments` and pre-fill `argument_values`
     /// with defaults (existing values in `argument_values` are not overwritten).
     #[cfg(feature = "mitm")]
-    fn backfill_arguments(&self, name: &str, meta: &ConfigMeta) -> LanpathResult<()> {
+    fn backfill_arguments(
+        &self,
+        name: &str,
+        meta: &ConfigMeta,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<()> {
         if meta.arguments.is_empty() {
             return Ok(());
         }
@@ -357,39 +263,73 @@ impl RemoteManager {
             }
         }
         remote.arguments = meta.arguments.clone();
-        self.save(&remotes)
+        self.save_with_context(&remotes, context)
     }
 
     /// Fetch Snippet: parse → backfill script hooks/task sources one by one (failure recorded in warning and skipped).
     #[cfg(feature = "mitm")]
-    async fn fetch_snippet(&self, remote: &RemoteResource) -> LanpathResult<ImportedConfig> {
-        let text = self.fetch_text(&remote.url).await?;
+    async fn fetch_snippet(
+        &self,
+        remote: &RemoteResource,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<(ImportedConfig, bool)> {
+        let text = self.fetch_text_with_context(&remote.url, context).await?;
         let mut imported = parse_import(&text, remote.dialect).map_err(|e| {
             LanpathError::Client(format!("snippet '{}' parse failed: {e}", remote.name))
         })?;
-        self.fill_script_sources(&mut imported).await;
-        Ok(imported)
+        // Source backfill removes only failed enabled assets, not unsupported
+        // directives rejected by the parser. Do not treat unrelated warnings as fatal.
+        let hooks = imported.scripts.iter().filter(|rule| rule.enabled).count();
+        let tasks = imported
+            .task_scripts
+            .iter()
+            .filter(|(task, _)| task.enabled)
+            .count();
+        self.fill_script_sources_with_context(&mut imported, context)
+            .await;
+        // Empty downloads are not complete module updates; explicit manual
+        // refresh keeps its existing diagnostic/partial-import semantics.
+        let complete = !text.trim().is_empty()
+            && hooks == imported.scripts.iter().filter(|rule| rule.enabled).count()
+            && tasks
+                == imported
+                    .task_scripts
+                    .iter()
+                    .filter(|(task, _)| task.enabled)
+                    .count();
+        Ok((imported, complete))
     }
 
     /// Write pure JS script to `data_dir/scripts/<name>.js`.
-    fn write_script(&self, name: &str, content: &str) -> LanpathResult<PathBuf> {
+    fn write_script(
+        &self,
+        name: &str,
+        content: &str,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<PathBuf> {
         let dir = self.data_dir.join("scripts");
-        std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.js", safe_name(name)));
-        std::fs::write(&path, content)?;
+        super::refresh::atomic_write_with_context(&path, content.as_bytes(), context)?;
         Ok(path)
     }
 
     /// Serialize Snippet aggregation result to cache `data_dir/remote_cache/<name>.json`.
     #[cfg(feature = "mitm")]
-    fn write_cache(&self, name: &str, imported: &ImportedConfig) -> LanpathResult<PathBuf> {
+    fn write_cache(
+        &self,
+        remote: &RemoteResource,
+        imported: &ImportedConfig,
+        context: Option<&RemoteFetchContext>,
+    ) -> LanpathResult<(usize, Vec<String>)> {
         let dir = self.data_dir.join("remote_cache");
-        std::fs::create_dir_all(&dir)?;
-        let cached = super::CachedRemoteConfig::from_imported(imported);
+        let module_id = super::activation::remote_module_id(remote);
+        let mut cached = super::CachedRemoteConfig::from_imported(imported);
+        cached.bind_module(&module_id);
+        let (hostnames, warnings) = cached.resolved_hostnames(Some(remote));
         let text = serde_json::to_string_pretty(&cached)?;
-        let path = dir.join(format!("{}.json", safe_name(name)));
-        std::fs::write(&path, text)?;
-        Ok(path)
+        let path = dir.join(format!("{}.json", module_id.replace(':', "-")));
+        super::refresh::atomic_write_with_context(&path, text.as_bytes(), context)?;
+        Ok((hostnames.len(), warnings))
     }
 
     /// Find `<safe_name(name)>.<ext>` icon cache under `data_dir/icons/`; return path when exists,
@@ -435,6 +375,8 @@ impl RemoteManager {
         let dir = self.data_dir.join("icons");
         std::fs::create_dir_all(&dir)?;
         let base = safe_name(name);
+        let path = dir.join(format!("{base}.{ext}"));
+        super::refresh::atomic_write(&path, &bytes)?;
         // Delete other old extension files for this name (keep this write target).
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -446,8 +388,6 @@ impl RemoteManager {
                 }
             }
         }
-        let path = dir.join(format!("{base}.{ext}"));
-        std::fs::write(&path, &bytes)?;
         Ok(Some(path))
     }
 }

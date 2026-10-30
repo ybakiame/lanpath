@@ -5,6 +5,7 @@ use lanpath_client::remote::{
 use lanpath_common::LanpathResult;
 
 use super::BusinessService;
+use crate::script_dialects::{is_selectable, validate_selection};
 
 impl BusinessService {
     fn remote_service(&self) -> RemoteResourceService {
@@ -19,6 +20,7 @@ impl BusinessService {
         &self,
         resource: RemoteResource,
     ) -> LanpathResult<RemoteResource> {
+        validate_selection(resource.dialect, None)?;
         self.remote_service().add(resource).await
     }
 
@@ -27,7 +29,16 @@ impl BusinessService {
         name: &str,
         resource: RemoteResource,
     ) -> LanpathResult<RemoteResource> {
-        self.remote_service().update(name, resource).await
+        let service = self.remote_service();
+        if !is_selectable(resource.dialect) {
+            let previous = service
+                .load()?
+                .into_iter()
+                .find(|existing| existing.name == name)
+                .map(|existing| existing.dialect);
+            validate_selection(resource.dialect, previous)?;
+        }
+        service.update(name, resource).await
     }
 
     pub(crate) async fn set_remote_resource_enabled(
@@ -55,6 +66,7 @@ impl BusinessService {
         content: &str,
         dialect: ScriptDialect,
     ) -> LanpathResult<ImportSummary> {
+        validate_selection(dialect, None)?;
         self.remote_service().import_content(content, dialect).await
     }
 }

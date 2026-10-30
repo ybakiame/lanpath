@@ -3,8 +3,48 @@ use std::path::{Component, Path, PathBuf};
 use lanpath_common::{LanpathError, LanpathResult};
 use serde_json::Value;
 
+pub(crate) const TLS_INPUT_PATHS: &[&str] = &[
+    "certificate_path",
+    "client_certificate_path",
+    "client_key_path",
+];
+
 pub(super) fn denied(location: &str, reason: &str) -> LanpathError {
     LanpathError::Config(format!("{location}: {reason}"))
+}
+
+#[cfg(not(windows))]
+fn relative_to_root<'a>(candidate: &'a Path, root: &Path) -> Option<&'a Path> {
+    candidate.strip_prefix(root).ok()
+}
+
+#[cfg(windows)]
+fn relative_to_root<'a>(candidate: &'a Path, root: &Path) -> Option<&'a Path> {
+    use std::path::Prefix;
+    let mut remaining = candidate.components();
+    for expected in root.components() {
+        match (remaining.next(), expected) {
+            (Some(Component::Prefix(actual)), Component::Prefix(expected)) => {
+                let equal = match (actual.kind(), expected.kind()) {
+                    (
+                        Prefix::Disk(a) | Prefix::VerbatimDisk(a),
+                        Prefix::Disk(b) | Prefix::VerbatimDisk(b),
+                    ) => a.eq_ignore_ascii_case(&b),
+                    (
+                        Prefix::UNC(a, b) | Prefix::VerbatimUNC(a, b),
+                        Prefix::UNC(c, d) | Prefix::VerbatimUNC(c, d),
+                    ) => a == c && b == d,
+                    (a, b) => a == b,
+                };
+                if !equal {
+                    return None;
+                }
+            }
+            (Some(actual), expected) if actual == expected => {}
+            _ => return None,
+        }
+    }
+    Some(remaining.as_path())
 }
 
 /// Check each existing component, including Windows junctions (whose canonical
@@ -25,10 +65,11 @@ pub(crate) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult
     let canonical_root = std::fs::canonicalize(root)?;
     let candidate = Path::new(text);
     let relative = if candidate.is_absolute() {
-        candidate
-            .strip_prefix(&canonical_root)
+        // Compare namespace aliases without canonicalizing the candidate:
+        // resolving it first could erase a forbidden junction/symlink component.
+        relative_to_root(candidate, &canonical_root)
             .map(Path::to_path_buf)
-            .map_err(|_| {
+            .ok_or_else(|| {
                 denied(
                     location,
                     "absolute resource paths must stay inside the experimental root",

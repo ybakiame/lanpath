@@ -30,7 +30,6 @@ type Arch = (typeof ARCHES)[number];
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = join(appDir, "src-tauri", "seed-manifest.json");
 const outDir = join(appDir, "src-tauri", "resources", "seed");
-const licensesDir = join(outDir, "licenses");
 
 interface Manifest {
   sing_box: {
@@ -109,8 +108,10 @@ function findEntry(entries: Record<string, Uint8Array>, suffix: string, label: s
   return hit[1];
 }
 
-async function main(): Promise<void> {
-  const { arch, force } = parseArgs();
+/** Framework-independent verified seed fetch; callers choose an isolated output root. */
+export async function fetchSeedCore(arch: Arch, outDir: string, force = true): Promise<void> {
+  const licensesDir = join(outDir, "licenses");
+  if (!ARCHES.includes(arch)) throw new Error(`Unsupported seed architecture: ${arch}`);
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
   const version = manifest.sing_box.version;
 
@@ -148,20 +149,7 @@ async function main(): Promise<void> {
     findEntry(sbEntries, "/LICENSE", asset.file),
   );
 
-  // wintun（TUN 依赖，sing-box 不内嵌；与运行时 ensure_wintun 同版本 0.14.1）。
-  const wt = manifest.wintun;
-  const wtZip = await downloadVerified(wt.url, wt.sha256, `wintun ${wt.version}`);
-  const wtEntries = unzipSync(wtZip);
-  writeFileSync(join(outDir, "wintun.dll"), findEntry(wtEntries, wt.dll_path[arch], "wintun"));
-  writeFileSync(
-    join(licensesDir, "wintun-LICENSE.txt"),
-    findEntry(wtEntries, "/LICENSE.txt", "wintun"),
-  );
-
-  // GPL-3.0 全文（sing-box 随附的 LICENSE 仅为声明性短文本，GPL 合规要求随二进制
-  // 附带许可证全文；wintun 为预编译二进制许可证，上文已从其 zip 提取全文）。
-  const gplText = await downloadVerified(manifest.gpl3.url, manifest.gpl3.sha256, "GPL-3.0 全文");
-  writeFileSync(join(licensesDir, "gpl-3.0.txt"), gplText);
+  await fetchWindowsTunResources(arch, outDir);
 
   if (process.platform !== "win32") {
     chmodSync(join(outDir, "sing-box.exe"), 0o644);
@@ -170,7 +158,27 @@ async function main(): Promise<void> {
     runtimeManifestPath,
     `${JSON.stringify({ sing_box_version: version, arch }, null, 2)}\n`,
   );
-  console.log(`✓ 种子就绪：${outDir}（sing-box ${version} / ${arch} + wintun ${wt.version}）`);
+  console.log(`✓ 种子就绪：${outDir}（sing-box ${version} / ${arch} + wintun ${manifest.wintun.version}）`);
 }
 
-await main();
+/** Verified Windows compatibility DLL/licenses, without downloading a stock core. */
+export async function fetchWindowsTunResources(arch: Arch, outDir: string): Promise<void> {
+  if (!ARCHES.includes(arch)) throw new Error(`Unsupported seed architecture: ${arch}`);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
+  const licensesDir = join(outDir, "licenses");
+  mkdirSync(licensesDir, { recursive: true });
+  // Some cores embed Wintun. Shipping this compatibility DLL does not prove
+  // which bytes a running core actually loads.
+  const wt = manifest.wintun;
+  const wtZip = await downloadVerified(wt.url, wt.sha256, `wintun ${wt.version}`);
+  const wtEntries = unzipSync(wtZip);
+  writeFileSync(join(outDir, "wintun.dll"), findEntry(wtEntries, wt.dll_path[arch], "wintun"));
+  writeFileSync(join(licensesDir, "wintun-LICENSE.txt"), findEntry(wtEntries, "/LICENSE.txt", "wintun"));
+  const gplText = await downloadVerified(manifest.gpl3.url, manifest.gpl3.sha256, "GPL-3.0 全文");
+  writeFileSync(join(licensesDir, "gpl-3.0.txt"), gplText);
+}
+
+if (import.meta.main) {
+  const { arch, force } = parseArgs();
+  await fetchSeedCore(arch, outDir, force);
+}

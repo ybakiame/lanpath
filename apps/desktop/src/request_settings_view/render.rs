@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _,
-    button::Button,
+    button::{Button, ButtonVariants as _},
     input::Input,
     radio::{Radio, RadioGroup},
     scroll::ScrollableElement as _,
@@ -80,8 +80,9 @@ impl Render for RequestSettingsView {
         });
 
         div().flex().flex_col().flex_1().min_h_0().min_w_0()
-            .overflow_y_scrollbar()
-            .child(div().flex().flex_col().gap_4().p_1()
+            .child(div().flex_1().min_h_0().min_w_0().overflow_y_scrollbar()
+                .child(div().flex().flex_col().flex_shrink_0().min_w_0().w_full()
+                    .max_w(gpui_kit::rems(64.0)).gap_4().p_1().pb_4()
                 .child(div().text_lg().child("网络请求"))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("仅影响 Lanpath 拉取订阅、脚本和 GitHub 资源，不会修改系统代理、TUN 或证书。"))
@@ -121,8 +122,16 @@ impl Render for RequestSettingsView {
                         .aria_label("GitHub 镜像前缀").disabled(editing_disabled))
                     .child(div().text_sm().text_color(cx.theme().muted_foreground)
                         .child("留空不使用镜像；仅按现有规则将前缀拼接到 GitHub 资源 URL 前。")))
+                .child(div().id("request-saved-policy").text_sm()
+                    .text_color(cx.theme().muted_foreground).child(saved_summary))
+                .child(div().text_sm().text_color(cx.theme().muted_foreground)
+                    .child("连接测试使用接受测试时的已保存快照，请求 https://api.github.com/zen；每次请求超时 10 秒，沿用真实资源拉取的重试规则。"))
+                .children(probe_summary.map(|summary| div().id("request-probe-result")
+                    .role(Role::Status).aria_label(summary.clone()).text_sm().child(summary)))))
+            .child(div().flex().flex_col().flex_shrink_0().min_w_0().gap_2()
+                .border_t_1().border_color(cx.theme().border).pt_3().px_1().pb_1()
                 .child(div().flex().items_center().flex_wrap().gap_2()
-                    .child(Button::new("request-save").label("保存")
+                    .child(Button::new("request-save").primary().label("保存")
                         .disabled(editing_disabled || !self.dirty())
                         .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))))
                     .child(Button::new("request-reload").label(if self.dirty() { "重新载入…" } else { "重新载入" })
@@ -132,14 +141,8 @@ impl Render for RequestSettingsView {
                         .disabled(self.closing || self.busy() || self.service.is_none())
                         .on_click(cx.listener(|this, _, _, cx| this.probe(cx)))))
                 .child(div().id("request-draft-status").role(Role::Status)
-                    .aria_label(status.clone()).text_sm()
+                    .aria_label(status.clone()).text_sm().min_w_0().max_h_16().overflow_y_scrollbar()
                     .text_color(if self.error.is_some() { cx.theme().danger } else { cx.theme().muted_foreground })
-                    .child(status))
-                .child(div().id("request-saved-policy").text_sm()
-                    .text_color(cx.theme().muted_foreground).child(saved_summary))
-                .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                    .child("连接测试使用接受测试时的已保存快照，请求 https://api.github.com/zen；每次请求超时 10 秒，沿用真实资源拉取的重试规则。"))
-                .children(probe_summary.map(|summary| div().id("request-probe-result")
-                    .role(Role::Status).aria_label(summary.clone()).text_sm().child(summary))))
+                    .child(status)))
     }
 }

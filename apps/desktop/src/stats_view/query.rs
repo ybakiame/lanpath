@@ -1,6 +1,5 @@
 use gpui_kit::component::{
-    Disableable as _, IndexPath, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    IndexPath, Sizable as _,
     input::{Input, InputEvent, InputState},
     select::{Select, SelectState},
 };
@@ -68,12 +67,15 @@ impl QueryForm {
         div()
             .flex()
             .flex_wrap()
+            .min_w_0()
             .items_end()
             .gap_2()
             .child(
                 input_field(prefix, "搜索", &self.search, disabled)
                     .flex_1()
-                    .min_w_48(),
+                    .flex_basis(gpui_kit::rems(12.))
+                    .min_w_0()
+                    .max_w_full(),
             )
             .child(
                 div()
@@ -81,6 +83,8 @@ impl QueryForm {
                     .flex_col()
                     .gap_1()
                     .w_40()
+                    .min_w_0()
+                    .max_w_full()
                     .text_sm()
                     .child("排序字段")
                     .child(
@@ -97,6 +101,8 @@ impl QueryForm {
                     .flex_col()
                     .gap_1()
                     .w_24()
+                    .min_w_0()
+                    .max_w_full()
                     .text_sm()
                     .child("顺序")
                     .child(
@@ -107,7 +113,11 @@ impl QueryForm {
                             .w_full(),
                     ),
             )
-            .child(input_field("stats-query-limit", "返回上限", &self.limit, disabled).w_24())
+            .child(
+                input_field("stats-query-limit", "返回上限", &self.limit, disabled)
+                    .w_24()
+                    .max_w_full(),
+            )
     }
 }
 
@@ -179,7 +189,7 @@ impl QueryInputs {
 }
 
 impl StatsView {
-    pub(super) fn render_filters(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_filters(&self, _: &mut Context<Self>) -> impl IntoElement {
         let disabled = self.requests.clearing();
         let daily = self.kind == StatsKind::Daily;
         let form = if daily {
@@ -190,6 +200,7 @@ impl StatsView {
         div()
             .flex()
             .flex_col()
+            .min_w_0()
             .gap_2()
             .child(form.render(
                 if daily {
@@ -204,6 +215,7 @@ impl StatsView {
                     .flex()
                     .flex_wrap()
                     .items_end()
+                    .min_w_0()
                     .gap_2()
                     .children(daily.then(|| {
                         input_field(
@@ -213,6 +225,7 @@ impl StatsView {
                             disabled,
                         )
                         .w_64()
+                        .max_w_full()
                     }))
                     .children(daily.then(|| {
                         input_field(
@@ -222,15 +235,8 @@ impl StatsView {
                             disabled,
                         )
                         .w_64()
-                    }))
-                    .child(
-                        Button::new("stats-apply-query")
-                            .label("应用查询")
-                            .primary()
-                            .small()
-                            .disabled(disabled)
-                            .on_click(cx.listener(|view, _, _, cx| view.apply_query(cx))),
-                    ),
+                        .max_w_full()
+                    })),
             )
     }
 }

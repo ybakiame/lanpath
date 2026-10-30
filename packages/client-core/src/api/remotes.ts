@@ -34,6 +34,7 @@ export interface FetchReport {
   scripts: number;
   rewrites: number;
   tasks: number;
+  hostnames: number;
   warnings: string[];
 }
 

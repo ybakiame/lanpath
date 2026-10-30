@@ -1,13 +1,15 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, button::Button, input::Editor, list::List,
-    scroll::ScrollableElement as _, switch::Switch,
+    ActiveTheme as _, Disableable as _, button::Button, checkbox::Checkbox, input::Editor,
+    list::List, scroll::ScrollableElement as _,
 };
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
-use lanpath_client::mitm::CaTrustStatus;
+use lanpath_client::mitm::{CaOwnershipStatus, CaTrustStatus};
 
+use super::traffic_list::traffic_columns;
 use super::{MitmView, Operation};
 
 impl Render for MitmView {
@@ -34,6 +36,7 @@ impl Render for MitmView {
             Operation::Save => "正在保存 MITM 设置…",
             Operation::Refresh => "正在刷新证书与运行状态…",
             Operation::InstallCa => "正在安装实验 MITM CA…",
+            Operation::RemoveCa => "正在移除本应用拥有的 CA 信任…",
         });
         let status = operation
             .map(str::to_string)
@@ -63,16 +66,18 @@ impl Render for MitmView {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .gap_3()
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
-                    .child("MITM")
                     .child(
-                        Switch::new("mitm-enabled")
-                            .label("启用")
+                        Checkbox::new("mitm-enabled")
+                            .label("启用 MITM")
                             .checked(self.enabled)
                             .disabled(editing_disabled)
                             .on_click(cx.listener(|this, checked: &bool, _, cx| {
@@ -111,6 +116,10 @@ impl Render for MitmView {
                     .role(Role::Status)
                     .aria_label(status.clone())
                     .text_sm()
+                    .min_w_0()
+                    .max_h_16()
+                    .flex_shrink_0()
+                    .overflow_y_scrollbar()
                     .text_color(if status_error {
                         cx.theme().danger
                     } else {
@@ -125,13 +134,16 @@ impl Render for MitmView {
                     .items_stretch()
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
                     .gap_4()
                     .child(
                         div()
                             .flex()
                             .flex_col()
-                            .w_1_2()
+                            .flex_1()
+                            .max_w_full()
                             .min_w_0()
+                            .min_h_0()
                             .gap_4()
                             .overflow_y_scrollbar()
                             .child(section_title(
@@ -142,6 +154,57 @@ impl Render for MitmView {
                             .child(info_row("证书路径", ca_path, cx))
                             .child(info_row("系统信任", trust, cx))
                             .child(info_row(
+                                "SHA-256",
+                                self.ca
+                                    .as_ref()
+                                    .map(|ca| ca.sha256.clone())
+                                    .unwrap_or_else(|| "未加载".into()),
+                                cx,
+                            ))
+                            .child(info_row(
+                                "信任范围",
+                                self.ca
+                                    .as_ref()
+                                    .map(|ca| format!("{:?}", ca.scope))
+                                    .unwrap_or_else(|| "未加载".into()),
+                                cx,
+                            ))
+                            .child(info_row(
+                                "回执 SHA-256",
+                                self.trust
+                                    .as_ref()
+                                    .and_then(|trust| trust.receipt_sha256.clone())
+                                    .unwrap_or_else(|| "无拥有的安装回执".into()),
+                                cx,
+                            ))
+                            .child(info_row(
+                                "安装所有权",
+                                self.trust
+                                    .as_ref()
+                                    .map(|trust| {
+                                        match trust.ownership {
+                                            CaOwnershipStatus::Untracked => {
+                                                "无拥有的安装回执；既有根不会移除"
+                                            }
+                                            CaOwnershipStatus::Owned => {
+                                                "本应用新增；回执与原始所有权匹配"
+                                            }
+                                            CaOwnershipStatus::Absent => {
+                                                "已不在信任库；可清理旧回执"
+                                            }
+                                            CaOwnershipStatus::Changed => {
+                                                "所有权已变；拒绝移除并保留回执"
+                                            }
+                                            CaOwnershipStatus::Unknown => {
+                                                "所有权查询失败；禁止移除"
+                                            }
+                                        }
+                                        .to_string()
+                                    })
+                                    .unwrap_or_else(|| "未查询".into()),
+                                cx,
+                            ))
+                            .child(info_row(
                                 "脚本方言",
                                 format!("{:?}", self.script_dialect),
                                 cx,
@@ -150,18 +213,43 @@ impl Render for MitmView {
                                 div()
                                     .flex()
                                     .items_center()
+                                    .flex_wrap()
                                     .gap_2()
                                     .child(
                                         Button::new("mitm-install-ca")
                                             .label("安装到系统信任库…")
+                                            .min_w_0()
+                                            .max_w_full()
                                             .disabled(self.locked || busy || self.ca.is_none())
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.request_install_ca(window, cx);
                                             })),
                                     )
                                     .child(
+                                        Button::new("mitm-remove-ca")
+                                            .label("移除拥有的信任…")
+                                            .min_w_0()
+                                            .max_w_full()
+                                            .disabled(
+                                                self.locked
+                                                    || busy
+                                                    || !self.trust.as_ref().is_some_and(|trust| {
+                                                        matches!(
+                                                            trust.ownership,
+                                                            CaOwnershipStatus::Owned
+                                                                | CaOwnershipStatus::Absent
+                                                        )
+                                                    }),
+                                            )
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.request_remove_ca(window, cx);
+                                            })),
+                                    )
+                                    .child(
                                         Button::new("mitm-copy-ca")
                                             .label("复制证书 PEM")
+                                            .min_w_0()
+                                            .max_w_full()
                                             .disabled(self.ca.is_none())
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.copy_ca(cx);
@@ -186,6 +274,8 @@ impl Render for MitmView {
                                     .children(self.derived.iter().map(|entry| {
                                         div()
                                             .flex()
+                                            .flex_wrap()
+                                            .min_w_0()
                                             .items_center()
                                             .gap_2()
                                             .text_sm()
@@ -220,6 +310,7 @@ impl Render for MitmView {
                             .flex()
                             .flex_col()
                             .flex_1()
+                            .flex_grow(2.)
                             .min_w_0()
                             .min_h_0()
                             .gap_2()
@@ -230,16 +321,12 @@ impl Render for MitmView {
                             ))
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
+                                    .px_3()
+                                    .flex_shrink_0()
+                                    .min_w_0()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(div().w_48().child("时间"))
-                                    .child(div().w_16().child("方法"))
-                                    .child(div().flex_1().child("URL"))
-                                    .child(div().w_12().child("状态"))
-                                    .child(div().w_20().child("耗时")),
+                                    .child(traffic_columns("时间", "方法", "URL", "状态", "耗时")),
                             )
                             .child(List::new(&self.traffic).flex_1().min_h_0()),
                     ),
@@ -252,12 +339,18 @@ fn section_title(
     description: impl Into<String>,
     cx: &Context<MitmView>,
 ) -> impl IntoElement {
-    div().flex().flex_col().gap_1().child(title.into()).child(
-        div()
-            .text_sm()
-            .text_color(cx.theme().muted_foreground)
-            .child(description.into()),
-    )
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .gap_1()
+        .child(div().font_semibold().child(title.into()))
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(description.into()),
+        )
 }
 
 fn info_row(
@@ -267,14 +360,25 @@ fn info_row(
 ) -> impl IntoElement {
     div()
         .flex()
-        .items_center()
+        .flex_wrap()
+        .min_w_0()
+        .items_start()
         .gap_2()
         .text_sm()
         .child(
             div()
                 .w_24()
+                .max_w_full()
+                .flex_shrink_0()
                 .text_color(cx.theme().muted_foreground)
                 .child(label.into()),
         )
-        .child(div().min_w_0().flex_1().child(value.into()))
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .flex_basis(gpui_kit::rems(8.))
+                .whitespace_normal()
+                .child(value.into()),
+        )
 }

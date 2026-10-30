@@ -65,25 +65,27 @@ async fn socks5_connect_establishes_tunnel_through_parent() {
                 }
                 let _ = client.write_all(&[0x05, 0x00]).await;
                 let mut head = [0u8; 4];
-                if client.read_exact(&mut head).await.is_err()
-                    || head[..3] != [0x05, 0x01, 0x00]
-                    || head[3] != 0x03
-                {
+                if client.read_exact(&mut head).await.is_err() || head[..3] != [0x05, 0x01, 0x00] {
                     return;
                 }
-                let mut len = [0u8; 1];
-                if client.read_exact(&mut len).await.is_err() {
-                    return;
-                }
-                let mut host = vec![0u8; len[0] as usize];
-                if client.read_exact(&mut host).await.is_err() {
-                    return;
-                }
+                let host = match head[3] {
+                    0x01 => {
+                        let mut ip = [0; 4];
+                        client.read_exact(&mut ip).await.unwrap();
+                        std::net::Ipv4Addr::from(ip).to_string()
+                    }
+                    0x03 => {
+                        let len = client.read_u8().await.unwrap();
+                        let mut host = vec![0; len as usize];
+                        client.read_exact(&mut host).await.unwrap();
+                        String::from_utf8(host).unwrap()
+                    }
+                    _ => panic!("unexpected SOCKS address type"),
+                };
                 let mut port_buf = [0u8; 2];
                 if client.read_exact(&mut port_buf).await.is_err() {
                     return;
                 }
-                let host = String::from_utf8_lossy(&host).into_owned();
                 let port = u16::from_be_bytes(port_buf);
                 let mut target = match TcpStream::connect((host.as_str(), port)).await {
                     Ok(s) => s,
@@ -114,4 +116,40 @@ async fn socks5_connect_establishes_tunnel_through_parent() {
 
     upstream_task.abort();
     parent_task.abort();
+}
+
+#[tokio::test]
+async fn http_connect_preserves_server_first_bytes_sent_with_the_response_head() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let parent = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(socket.read_u8().await.unwrap());
+        }
+        assert!(head.starts_with(b"CONNECT [::1]:8443 HTTP/1.1\r\n"));
+        socket
+            .write_all(b"HTTP/1.1 200 established\r\nX-Parent: yes\r\n\r\n\0\xff\x80hello")
+            .await
+            .unwrap();
+    });
+    let stream = TcpStream::connect(addr).await.unwrap();
+    let mut tunnel = http_connect(stream, "::1", 8443).await.unwrap();
+    let mut bytes = [0; 8];
+    tunnel.read_exact(&mut bytes).await.unwrap();
+    assert_eq!(&bytes, b"\0\xff\x80hello");
+    parent.await.unwrap();
+}
+
+#[test]
+fn target_parsing_keeps_ipv6_and_tls_ports_distinct() {
+    assert_eq!(
+        parse_target(&"https://[::1]:8443/path".parse().unwrap()).unwrap(),
+        ("::1".into(), 8443, true)
+    );
+    assert_eq!(
+        parse_target(&"http://example.test/path".parse().unwrap()).unwrap(),
+        ("example.test".into(), 80, false)
+    );
 }

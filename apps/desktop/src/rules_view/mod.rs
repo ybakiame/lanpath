@@ -211,7 +211,7 @@ impl RulesView {
         cx.notify();
     }
 
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.locked || self.busy() || !self.dirty {
             return;
         }

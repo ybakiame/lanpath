@@ -1,3 +1,4 @@
+mod automatic;
 mod editing;
 mod inputs;
 mod operations;
@@ -9,13 +10,16 @@ mod render_tasks;
 use std::{sync::Arc, time::Duration};
 
 use crate::{business::BusinessService, runtime::DesktopRuntime, scripts_view::inputs::FormInputs};
-use gpui_kit::{AppContext as _, Context, Subscription, Task, Window};
+use gpui_kit::{AppContext as _, Context, EventEmitter, Subscription, Task, Window};
 use lanpath_client::{
     ArgSpec,
     remote::{
         FetchReport, ImportSummary, RemoteKind, RemoteResource, RemoteTaskView, ScriptDialect,
     },
 };
+
+const DIALECT_SCOPE_NOTICE: &str =
+    "兼容范围：Surge 为主、QX 为辅；Loon / Stash 暂不可选，不代表完整厂商客户端支持。";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
@@ -31,10 +35,12 @@ pub(super) enum Operation {
     Toggle,
     Detect,
     Fetch,
+    AutomaticFetch,
     Import,
-    LoadTasks,
     RunTask,
 }
+
+pub(crate) struct AutomaticRefreshPoll;
 
 pub(crate) struct ScriptsView {
     core: Arc<DesktopRuntime>,
@@ -57,6 +63,8 @@ pub(crate) struct ScriptsView {
     running: bool,
     active: bool,
     operation: Option<Operation>,
+    automatic_eligible: bool,
+    automatic_cancel: Option<tokio::sync::oneshot::Sender<()>>,
     error: Option<String>,
     notice: Option<String>,
     fetch_report: Option<FetchReport>,
@@ -65,9 +73,13 @@ pub(crate) struct ScriptsView {
     task_output: Option<(String, String)>,
     generation: u64,
     task: Option<Task<()>>,
+    task_status_busy: bool,
+    task_status_task: Option<Task<()>>,
     _poll_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<AutomaticRefreshPoll> for ScriptsView {}
 
 impl ScriptsView {
     pub(crate) fn new(
@@ -91,9 +103,10 @@ impl ScriptsView {
                 cx.background_executor().timer(Duration::from_secs(5)).await;
                 if this
                     .update(cx, |this, cx| {
-                        if this.active && this.running && this.operation.is_none() {
+                        if this.active && this.running {
                             this.load_tasks(cx);
                         }
+                        cx.emit(AutomaticRefreshPoll);
                     })
                     .is_err()
                 {
@@ -108,7 +121,7 @@ impl ScriptsView {
             resources,
             selected,
             creating: false,
-            import_dialect: ScriptDialect::Loon,
+            import_dialect: ScriptDialect::Surge,
             kind: RemoteKind::Script,
             dialect: ScriptDialect::Surge,
             arguments: Vec::new(),
@@ -123,6 +136,8 @@ impl ScriptsView {
             running: false,
             active: false,
             operation: None,
+            automatic_eligible: false,
+            automatic_cancel: None,
             error: load_error,
             notice: None,
             fetch_report: None,
@@ -131,6 +146,8 @@ impl ScriptsView {
             task_output: None,
             generation: 0,
             task: None,
+            task_status_busy: false,
+            task_status_task: None,
             _poll_task: poll_task,
             _subscriptions: subscriptions,
         };
@@ -141,6 +158,13 @@ impl ScriptsView {
         view
     }
 
+    pub(crate) fn save_from_shortcut(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.section == Section::Remotes && !self.creating && self.selected_resource().is_some()
+        {
+            self.save_resource(window, cx);
+        }
+    }
+
     pub(crate) fn dirty(&self) -> bool {
         self.resource_dirty || self.import_dirty
     }
@@ -149,8 +173,15 @@ impl ScriptsView {
         self.operation.is_some()
     }
 
+    pub(crate) fn lifecycle_busy(&self) -> bool {
+        self.operation
+            .is_some_and(|operation| operation != Operation::AutomaticFetch)
+    }
+
     pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
         self.locked = locked;
+        // Editing remains locked while running; background-cache eligibility is
+        // independently owned by the root and must not cancel itself here.
         self.inputs
             .set_locked(locked, self.selected.is_some() && !self.creating, cx);
         cx.notify();
@@ -159,6 +190,10 @@ impl ScriptsView {
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
         self.generation = self.generation.wrapping_add(1);
         self.running = running;
+        if !running {
+            self.cancel_automatic_refresh();
+        }
+        self.task_status_busy = false;
         self.tasks.clear();
         self.task_output = None;
         if running {
@@ -250,7 +285,7 @@ impl ScriptsView {
             .unwrap_or(RemoteKind::Script);
         self.dialect = selected
             .as_ref()
-            .map(|resource| normalize_dialect(resource.dialect))
+            .map(|resource| resource.dialect)
             .unwrap_or(ScriptDialect::Surge);
         self.arguments = selected
             .as_ref()
@@ -321,13 +356,13 @@ impl ScriptsView {
     }
 
     fn load_tasks(&mut self, cx: &mut Context<Self>) {
-        if !self.running || self.operation.is_some() {
+        if !self.running || self.task_status_busy || self.operation == Some(Operation::RunTask) {
             return;
         }
-        self.operation = Some(Operation::LoadTasks);
+        self.task_status_busy = true;
         let core = self.core.clone();
         let generation = self.generation;
-        self.task = Some(cx.spawn(async move |this, cx| {
+        self.task_status_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { core.script_tasks() })
                 .await;
@@ -335,7 +370,7 @@ impl ScriptsView {
                 if this.generation != generation {
                     return;
                 }
-                this.operation = None;
+                this.task_status_busy = false;
                 match result {
                     Ok(tasks) => {
                         this.tasks = tasks;
@@ -367,11 +402,4 @@ fn set_input(
     input.update(cx, |state, cx| {
         state.set_value(value.to_string(), window, cx)
     });
-}
-
-fn normalize_dialect(dialect: ScriptDialect) -> ScriptDialect {
-    match dialect {
-        ScriptDialect::QuantumultX => ScriptDialect::Loon,
-        other => other,
-    }
 }

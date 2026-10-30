@@ -1,11 +1,27 @@
 import { useState } from "react";
 import { Alert, Button, Card, Chip, Table, TextArea } from "@lanpath/ui";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getMitmCa, getMitmCaTrustStatus, getMitmWhitelist, installMitmCa, listTraffic } from "@lanpath/client-core";
+import {
+  getMitmCa,
+  getMitmCaTrustStatus,
+  getMitmWhitelist,
+  installMitmCa,
+  removeMitmCa,
+  listTraffic,
+} from "@lanpath/client-core";
 import type { MitmCaTrustStatus, TrafficRecord } from "@lanpath/client-core";
 import { MITM_CA_KEY, MITM_CA_TRUST_KEY, MITM_WHITELIST_KEY, TRAFFIC_KEY } from "@lanpath/client-core";
 import { useClientConfig, useSaveConfig } from "@lanpath/client-core";
 import { toastError, toastSuccess, toErrorMessage } from "@lanpath/client-core";
+import { MitmCaDialog, type MitmCaAuthorization } from "./MitmCaDialog";
+
+const OWNERSHIP_LABEL = {
+  untracked: "无拥有的回执；既有根保持不动",
+  owned: "本应用新增；原始所有权匹配",
+  absent: "已不在信任库；可清理回执",
+  changed: "所有权已变；拒绝移除并保留回执",
+  unknown: "所有权查询失败；禁止移除",
+};
 
 /** 信任状态 Chip 配色与文案。 */
 const TRUST_CHIP: Record<MitmCaTrustStatus, { color: "success" | "warning" | "default"; label: string }> = {
@@ -116,6 +132,7 @@ export default function Mitm() {
   const { data: config } = useClientConfig();
   const saveConfigMutation = useSaveConfig();
   const [caCopied, setCaCopied] = useState(false);
+  const [caAuthorization, setCaAuthorization] = useState<MitmCaAuthorization | null>(null);
 
   // 抓包记录轮询（Query 缓存为唯一权威源，不再经 store 中转）
   const {
@@ -129,7 +146,11 @@ export default function Mitm() {
   });
 
   // MITM CA 证书
-  const { data: mitmCa } = useQuery({
+  const {
+    data: mitmCa,
+    error: caError,
+    refetch: refreshCa,
+  } = useQuery({
     queryKey: MITM_CA_KEY,
     queryFn: getMitmCa,
     staleTime: Infinity,
@@ -145,6 +166,7 @@ export default function Mitm() {
   } = useQuery({
     queryKey: MITM_CA_TRUST_KEY,
     queryFn: getMitmCaTrustStatus,
+    enabled: !!mitmCa || !!caError,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
@@ -152,7 +174,7 @@ export default function Mitm() {
 
   // 一键安装到系统信任库：成功后回写信任状态缓存；失败 toast 错误信息。
   const installMutation = useMutation({
-    mutationFn: installMitmCa,
+    mutationFn: (sha256: string) => installMitmCa(sha256),
     onMutate: () => queryClient.cancelQueries({ queryKey: MITM_CA_TRUST_KEY }),
     onSuccess: (view) => {
       queryClient.setQueryData(MITM_CA_TRUST_KEY, view);
@@ -164,6 +186,21 @@ export default function Mitm() {
     },
     onError: (err) => toastError(toErrorMessage(err)),
   });
+
+  const removeMutation = useMutation({
+    mutationFn: (sha256: string) => removeMitmCa(sha256),
+    onMutate: () => queryClient.cancelQueries({ queryKey: MITM_CA_TRUST_KEY }),
+    onSuccess: (receipt) => {
+      void queryClient.invalidateQueries({ queryKey: MITM_CA_TRUST_KEY });
+      toastSuccess(
+        receipt.disposition === "already_absent"
+          ? "拥有的证书已不在信任库；旧回执已清理"
+          : "本应用拥有的 CA 信任已移除；既有根未改动",
+      );
+    },
+    onError: (err) => toastError(toErrorMessage(err)),
+  });
+  const caBusy = installMutation.isPending || removeMutation.isPending;
 
   // RFC3339 时间戳转为本地可读时间；解析失败时原样展示。
   const formatTime = (iso: string) => {
@@ -244,6 +281,24 @@ export default function Mitm() {
                       {mitmCa?.path ?? "-"}
                     </dd>
                   </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="shrink-0 text-muted">SHA-256</dt>
+                    <dd className="min-w-0 break-all font-mono text-xs">{mitmCa?.sha256 ?? "-"}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="shrink-0 text-muted">信任范围</dt>
+                    <dd>{mitmCa?.scope === "current_user_root" ? "Windows CurrentUser Root" : "系统信任库"}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="shrink-0 text-muted">安装所有权</dt>
+                    <dd>{trust ? OWNERSHIP_LABEL[trust.ownership] : "未查询"}</dd>
+                  </div>
+                  {trust?.receipt_sha256 && (
+                    <div className="flex items-start justify-between gap-4">
+                      <dt className="shrink-0 text-muted">回执 SHA-256</dt>
+                      <dd className="min-w-0 break-all font-mono text-xs">{trust.receipt_sha256}</dd>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-4">
                     <dt className="shrink-0 text-muted">系统信任状态</dt>
                     <dd className="flex min-w-0 items-center gap-2">
@@ -257,30 +312,44 @@ export default function Mitm() {
                       )}
                     </dd>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <Button
                       variant="secondary"
                       isPending={checkingTrust}
-                      isDisabled={installMutation.isPending}
-                      onPress={() => void refreshTrust()}
+                      isDisabled={caBusy}
+                      onPress={() => void Promise.all([refreshCa(), refreshTrust()])}
                     >
-                      刷新信任状态
+                      刷新证书与信任
                     </Button>
                     <Button
                       variant="primary"
                       isPending={installMutation.isPending}
-                      onPress={() => installMutation.mutate()}
+                      isDisabled={caBusy || !mitmCa}
+                      onPress={() =>
+                        mitmCa && setCaAuthorization({ action: "install", sha256: mitmCa.sha256, scope: mitmCa.scope })
+                      }
                     >
                       安装到系统信任库
+                    </Button>
+                    <Button
+                      variant="danger"
+                      isPending={removeMutation.isPending}
+                      isDisabled={caBusy || !trust?.receipt_sha256 || !["owned", "absent"].includes(trust.ownership)}
+                      onPress={() =>
+                        trust?.receipt_sha256 &&
+                        setCaAuthorization({ action: "remove", sha256: trust.receipt_sha256, scope: trust.scope })
+                      }
+                    >
+                      移除拥有的信任
                     </Button>
                     <Button variant="secondary" onPress={() => void handleCopyCaPem()}>
                       复制证书 PEM
                     </Button>
                     {caCopied && <span className="text-sm text-success">已复制到剪贴板</span>}
                   </div>
-                  {trustError && (
+                  {(trustError || caError) && (
                     <p role="alert" className="text-danger">
-                      {toErrorMessage(trustError)}
+                      {toErrorMessage(trustError ?? caError)}
                     </p>
                   )}
                   <p className="text-xs text-muted">
@@ -360,6 +429,15 @@ export default function Mitm() {
           </Card.Footer>
         </Card>
       </div>
+      <MitmCaDialog
+        authorization={caAuthorization}
+        onCancel={() => setCaAuthorization(null)}
+        onConfirm={(authorization) => {
+          if (authorization.action === "install") installMutation.mutate(authorization.sha256);
+          else removeMutation.mutate(authorization.sha256);
+          setCaAuthorization(null);
+        }}
+      />
     </div>
   );
 }

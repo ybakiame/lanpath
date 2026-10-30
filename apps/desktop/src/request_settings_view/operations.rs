@@ -5,7 +5,7 @@ use lanpath_common::LanpathError;
 use super::{ProbeResult, RequestSettingsView};
 
 impl RequestSettingsView {
-    pub(super) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_disabled() || !self.dirty() {
             return;
         }

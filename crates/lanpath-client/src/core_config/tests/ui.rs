@@ -148,3 +148,40 @@ fn apply_singbox_panel_features_prefixes_ui_download_url_with_github_proxy() {
         "empty prefix keeps the original URL"
     );
 }
+
+#[test]
+fn disabling_api_removes_inherited_dashboard_and_preserves_other_experimental_settings() {
+    let mut cfg = json!({
+        "outbounds": [{ "type": "direct", "tag": "direct" }],
+        "experimental": {
+            "clash_api": {
+                "external_controller": "0.0.0.0:9090",
+                "secret": "inherited-secret",
+                "external_ui": "/inherited/dashboard",
+                "external_ui_download_url": "https://example.invalid/dashboard.zip"
+            },
+            "cache_file": { "enabled": true, "cache_id": "keep-me" }
+        }
+    });
+    let disabled = PanelFeatures {
+        tun_enabled: false,
+        clash_api_enabled: false,
+        clash_api_port: 0,
+        ..singbox_features()
+    };
+    apply_panel_features(&mut cfg, &disabled);
+    assert!(cfg.pointer("/experimental/clash_api").is_none());
+    assert_eq!(cfg["experimental"]["cache_file"]["cache_id"], "keep-me");
+
+    // Disabling a previously generated document removes its selected assets too.
+    let enabled = PanelFeatures {
+        clash_api_enabled: true,
+        clash_api_port: 9090,
+        ..disabled.clone()
+    };
+    apply_panel_features(&mut cfg, &enabled);
+    assert!(cfg.pointer("/experimental/clash_api/external_ui").is_some());
+    apply_panel_features(&mut cfg, &disabled);
+    assert!(cfg.pointer("/experimental/clash_api").is_none());
+    assert_eq!(cfg["experimental"]["cache_file"]["cache_id"], "keep-me");
+}

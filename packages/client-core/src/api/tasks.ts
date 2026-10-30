@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 /** Task script view (aligned with `TaskScriptView`, fields are snake_case raw serialization). */
 export interface TaskScriptView {
+  id: string;
   name: string;
   cron_expr: string;
   dialect: string;
@@ -21,6 +22,6 @@ export function listTasks(): Promise<TaskScriptView[]> {
   return invoke<TaskScriptView[]>("list_tasks");
 }
 
-export function runTask(name: string): Promise<string> {
-  return invoke<string>("run_task", { name });
+export function runTask(id: string): Promise<string> {
+  return invoke<string>("run_task", { id });
 }

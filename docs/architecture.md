@@ -52,7 +52,15 @@ client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。
 `apps/desktop` 是独立 Cargo 应用，不加入 Android 目标或替换 `apps/client`。
 Tauri 与 GPUI 共享适用的 Rust 业务能力，各自持有 UI 状态及平台适配；React 状态规范仍只约束现行 React 页面。
 
-实验应用使用独立身份、持久数据根、核心进程和 loopback 端口，不读取/迁移生产数据，不设置系统代理或启用 TUN。
-完整功能接入与正式替换是不同决策；数据兼容、系统集成、目标架构、安装更新、回退和资源收益仍需实际验收。
+实验应用使用独立身份、持久数据根、核心进程和 loopback 端口；并行期不共享或搬迁 Tauri 的可写数据根。
+后续 [ADR-0014](adr/0014-gpui-native-integration-and-distribution.md) 已授权显式、可归属且可恢复的
+系统代理/TUN 与独立分发实现；默认关闭，不能据此接管第三方网络设置或提前切换标准数据目录。
+完整功能接入与正式替换是不同决策；数据兼容、系统集成、目标架构、ZIP 更新/回退和资源收益仍需实际验收。
 根 workspace 不包含该应用，独立检查及原生 Windows 验收不由现行 Tauri 构建结果替代。
 已有技术验证证据保留在 [ADR-0012](adr/0012-gpui-desktop-local-validation.md)，不将其切片覆盖当作完整客户端对等证明。
+
+GPUI 仅发行一份签名 ZIP，默认程序旁便携标记与 `data/`；移除标记才选独立标准目录，
+切换只在文档说明，不自动搬数据或读取 Tauri 根。安装/卸载登记及安装器交接已移除，
+安全更新仍由精确资源准入和可恢复原生载荷事务处理。未来 `0.2.x-rc` 桌面候选只走 GPUI；
+Tauri 桌面退役以完整验收为前提。移动 Rust UI 是后续评估路线，先保留现有 VPN/libbox，
+不把实验性 gpui-mobile 视为 Android 产品验证；详见 ADR-0014。

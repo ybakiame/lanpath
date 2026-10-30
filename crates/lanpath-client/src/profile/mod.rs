@@ -335,6 +335,40 @@ pub async fn build_core_config_v2(
     let mut config = singbox_template(&extract_nodes_singbox(sub));
     // ⓪ Slice layer: before the profile overrides so YAML/JS wins on field conflicts (ADR-0005 D2).
     let report = apply_config_slices(&mut config, slices)?;
+    // The template owns these dialers until YAML/JS runs. A takeover may remove
+    // its local DNS: derive a declared bootstrap using the existing composition
+    // policy, rather than retaining a dangling local reference or inventing DNS.
+    if report.dns_applied
+        && let Some(obj) = config.as_object_mut()
+        && !obj
+            .get("dns")
+            .and_then(|dns| dns.get("servers"))
+            .and_then(Value::as_array)
+            .is_some_and(|servers| servers.iter().any(|server| server["tag"] == "local"))
+    {
+        if slices.route.resolver.server.is_empty()
+            && let Some(route) = obj.get_mut("route").and_then(Value::as_object_mut)
+        {
+            route.remove("default_domain_resolver");
+        }
+        crate::core_config::ensure_domain_resolver(obj);
+        let resolver = obj
+            .get("route")
+            .and_then(|route| route.get("default_domain_resolver"))
+            .cloned();
+        if let Some(resolver) = resolver
+            && let Some(client) = obj
+                .get_mut("http_clients")
+                .and_then(Value::as_array_mut)
+                .and_then(|clients| {
+                    clients.iter_mut().find(|client| {
+                        client["tag"] == crate::core_config::RULE_SET_HTTP_CLIENT_TAG
+                    })
+                })
+        {
+            client["domain_resolver"] = resolver;
+        }
+    }
     if report.dns_applied || !report.outbound_tags.is_empty() {
         tracing::info!(
             dns_applied = report.dns_applied,

@@ -4,9 +4,11 @@ use gpui_kit::component::{
     ActiveTheme as _, IndexPath,
     label::Label,
     list::{ListDelegate, ListItem, ListState},
+    tooltip::Tooltip,
 };
 use gpui_kit::{
-    App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
+    App, Context, Div, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, relative,
 };
 use lanpath_client::mitm::TrafficRecord;
 
@@ -70,6 +72,52 @@ impl TrafficListDelegate {
     }
 }
 
+// Share the same proportional budget with the header: secondary metadata may
+// truncate, but never consumes the URL's remaining width at larger text scales.
+pub(super) fn traffic_columns(
+    time: impl Into<SharedString>,
+    method: impl Into<SharedString>,
+    url: impl Into<SharedString>,
+    status: impl Into<SharedString>,
+    duration: impl Into<SharedString>,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .w_full()
+        .min_w_0()
+        .child(
+            Label::new(time)
+                .w(relative(0.16))
+                .min_w_0()
+                .flex_shrink_0()
+                .truncate(),
+        )
+        .child(
+            Label::new(method)
+                .w(relative(0.12))
+                .min_w_0()
+                .flex_shrink_0()
+                .truncate(),
+        )
+        .child(Label::new(url).flex_1().min_w_0().truncate())
+        .child(
+            Label::new(status)
+                .w(relative(0.10))
+                .min_w_0()
+                .flex_shrink_0()
+                .truncate(),
+        )
+        .child(
+            Label::new(duration)
+                .w(relative(0.16))
+                .min_w_0()
+                .flex_shrink_0()
+                .truncate(),
+        )
+}
+
 impl ListDelegate for TrafficListDelegate {
     type Item = ListItem;
 
@@ -84,22 +132,22 @@ impl ListDelegate for TrafficListDelegate {
         _cx: &mut Context<ListState<Self>>,
     ) -> Option<ListItem> {
         let row = self.rows.get(ix.row)?;
+        let time = row.time.clone();
+        let summary = row.summary.clone();
         Some(
             ListItem::new(row.id.clone())
                 .accessibility_label(row.summary.clone())
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .w_full()
-                        .min_w_0()
-                        .child(Label::new(row.time.clone()).w_48().truncate())
-                        .child(Label::new(row.method.clone()).w_16().truncate())
-                        .child(Label::new(row.url.clone()).flex_1().min_w_0().truncate())
-                        .child(Label::new(row.status.clone()).w_12().truncate())
-                        .child(Label::new(row.duration.clone()).w_20().truncate()),
-                ),
+                .text_sm()
+                .tooltip(move |window, cx| {
+                    Tooltip::new(format!("{time} · {summary}")).build(window, cx)
+                })
+                .child(traffic_columns(
+                    row.time.clone(),
+                    row.method.clone(),
+                    row.url.clone(),
+                    row.status.clone(),
+                    row.duration.clone(),
+                )),
         )
     }
 

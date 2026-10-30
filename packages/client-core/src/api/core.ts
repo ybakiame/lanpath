@@ -26,16 +26,28 @@ export interface MitmCaView {
   path: string;
   /** PEM format root certificate content. */
   pem: string;
+  sha256: string;
+  scope: "current_user_root" | "system";
 }
 
 /** MITM CA 系统信任状态（aligned with Rust `CaTrustStatus`，serde snake_case）。 */
 export type MitmCaTrustStatus = "trusted" | "not_trusted" | "unknown";
 
-/** MITM CA 信任状态视图（aligned with Rust `CaTrustView`）。 */
+/** MITM CA trust and owned-installation status (aligned with Rust `CaOwnedTrustView`). */
 export interface MitmCaTrustView {
   status: MitmCaTrustStatus;
   /** 状态说明（面向用户的一行描述）。 */
   detail: string;
+  sha256: string | null;
+  scope: "current_user_root" | "system";
+  ownership: "untracked" | "owned" | "absent" | "changed" | "unknown";
+  receipt_sha256: string | null;
+}
+
+export interface MitmCaRemovalReceipt {
+  sha256: string;
+  scope: "current_user_root" | "system";
+  disposition: "removed" | "already_absent" | "preserved_preexisting" | "ownership_changed";
 }
 
 export function getConfig(): Promise<ClientConfig> {
@@ -90,14 +102,19 @@ export function getMitmWhitelist(): Promise<MitmWhitelistView> {
   return invoke<MitmWhitelistView>("get_mitm_whitelist");
 }
 
-/** Detect whether the MITM CA is trusted by the system trust store (never rejects on detection failure — status becomes "unknown"). */
+/** Query exact CA trust and persisted native ownership; detection failures never imply absence. */
 export function getMitmCaTrustStatus(): Promise<MitmCaTrustView> {
   return invoke<MitmCaTrustView>("mitm_ca_trust_status");
 }
 
 /** Install MITM CA into the system trust store (macOS/Linux 弹系统授权框；Windows 免管理员). Returns the trust status after install. */
-export function installMitmCa(): Promise<MitmCaTrustView> {
-  return invoke<MitmCaTrustView>("install_mitm_ca");
+export function installMitmCa(expectedSha256: string): Promise<MitmCaTrustView> {
+  return invoke<MitmCaTrustView>("install_mitm_ca", { expectedSha256 });
+}
+
+/** Remove only exact CurrentUser Root trust whose native owner token matches the saved receipt. */
+export function removeMitmCa(expectedSha256: string): Promise<MitmCaRemovalReceipt> {
+  return invoke<MitmCaRemovalReceipt>("remove_mitm_ca", { expectedSha256 });
 }
 
 /** Available even while configuration composition holds the runtime lock. */

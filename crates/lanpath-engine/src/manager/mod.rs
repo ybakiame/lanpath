@@ -24,7 +24,7 @@ pub trait CoreManager: Send + Sync {
     /// Start the core with the given configuration.
     async fn start(&self, config: &Value) -> LanpathResult<()>;
 
-    /// Stop the running core gracefully.
+    /// Stop the core and finish owned-state cleanup; process managers may force termination.
     async fn stop(&self) -> LanpathResult<()>;
 
     /// Restart the core with a new configuration.

@@ -35,7 +35,7 @@ impl CommandSpec {
 pub enum TargetOs {
     /// macOS（`networksetup`）。
     MacOs,
-    /// Windows（`reg`）。
+    /// Windows（owned WinINet default-LAN session）。
     Windows,
     /// Linux（`gsettings`，GNOME）。
     Linux,
@@ -66,12 +66,15 @@ impl TargetOs {
 }
 
 /// 基于目标平台执行系统命令的真实实现。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PlatformSystemProxy {
     /// 目标平台。
     pub os: TargetOs,
     /// macOS 网络接口名（Windows/Linux 忽略）。
     pub interface: String,
+    #[cfg(windows)]
+    pub(crate) session:
+        std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<super::SystemProxySession>>>>,
 }
 
 impl Default for PlatformSystemProxy {
@@ -79,6 +82,8 @@ impl Default for PlatformSystemProxy {
         Self {
             os: TargetOs::current(),
             interface: "Wi-Fi".to_string(),
+            #[cfg(windows)]
+            session: Default::default(),
         }
     }
 }
@@ -89,11 +94,10 @@ impl PlatformSystemProxy {
         Self {
             os,
             interface: "Wi-Fi".to_string(),
+            #[cfg(windows)]
+            session: Default::default(),
         }
     }
-
-    pub(crate) const REG_KEY: &'static str =
-        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
     /// 纯函数：构造启用命令（不执行）。
     pub fn build_commands(&self, addr: SocketAddr) -> Vec<CommandSpec> {
@@ -107,36 +111,8 @@ impl PlatformSystemProxy {
                 CommandSpec::new("networksetup", &["-setwebproxystate", iface, "on"]),
                 CommandSpec::new("networksetup", &["-setsecurewebproxystate", iface, "on"]),
             ],
-            TargetOs::Windows => vec![
-                CommandSpec::new(
-                    "reg",
-                    &[
-                        "add",
-                        Self::REG_KEY,
-                        "/v",
-                        "ProxyEnable",
-                        "/t",
-                        "REG_DWORD",
-                        "/d",
-                        "1",
-                        "/f",
-                    ],
-                ),
-                CommandSpec::new(
-                    "reg",
-                    &[
-                        "add",
-                        Self::REG_KEY,
-                        "/v",
-                        "ProxyServer",
-                        "/t",
-                        "REG_SZ",
-                        "/d",
-                        &format!("{host}:{port}"),
-                        "/f",
-                    ],
-                ),
-            ],
+            // Windows has no stateless enable/disable command: ownership is mandatory.
+            TargetOs::Windows => vec![],
             TargetOs::Linux => vec![
                 CommandSpec::new(
                     "gsettings",
@@ -173,20 +149,7 @@ impl PlatformSystemProxy {
                 CommandSpec::new("networksetup", &["-setwebproxystate", iface, "off"]),
                 CommandSpec::new("networksetup", &["-setsecurewebproxystate", iface, "off"]),
             ],
-            TargetOs::Windows => vec![CommandSpec::new(
-                "reg",
-                &[
-                    "add",
-                    Self::REG_KEY,
-                    "/v",
-                    "ProxyEnable",
-                    "/t",
-                    "REG_DWORD",
-                    "/d",
-                    "0",
-                    "/f",
-                ],
-            )],
+            TargetOs::Windows => vec![],
             TargetOs::Linux => vec![CommandSpec::new(
                 "gsettings",
                 &["set", "org.gnome.system.proxy", "mode", "none"],
@@ -194,6 +157,24 @@ impl PlatformSystemProxy {
             // Android 无桌面禁用命令（见 [`TargetOs::Android`]）。
             TargetOs::Android => vec![],
         }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn windows_session(
+        &self,
+    ) -> lanpath_common::LanpathResult<std::sync::Arc<super::SystemProxySession>> {
+        let mut slot = self
+            .session
+            .lock()
+            .map_err(|_| super::model::error("platform session lock poisoned"))?;
+        if slot.is_none() {
+            *slot = Some(std::sync::Arc::new(super::SystemProxySession::windows(
+                "Lanpath client",
+            )?));
+        }
+        slot.as_ref()
+            .cloned()
+            .ok_or_else(|| super::model::error("missing platform session"))
     }
 
     /// 逐条执行命令，任一条失败即返回错误（`gsettings` 缺失时给出提示）。

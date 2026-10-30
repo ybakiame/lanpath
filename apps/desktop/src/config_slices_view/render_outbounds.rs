@@ -1,6 +1,7 @@
 use gpui_kit::component::{
     Disableable as _, Selectable as _,
     button::{Button, ButtonVariants as _},
+    scroll::ScrollableElement as _,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::config_slices::OutboundProtocol;
@@ -34,10 +35,18 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .min_w_0()
+                    .h_auto()
+                    .max_h_32()
+                    .overflow_y_scrollbar()
                     .gap_2()
                     .children(slices.outbounds.items.iter().map(|item| {
                         let id = item.id.clone();
                         Button::new(format!("outbound-{}", item.id))
+                            .min_w_0()
+                            .max_w_full()
+                            .tooltip(item.name.clone())
                             .label(format!(
                                 "{}{}",
                                 if item.builtin {
@@ -67,6 +76,7 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .children(outbound_kinds().into_iter().map(|(kind, label)| {
                         Button::new(format!("outbound-add-{label}"))
@@ -87,6 +97,7 @@ impl ConfigSlicesView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 Button::new("outbound-enabled")
@@ -102,20 +113,17 @@ impl ConfigSlicesView {
                             })),
                     )
                     .child(field("名称", &self.inputs.out_name, protocol_locked))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .children(outbound_kinds().into_iter().map(|(kind, label)| {
-                                Button::new(format!("outbound-kind-{label}"))
-                                    .label(label)
-                                    .selected(selected_kind == Some(kind))
-                                    .disabled(protocol_locked)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.set_outbound_kind(kind, window, cx)
-                                    }))
-                            })),
-                    )
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        outbound_kinds().into_iter().map(|(kind, label)| {
+                            Button::new(format!("outbound-kind-{label}"))
+                                .label(label)
+                                .selected(selected_kind == Some(kind))
+                                .disabled(protocol_locked)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.set_outbound_kind(kind, window, cx)
+                                }))
+                        }),
+                    ))
                     .children((!is_group).then(|| self.render_node_fields(outbound, disabled, cx)))
                     .children(is_group.then(|| self.render_group_fields(outbound, disabled, cx)))
             }))
@@ -169,6 +177,7 @@ impl ConfigSlicesView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 Button::new("outbound-tls")

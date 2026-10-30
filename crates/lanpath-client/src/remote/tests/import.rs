@@ -133,7 +133,7 @@ async fn import_content_records_warning_on_script_fetch_failure_and_keeps_rewrit
         "#!name=FailedImport\n\
              [rewrite_local]\n\
              ^https?://api-cs.intsig.net/purchase script-response-body {base}/missing.js\n\
-             ^https?://example.com/ url-and-header https://target.example.com/\n\
+             ^https?://example.com/ url 302 https://target.example.com/\n\
              [mitm]\n\
              hostname = *.camscanner.com\n"
     );
@@ -151,7 +151,10 @@ async fn import_content_records_warning_on_script_fetch_failure_and_keeps_rewrit
     assert_eq!(summary.hostnames, 1);
     assert_eq!(summary.meta.name.as_deref(), Some("FailedImport"));
     assert!(
-        summary.warnings.iter().any(|w| w.contains("missing.js")),
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("download failed")),
         "should have script fetch failure warning: {:?}",
         summary.warnings
     );

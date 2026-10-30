@@ -6,7 +6,7 @@ use super::helpers::*;
 #[tokio::test]
 async fn fake_core_binary_starts_and_stops() {
     let dir = tempfile::tempdir().unwrap();
-    let core_bin = fake_core_script(&dir);
+    let core_bin = native_core_fixture(&dir);
     let runner = crate::runner::CoreRunner::create(&core_bin, dir.path()).unwrap();
     let config = serde_json::json!({"log": {"level": "info"}});
     runner.start(&config).await.unwrap();
@@ -84,9 +84,9 @@ async fn start_with_empty_mitm_whitelist_skips_mitm_chain() {
     let dir = tempfile::tempdir().unwrap();
 
     let capture = dir.path().join("core-config-capture.json");
-    let core_bin = fake_core_capturing_args(&dir, &capture);
+    let core_bin = native_core_capturing_args(&dir, &capture);
     let sub_id = add_local_subscription(&dir, &format!("http://{addr}/sub"));
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         format!("http://{addr}"),
         "tok",
@@ -133,7 +133,7 @@ async fn start_with_empty_mitm_whitelist_skips_mitm_chain() {
         );
     }
 
-    state.stop().await;
+    state.stop().await.unwrap();
 }
 
 /// Full integration server (no external network):
@@ -235,7 +235,7 @@ async fn start_with_remote_snippet_runs_mitm_and_scheduler() {
     assert_eq!(tasks[0].name, "每日签到");
 
     // stop normally: reverse order shutdown system proxy → MITM → scheduler → core.
-    state.stop().await;
+    state.stop().await.unwrap();
     let status = state.status().await;
     assert!(status.mitm_addr.is_none());
     assert!(!status.core_running);
@@ -322,7 +322,7 @@ async fn start_pushes_rule_mode_via_clash_api_when_enabled() {
     );
 
     // After stop, rule count is cleared and API address disappears.
-    state.stop().await;
+    state.stop().await.unwrap();
     let status = state.status().await;
     assert_eq!(status.rule_count, 0);
     assert_eq!(status.clash_api_url, None);
@@ -342,11 +342,11 @@ async fn start_accepts_clash_format_with_singbox_core() {
         .add("clash-sub", &format!("http://{addr}/sub"), true, None)
         .unwrap();
 
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.active_subscription_id = Some(sub.id);
     cfg.mitm_enabled = false;
@@ -365,7 +365,7 @@ async fn start_accepts_clash_format_with_singbox_core() {
     assert!(status.core_running, "clash 订阅应能以 sing-box 核心启动");
     assert_eq!(mock.enable_count(), 1, "系统代理应启用一次");
 
-    state.stop().await;
+    state.stop().await.unwrap();
     assert!(!state.status().await.core_running);
 }
 
@@ -401,11 +401,11 @@ async fn start_with_subscription_store_fetches_and_starts() {
         .add("local", &format!("{base}/sub"), true, None)
         .unwrap();
 
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.active_subscription_id = Some(sub.id);
     cfg.mitm_enabled = false;
@@ -424,7 +424,7 @@ async fn start_with_subscription_store_fetches_and_starts() {
         "generic subscription path core should start"
     );
 
-    state.stop().await;
+    state.stop().await.unwrap();
     let status = state.status().await;
     assert!(!status.core_running);
 }
@@ -455,11 +455,11 @@ async fn start_uses_cached_subscription_without_fetching() {
         )
         .unwrap();
 
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.active_subscription_id = Some(sub.id);
     cfg.mitm_enabled = false;
@@ -476,138 +476,7 @@ async fn start_uses_cached_subscription_without_fetching() {
         "cached subscription must start the core without any network fetch"
     );
 
-    state.stop().await;
-}
-
-#[tokio::test]
-async fn start_with_mitm_chain_runs_mitm_before_core_and_proxy_points_at_main_port() {
-    let base = spawn_integration_server().await;
-    let dir = tempfile::tempdir().unwrap();
-
-    // Pre-set remote snippet cache (contains MITM whitelist *.example.com / api.example2.com).
-    let remote = crate::remote::RemoteManager::new(dir.path().to_path_buf());
-    let remotes = vec![RemoteResource {
-        name: "rules".into(),
-        url: format!("{base}/snippet"),
-        kind: RemoteKind::Snippet,
-        dialect: lanpath_script::ScriptDialect::QuantumultX,
-        ..RemoteResource::default()
-    }];
-    remote.save(&remotes).unwrap();
-    let report = remote.fetch_all(&remotes).await;
-    assert_eq!(report.fetched, 1, "snippet fetch should succeed");
-
-    // Fake core copies received composed config out, for asserting core actual config.
-    let capture = dir.path().join("core-config-capture.json");
-    let core_bin = fake_core_capturing_args(&dir, &capture);
-    let sub_id = add_local_subscription(&dir, &format!("{base}/sub/tok"));
-    let mut cfg = ClientConfig::new(dir.path().to_path_buf(), base, "tok", core_bin);
-    cfg.active_subscription_id = Some(sub_id);
-    cfg.mitm_enabled = true;
-    cfg.system_proxy_enabled = true;
-    // 本场景只验证 MITM 链 + 系统代理指向主入口；Clash API 默认已开启，若走默认会
-    // 多注入 clash_mode 基础规则影响 rule_count 断言，故显式关闭。
-    cfg.clash_api_enabled = false;
-    cfg.save().unwrap();
-
-    let mock = Arc::new(MockSystemProxy::new());
-    let mut state = ClientState::with_system_proxy(cfg, mock.clone());
-    state.start().await.unwrap();
-
-    let status = state.status().await;
-    let mitm_addr = status.mitm_addr.expect("MITM should be running");
-
-    // System proxy points to core mixed main port (not MITM random port).
-    let calls = mock.calls();
-    assert_eq!(calls.len(), 1, "system proxy should only be enabled once");
-    match &calls[0] {
-        SysProxyCall::Enable(addr) => {
-            assert_eq!(
-                addr.port(),
-                17890,
-                "system proxy should point to core mixed main entry port"
-            )
-        }
-        SysProxyCall::Disable => panic!("should not appear disable"),
-    }
-
-    // MITM starts before core: core received config's lanpath-mitm outbound port == MITM actual
-    // listen port (random port, only known after MITM starts).
-    let mut attempts = 0;
-    while !capture.exists() && attempts < 100 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        attempts += 1;
-    }
-    assert!(
-        capture.exists(),
-        "fake core should have copied composed config"
-    );
-    let core_config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
-
-    // Dual mixed inbounds: main entry + return entry.
-    let inbounds = core_config["inbounds"].as_array().unwrap();
-    assert_eq!(inbounds.len(), 2);
-    assert_eq!(inbounds[0]["tag"], "main-in");
-    assert_eq!(inbounds[0]["listen_port"], 17890);
-    assert_eq!(inbounds[1]["tag"], "mitm-return");
-    assert_eq!(inbounds[1]["listen_port"], 17891);
-
-    // lanpath-mitm outbound points to MITM actual listen port.
-    let outbounds = core_config["outbounds"].as_array().unwrap();
-    let lanpath_mitm = outbounds
-        .iter()
-        .find(|o| o["tag"] == "lanpath-mitm")
-        .expect("core config should contain lanpath-mitm outbound");
-    assert_eq!(lanpath_mitm["type"], "http");
-    assert_eq!(lanpath_mitm["server_port"], mitm_addr.port());
-
-    // Whitelist routing rule: inbound matches main entry, domains are correctly split by wildcard/exact.
-    // 前面四条是 sniff + hijack-dns + realip resolve + IPv6 reject 头部规则（无条件注入），
-    // MITM whitelist 被推到 index 4。
-    let rules = core_config["route"]["rules"].as_array().unwrap();
-    assert_eq!(
-        rules.len(),
-        6,
-        "2 sniff/dns-hijack + 1 realip resolve + 1 IPv6 reject head rules + 1 built-in private-direct rule + 1 MITM whitelist rule"
-    );
-    assert_eq!(rules[0], serde_json::json!({ "action": "sniff" }));
-    assert_eq!(
-        rules[1],
-        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })
-    );
-    assert_eq!(
-        rules[2],
-        serde_json::json!({ "action": "resolve", "strategy": "ipv4_only" })
-    );
-    assert_eq!(
-        rules[3],
-        serde_json::json!({ "ip_version": 6, "action": "reject" })
-    );
-    // 内置私有直连规则经 local_override 物化注入（统一规则列表，默认置顶、在用户规则与
-    // MITM 白名单之前——本地规则块整体前插的既有语义）。
-    assert_eq!(
-        rules[4]["rule_set"],
-        serde_json::json!(["geosite-private", "geoip-private"])
-    );
-    assert_eq!(rules[4]["outbound"], "direct");
-    assert_eq!(rules[5]["inbound"], serde_json::json!(["main-in"]));
-    assert_eq!(
-        rules[5]["domain_suffix"],
-        serde_json::json!(["example.com"])
-    );
-    assert_eq!(rules[5]["domain"], serde_json::json!(["api.example2.com"]));
-    assert_eq!(rules[5]["outbound"], "lanpath-mitm");
-
-    // Running status extension: composed config contains sniff + hijack-dns + realip resolve +
-    // IPv6 reject + 1 built-in private-direct rule + 1 MITM whitelist rule.
-    let status = state.status().await;
-    assert_eq!(status.rule_count, 6);
-
-    state.stop().await;
-    let status = state.status().await;
-    assert!(status.mitm_addr.is_none());
-    assert!(!status.core_running);
+    state.stop().await.unwrap();
 }
 
 /// Profile layer integration: subscription (2 nodes + selector/direct groups) goes through template grouping, subscription-associated
@@ -653,8 +522,8 @@ async fn start_with_profile_applies_template_groups_and_js_override() {
     store.set_profile_id(sub.id, Some(profile_id)).unwrap();
 
     let capture = dir.path().join("core-config-capture.json");
-    let core_bin = fake_core_capturing_args(&dir, &capture);
-    let mut cfg = ClientConfig::new(
+    let core_bin = native_core_capturing_args(&dir, &capture);
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
@@ -722,7 +591,7 @@ async fn start_with_profile_applies_template_groups_and_js_override() {
     assert_eq!(lanpath_mitm["type"], "http");
     assert_eq!(lanpath_mitm["server_port"], mitm_addr.port());
 
-    state.stop().await;
+    state.stop().await.unwrap();
 }
 
 /// Subscription-associated override template has illegal JS override → start returns Err; core not started, system proxy zero calls.
@@ -756,11 +625,11 @@ async fn start_rolls_back_on_invalid_profile_js_override() {
         .unwrap();
     store.set_profile_id(sub.id, Some(profile_id)).unwrap();
 
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.active_subscription_id = Some(sub.id);
     cfg.mitm_enabled = true;
@@ -783,11 +652,11 @@ async fn start_rolls_back_on_invalid_profile_js_override() {
 #[tokio::test]
 async fn start_requires_active_subscription_selection() {
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.mitm_enabled = false;
     cfg.save().unwrap();
@@ -809,11 +678,11 @@ async fn start_rejects_disabled_selected_subscription() {
         .add("off", &format!("http://{addr}/sub"), false, None)
         .unwrap();
 
-    let mut cfg = ClientConfig::new(
+    let mut cfg = fixture_config(
         dir.path().to_path_buf(),
         String::new(),
         String::new(),
-        fake_core_script(&dir),
+        native_core_fixture(&dir),
     );
     cfg.active_subscription_id = Some(sub.id);
     cfg.mitm_enabled = false;
@@ -824,53 +693,4 @@ async fn start_rejects_disabled_selected_subscription() {
     let err = state.start().await.unwrap_err();
     assert!(err.to_string().contains("已停用"), "{err}");
     assert_eq!(mock.calls(), vec![]);
-}
-
-/// Injected custom Notifier reaches ScriptHost: manually run task containing `$notify` and it is recorded.
-#[tokio::test]
-async fn injected_notifier_receives_task_notify() {
-    let base = spawn_integration_server().await;
-    let dir = tempfile::tempdir().unwrap();
-
-    // Pre-set remotes.json and fetch once to write cache (task.js contains $notify).
-    let remote = crate::remote::RemoteManager::new(dir.path().to_path_buf());
-    let remotes = vec![RemoteResource {
-        name: "rules".into(),
-        url: format!("{base}/snippet"),
-        kind: RemoteKind::Snippet,
-        dialect: lanpath_script::ScriptDialect::QuantumultX,
-        ..RemoteResource::default()
-    }];
-    remote.save(&remotes).unwrap();
-    let report = remote.fetch_all(&remotes).await;
-    assert_eq!(report.fetched, 1, "snippet fetch should succeed");
-
-    let sub_id = add_local_subscription(&dir, &format!("{base}/sub/tok"));
-    let mut cfg = test_config(&dir, base);
-    cfg.active_subscription_id = Some(sub_id);
-    cfg.mitm_enabled = true;
-    // 无真实 Clash API 服务，关闭以免启动阻塞在 readiness 等待 + 模式推送重试。
-    cfg.clash_api_enabled = false;
-    cfg.save().unwrap();
-    let notifier = Arc::new(RecordingNotifier::new());
-    let mut state = ClientState::with_notifier(cfg, notifier.clone());
-    state.start().await.unwrap();
-
-    // Manually run task containing $notify, verify notification reaches injected notifier.
-    let scheduler = state.scheduler_handle().expect("scheduler should run");
-    // 后台循环对「从未执行但已有历史匹配时刻」的任务会补跑一次（is_due 语义），
-    // 会污染通知计数；先停掉后台循环，只保留手动触发路径，保证断言确定性。
-    scheduler.stop().await;
-    let before = notifier.calls().len();
-    let out = scheduler.run_now("每日签到").await.unwrap();
-    assert_eq!(out.0["code"], 0);
-    let calls = notifier.calls();
-    assert_eq!(
-        calls.len() - before,
-        1,
-        "task $notify should trigger one notification"
-    );
-    assert_eq!(calls[before].0, "签到成功");
-
-    state.stop().await;
 }

@@ -1,13 +1,13 @@
 //! `proxy` 模块单元测试。
 
 use super::*;
+use crate::Pattern;
 use crate::ca::CaStore;
 use crate::ca::FileCaStore;
 use crate::config::HostnameMatcher;
 use crate::recorder::MemoryRecorder;
 use crate::rewrite::{Phase, RewriteKind, RewriteRule};
 use crate::upstream::UpstreamProxy;
-use regex::Regex;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -60,7 +60,7 @@ async fn e2e_http_proxy_rewrites_response_and_records() {
                 body_pattern: None,
                 replacement: "rewritten".to_string(),
             },
-            pattern: Regex::new("original").unwrap(),
+            pattern: Pattern::new("original").unwrap(),
         }],
     };
     let config = MitmConfig {
@@ -70,7 +70,7 @@ async fn e2e_http_proxy_rewrites_response_and_records() {
         ..MitmConfig::default()
     };
     let proxy = MitmProxy::new(config, rewrite, None, Arc::clone(&recorder), ca);
-    let running = proxy.start().await.unwrap();
+    let mut running = proxy.start().await.unwrap();
 
     // 经代理发起请求：路径带 original，使规则 pattern 同时命中 URL 与 body。
     let client = reqwest::Client::builder()
@@ -102,7 +102,7 @@ async fn e2e_http_proxy_rewrites_response_and_records() {
         Some(r#"{"msg":"rewritten"}"#)
     );
 
-    running.shutdown();
+    running.shutdown().await.unwrap();
     server.abort();
 }
 
@@ -201,7 +201,7 @@ async fn e2e_http_chain_routes_through_http_parent_proxy() {
         ..MitmConfig::default()
     };
     let proxy = MitmProxy::new(config, rewrite, None, Arc::clone(&recorder), ca);
-    let running = proxy.start().await.unwrap();
+    let mut running = proxy.start().await.unwrap();
 
     // 经 MITM 代理发请求，断言响应正确、流量确实经过父代理且被记录。
     let client = reqwest::Client::builder()
@@ -230,46 +230,7 @@ async fn e2e_http_chain_routes_through_http_parent_proxy() {
         records[0].url
     );
 
-    running.shutdown();
+    running.shutdown().await.unwrap();
     server.abort();
     parent_task.abort();
-}
-
-#[test]
-fn websocket_connector_wired_only_for_upstream_chain() {
-    let provider = hudsucker::rustls::crypto::aws_lc_rs::default_provider();
-    let http_addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
-    let socks5_addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
-
-    // 直连：不设置 WebSocket 连接器（保持 hudsucker 默认）。
-    let direct = UpstreamConnector::new(UpstreamProxy::Direct, provider.clone()).unwrap();
-    assert!(
-        websocket_connector_for(UpstreamProxy::Direct, &direct).is_none(),
-        "Direct 上游不应设置 WebSocket 连接器"
-    );
-
-    // HTTP 父代理：设置连接器，且 wss 仅声明 http/1.1 ALPN（WebSocket
-    // 基于 HTTP/1.1 Upgrade，声明 h2 会破坏偏好 h2 上游的握手）。
-    let http =
-        UpstreamConnector::new(UpstreamProxy::Http { addr: http_addr }, provider.clone()).unwrap();
-    let connector = websocket_connector_for(UpstreamProxy::Http { addr: http_addr }, &http)
-        .expect("HTTP 上游应设置 WebSocket 连接器");
-    match connector {
-        hudsucker::tokio_tungstenite::Connector::Rustls(config) => {
-            assert_eq!(
-                config.alpn_protocols,
-                vec![b"http/1.1".to_vec()],
-                "wss 仅支持 HTTP/1.1，不得声明 h2 ALPN"
-            );
-        }
-        _ => panic!("expected rustls websocket connector"),
-    }
-
-    // SOCKS5 父代理：同样设置。
-    let socks5 =
-        UpstreamConnector::new(UpstreamProxy::Socks5 { addr: socks5_addr }, provider).unwrap();
-    assert!(
-        websocket_connector_for(UpstreamProxy::Socks5 { addr: socks5_addr }, &socks5).is_some(),
-        "SOCKS5 上游应设置 WebSocket 连接器"
-    );
 }

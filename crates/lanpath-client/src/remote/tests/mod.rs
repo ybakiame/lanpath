@@ -40,6 +40,8 @@ async fn spawn_remote_server(snippet: impl Fn(&str) -> String) -> String {
 #[cfg(test)]
 mod args;
 #[cfg(test)]
+mod cache_roundtrip;
+#[cfg(test)]
 mod crud;
 #[cfg(test)]
 mod fetch;
@@ -47,5 +49,7 @@ mod fetch;
 mod icon;
 #[cfg(test)]
 mod import;
+#[cfg(test)]
+mod mitm_templates;
 #[cfg(test)]
 mod sources;

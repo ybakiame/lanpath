@@ -1,23 +1,21 @@
-//! MITM CA 系统信任库安装与信任状态检测。
-//!
-//! 平台三分（其余平台编译为「不支持 / 未知」兜底，保证任意 host 可编译）：
-//!
-//! - **Windows**：`certutil -user -addstore Root`（CurrentUser 存储，免 UAC）；
-//!   状态经 `certutil -user -store Root <SHA-1>` 精确匹配本机 CA 指纹。
-//! - **macOS**：`osascript` 以管理员权限执行 `security add-trusted-cert` 写入
-//!   系统钥匙串；状态经 `security verify-cert -c <ca.crt>` 退出码判定。
-//! - **Linux**：`pkexec` 将 CA 安装到 `/usr/local/share/ca-certificates/` 并
-//!   `update-ca-certificates`；状态比对锚点目录中证书的 SHA-256 指纹。
-
-use std::path::Path;
+//! Explicit trust operations. Windows uses native CurrentUser Root APIs and exact DER ownership.
+//! Loading a CA never calls this module's mutation functions.
 
 use lanpath_common::error::{LanpathError, LanpathResult};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+#[cfg(test)]
+mod ownership_tests;
+mod receipt_store;
+#[cfg(windows)]
+mod windows;
+pub use receipt_store::{CaOwnedTrustView, CaOwnershipStatus, OwnedCaTrustStore};
 
 /// Linux 系统锚点中的固定安装文件名。
 const LINUX_ANCHOR_NAME: &str = "proxypanel-mitm.crt";
 
 /// Linux 锚点候选目录（Debian/Ubuntu 系与 Arch/Fedora p11-kit 系）。
+#[cfg(not(windows))]
 const LINUX_ANCHOR_DIRS: [&str; 2] = [
     "/usr/local/share/ca-certificates",
     "/etc/ca-certificates/trust-source/anchors",
@@ -66,56 +64,190 @@ impl CaTrustView {
     }
 }
 
-/// 将 CA 安装到系统信任库。
-///
-/// Windows 写 CurrentUser 存储（不弹 UAC）；macOS / Linux 会弹系统授权框。
-pub fn install_ca(ca_path: &Path) -> LanpathResult<()> {
-    platform_install_ca(ca_path)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaTrustScope {
+    CurrentUserRoot,
+    System,
 }
 
-/// 检测 CA 是否已被系统信任库信任。
-///
-/// 检测失败（命令缺失、读取失败等）返回 [`CaTrustStatus::Unknown`] 而非 `Err`，
-/// 前端据此展示灰色「未知」而非报错。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaInstallDisposition {
+    Added,
+    AlreadyPresent,
+    InstalledUntracked,
+}
+
+/// Persist this receipt only in the application's protected data root.
+/// Private DER/token fields bind removal to this precise addition, not a subject name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaInstallReceipt {
+    pub source_path: PathBuf,
+    pub sha256: String,
+    pub scope: CaTrustScope,
+    pub disposition: CaInstallDisposition,
+    der: Vec<u8>,
+    owner_token: Option<Vec<u8>>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaRemovalDisposition {
+    Removed,
+    AlreadyAbsent,
+    PreservedPreexisting,
+    OwnershipChanged,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct CaRemovalReceipt {
+    pub sha256: String,
+    pub scope: CaTrustScope,
+    pub disposition: CaRemovalDisposition,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct CaQueryReceipt {
+    pub source_path: PathBuf,
+    pub sha256: String,
+    pub scope: CaTrustScope,
+    pub view: CaTrustView,
+}
+fn source_der(path: &Path) -> LanpathResult<(PathBuf, Vec<u8>)> {
+    let path = std::fs::canonicalize(path)
+        .map_err(|e| LanpathError::Mitm(format!("Resolve CA source: {e}")))?;
+    let pem = std::fs::read_to_string(&path)
+        .map_err(|e| LanpathError::Mitm(format!("Read CA source: {e}")))?;
+    let der = pem_to_der(&pem)?;
+    crate::ca::validation::validate_ca_der(&der)?;
+    Ok((path, der))
+}
+pub fn query_ca(ca_path: &Path) -> LanpathResult<CaQueryReceipt> {
+    let (source_path, der) = source_der(ca_path)?;
+    #[cfg(windows)]
+    let view = windows::query(&der);
+    #[cfg(not(windows))]
+    let view = platform_ca_trust_status(&source_path);
+    Ok(CaQueryReceipt {
+        source_path,
+        sha256: sha256_hex(&der),
+        scope: trust_scope(),
+        view,
+    })
+}
+fn trust_scope() -> CaTrustScope {
+    if cfg!(windows) {
+        CaTrustScope::CurrentUserRoot
+    } else {
+        CaTrustScope::System
+    }
+}
+/// Explicit caller authorization required. No LocalMachine Windows support.
+pub fn install_ca(ca_path: &Path) -> LanpathResult<CaInstallReceipt> {
+    let (source_path, der) = source_der(ca_path)?;
+    install_der(source_path, der)
+}
+/// Pin authorization to the certificate currently used by the running proxy.
+pub fn install_ca_with_expected(
+    ca_path: &Path,
+    expected_sha256: &str,
+) -> LanpathResult<CaInstallReceipt> {
+    let (source_path, der) = source_der(ca_path)?;
+    if sha256_hex(&der) != expected_sha256 {
+        return Err(LanpathError::Mitm(
+            "CA source changed since authorization; nothing installed".into(),
+        ));
+    }
+    install_der(source_path, der)
+}
+fn install_der(source_path: PathBuf, der: Vec<u8>) -> LanpathResult<CaInstallReceipt> {
+    #[cfg(windows)]
+    let (disposition, owner_token) = windows::install(&der)?;
+    #[cfg(not(windows))]
+    let (disposition, owner_token) = {
+        platform_install_ca(&source_path)?;
+        (CaInstallDisposition::InstalledUntracked, None)
+    };
+    Ok(CaInstallReceipt {
+        source_path,
+        sha256: sha256_hex(&der),
+        scope: trust_scope(),
+        disposition,
+        der,
+        owner_token,
+    })
+}
+/// Remove only an exact certificate added by this receipt, never an existing root.
+pub fn remove_ca(receipt: &CaInstallReceipt) -> LanpathResult<CaRemovalReceipt> {
+    if receipt.sha256 != sha256_hex(&receipt.der) {
+        return Err(LanpathError::Mitm("CA receipt fingerprint mismatch".into()));
+    }
+    #[cfg(windows)]
+    {
+        let disposition = windows::remove(receipt)?;
+        Ok(CaRemovalReceipt {
+            sha256: receipt.sha256.clone(),
+            scope: receipt.scope,
+            disposition,
+        })
+    }
+    #[cfg(not(windows))]
+    Err(LanpathError::Mitm(
+        "Owned trust removal is supported only for Windows CurrentUser Root".into(),
+    ))
+}
+
+#[cfg(any(windows, test))]
+fn removal_decision(
+    receipt: &CaInstallReceipt,
+    found_der: Option<&[u8]>,
+    owner: Option<&[u8]>,
+) -> CaRemovalDisposition {
+    if receipt.disposition != CaInstallDisposition::Added {
+        return CaRemovalDisposition::PreservedPreexisting;
+    }
+    let Some(found) = found_der else {
+        return CaRemovalDisposition::AlreadyAbsent;
+    };
+    if receipt.scope != CaTrustScope::CurrentUserRoot
+        || found != receipt.der
+        || receipt
+            .owner_token
+            .as_deref()
+            .is_none_or(|token| token.is_empty() || Some(token) != owner)
+    {
+        return CaRemovalDisposition::OwnershipChanged;
+    }
+    CaRemovalDisposition::Removed
+}
+/// Unknown remains distinct from a successful exact-certificate absence query.
 pub fn ca_trust_status(ca_path: &Path) -> CaTrustView {
-    platform_ca_trust_status(ca_path)
+    match query_ca(ca_path) {
+        Ok(receipt) => receipt.view,
+        Err(error) => CaTrustView::unknown(error.to_string()),
+    }
 }
 
 // ---------------------------------------------------------------------------
 // 纯函数（参数化，供单测；不执行系统命令）
 // ---------------------------------------------------------------------------
 
-/// PEM → DER（取首个 CERTIFICATE 块）。
+/// PEM → DER; require exactly one certificate, not a silently truncated chain.
 pub fn pem_to_der(pem: &str) -> LanpathResult<Vec<u8>> {
-    let mut reader = pem.as_bytes();
-    match rustls_pemfile::certs(&mut reader).next() {
-        Some(item) => {
-            let der = item.map_err(|e| LanpathError::Mitm(format!("解析 CA PEM 失败: {e}")))?;
-            Ok(der.to_vec())
-        }
-        None => Err(LanpathError::Mitm("PEM 中未找到证书块".to_string())),
+    crate::ca::validation::validate_pem_envelope(pem, "CERTIFICATE")?;
+    let certificates: Result<Vec<_>, _> = rustls_pemfile::certs(&mut pem.as_bytes()).collect();
+    let certificates =
+        certificates.map_err(|e| LanpathError::Mitm(format!("Invalid CA PEM: {e}")))?;
+    if certificates.len() != 1 {
+        return Err(LanpathError::Mitm(
+            "CA PEM must contain exactly one certificate".into(),
+        ));
     }
+    Ok(certificates[0].to_vec())
 }
 
 /// 字节的 SHA-256 指纹（小写 hex，无分隔符）。
 pub fn sha256_hex(data: &[u8]) -> String {
     use sha2::Digest;
-    sha2::Sha256::digest(data)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-/// 字节的 SHA-1 指纹（小写 hex，无分隔符）。
-///
-/// Windows 证书存储以 SHA-1 thumbprint 作为稳定证书标识；这里只用于精确查找，
-/// 不用于签名或密码学安全判断。
-pub fn sha1_hex(data: &[u8]) -> String {
-    use sha1::Digest;
-    sha1::Sha1::digest(data)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    format!("{:x}", sha2::Sha256::digest(data))
 }
 
 /// Linux 提权安装的 shell 脚本（pkexec `sh -c` 的第三个参数；纯构造函数）。
@@ -137,74 +269,8 @@ pub fn macos_install_applescript(ca_path: &Path) -> String {
     )
 }
 
-/// Windows 安装命令 argv（纯构造函数）。
-pub fn windows_install_cmdline(ca_path: &Path) -> Vec<String> {
-    vec![
-        "certutil".to_string(),
-        "-user".to_string(),
-        "-addstore".to_string(),
-        "Root".to_string(),
-        ca_path.to_string_lossy().into_owned(),
-    ]
-}
-
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-// ---------------------------------------------------------------------------
-// Windows
-// ---------------------------------------------------------------------------
-
-#[cfg(target_os = "windows")]
-fn platform_install_ca(ca_path: &Path) -> LanpathResult<()> {
-    let argv = windows_install_cmdline(ca_path);
-    let mut command = std::process::Command::new(&argv[0]);
-    let output = lanpath_common::process::no_window(&mut command)
-        .args(&argv[1..])
-        .output()
-        .map_err(|e| LanpathError::Mitm(format!("无法执行 certutil: {e}")))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(LanpathError::Mitm(format!(
-        "certutil -addstore 失败（退出码 {}）: {}{}",
-        output.status,
-        stdout.trim(),
-        stderr.trim()
-    )))
-}
-
-#[cfg(target_os = "windows")]
-fn platform_ca_trust_status(ca_path: &Path) -> CaTrustView {
-    const NTE_NOT_FOUND: i32 = 0x8009_0011_u32 as i32;
-
-    let pem = match std::fs::read_to_string(ca_path) {
-        Ok(pem) => pem,
-        Err(error) => return CaTrustView::unknown(format!("读取本机 CA 失败: {error}")),
-    };
-    let der = match pem_to_der(&pem) {
-        Ok(der) => der,
-        Err(error) => return CaTrustView::unknown(format!("解析本机 CA 失败: {error}")),
-    };
-    let thumbprint = sha1_hex(&der);
-    let mut command = std::process::Command::new("certutil");
-    let output = match lanpath_common::process::no_window(&mut command)
-        .args(["-user", "-store", "Root", &thumbprint])
-        .output()
-    {
-        Ok(output) => output,
-        Err(error) => return CaTrustView::unknown(format!("无法执行 certutil: {error}")),
-    };
-    if output.status.success() {
-        return CaTrustView::trusted("当前 CA 已存在于当前用户 Root 信任存储");
-    }
-    if output.status.code() == Some(NTE_NOT_FOUND) {
-        return CaTrustView::not_trusted("当前用户 Root 信任存储中未找到当前 CA 指纹");
-    }
-    CaTrustView::unknown(format!("certutil -store 退出码 {}", output.status))
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +395,7 @@ mod tests {
     use crate::CaStore;
 
     #[test]
-    fn pem_to_der_extracts_first_cert_block() {
+    fn pem_to_der_decodes_a_single_certificate() {
         let dir = tempfile::tempdir().unwrap();
         let material = crate::FileCaStore::new(dir.path())
             .load_or_generate()
@@ -369,11 +435,6 @@ mod tests {
     }
 
     #[test]
-    fn sha1_hex_matches_windows_thumbprint_format() {
-        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
-    }
-
-    #[test]
     fn linux_install_script_quotes_path_and_updates_store() {
         let script = linux_install_script(Path::new("/home/user/my dir/ca.crt"));
         assert!(
@@ -407,21 +468,6 @@ mod tests {
     }
 
     #[test]
-    fn windows_install_cmdline_targets_current_user_root_store() {
-        let argv = windows_install_cmdline(Path::new("C:\\Users\\u\\ca.crt"));
-        assert_eq!(
-            argv,
-            vec![
-                "certutil".to_string(),
-                "-user".to_string(),
-                "-addstore".to_string(),
-                "Root".to_string(),
-                "C:\\Users\\u\\ca.crt".to_string(),
-            ]
-        );
-    }
-
-    #[test]
     fn trust_status_serializes_to_frontend_contract() {
         let view = CaTrustView::trusted("ok");
         let json = serde_json::to_value(&view).unwrap();
@@ -433,22 +479,5 @@ mod tests {
         );
         let view = CaTrustView::unknown("?");
         assert_eq!(serde_json::to_value(&view).unwrap()["status"], "unknown");
-    }
-
-    /// Linux 上本机（未安装 CA 的开发环境）检测应给出 NotTrusted 或 Unknown，
-    /// 绝不 panic / Err。
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_status_never_panics_for_fresh_ca() {
-        let dir = tempfile::tempdir().unwrap();
-        let material = crate::FileCaStore::new(dir.path())
-            .load_or_generate()
-            .unwrap();
-        std::fs::write(dir.path().join("ca.crt"), &material.cert_pem).unwrap();
-        let view = ca_trust_status(&dir.path().join("ca.crt"));
-        assert!(matches!(
-            view.status,
-            CaTrustStatus::NotTrusted | CaTrustStatus::Unknown | CaTrustStatus::Trusted
-        ));
     }
 }

@@ -163,7 +163,7 @@ export default function Dashboard() {
   };
 
   const handleCopyLink = async () => {
-    if (!config) {
+    if (!config?.clash_api_enabled) {
       return;
     }
     const secret = config.clash_api_secret || "";
@@ -174,7 +174,7 @@ export default function Dashboard() {
   };
 
   const handleOpenPanel = async () => {
-    if (!config) {
+    if (!config?.clash_api_enabled) {
       return;
     }
     try {

@@ -11,7 +11,7 @@ use lanpath_client::{
 };
 
 use super::{
-    Operation, ScriptsView,
+    DIALECT_SCOPE_NOTICE, Operation, ScriptsView,
     editing::{dialect_label, kind_label},
     render::section_title,
 };
@@ -20,19 +20,28 @@ impl ScriptsView {
     pub(super) fn render_remotes(&self, disabled: bool, cx: &Context<Self>) -> impl IntoElement {
         let selected = self.selected_resource();
         let form_visible = self.creating || selected.is_some();
+        let dialect_allowed = self.resource_dialect_allowed();
         div()
             .flex()
             .flex_col()
+            .min_w_0()
             .gap_3()
             .p_2()
             .child(section_title(
                 "远程资源",
-                "订阅纯 JS 或 Surge/Loon 片段。保存只更新清单；“立即更新全部”才拉取并重建缓存。",
+                "订阅纯 JS 或公开明文片段。已启用资源按保存间隔自动更新；运行核心、业务操作或未保存草稿期间暂缓。“立即更新全部”强制更新已启用资源。缓存下次启动生效，纯 JS 不自动绑定 hook。",
                 cx,
             ))
             .child(
                 div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(DIALECT_SCOPE_NOTICE),
+            )
+            .child(
+                div()
                     .flex()
+                    .flex_wrap()
                     .items_start()
                     .gap_4()
                     .child(
@@ -40,6 +49,8 @@ impl ScriptsView {
                             .flex()
                             .flex_col()
                             .w_64()
+                            .max_w_full()
+                            .min_w_0()
                             .flex_shrink_0()
                             .gap_2()
                             .child(
@@ -57,6 +68,7 @@ impl ScriptsView {
                                 div()
                                     .flex()
                                     .items_center()
+                                    .flex_wrap()
                                     .gap_1()
                                     .child(
                                         Button::new(format!("remote-select-{}", resource.name))
@@ -101,7 +113,7 @@ impl ScriptsView {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("暂无远程资源；创建后先更新缓存，再启动核心以加载 cron 任务。")
+                                    .child("暂无远程资源；创建后先更新本地集合，再启动核心以加载 cron 任务。")
                             })),
                     )
                     .children(form_visible.then(|| {
@@ -109,7 +121,9 @@ impl ScriptsView {
                             .flex()
                             .flex_col()
                             .flex_1()
+                            .flex_basis(gpui_kit::rems(20.0))
                             .min_w_0()
+                            .max_w_full()
                             .gap_3()
                             .child(if self.creating {
                                 "添加远程资源"
@@ -119,6 +133,7 @@ impl ScriptsView {
                             .child(
                                 div()
                                     .flex()
+                                    .flex_wrap()
                                     .gap_2()
                                     .child(field("名称", &self.inputs.name, disabled))
                                     .child(field("描述", &self.inputs.description, disabled)),
@@ -126,6 +141,7 @@ impl ScriptsView {
                             .child(
                                 div()
                                     .flex()
+                                    .flex_wrap()
                                     .items_end()
                                     .gap_2()
                                     .child(field("URL", &self.inputs.url, disabled))
@@ -144,6 +160,7 @@ impl ScriptsView {
                             .child(
                                 div()
                                     .flex()
+                                    .flex_wrap()
                                     .gap_4()
                                     .child(
                                         div()
@@ -198,6 +215,7 @@ impl ScriptsView {
                                             .child(
                                                 div()
                                                     .flex()
+                                                    .flex_wrap()
                                                     .gap_1()
                                                     .child(
                                                         Button::new("remote-dialect-surge")
@@ -218,19 +236,36 @@ impl ScriptsView {
                                                     )
                                                     .child(
                                                         Button::new("remote-dialect-loon")
-                                                            .label("Loon")
+                                                            .label("Loon（暂不可选）")
                                                             .selected(
                                                                 self.dialect == ScriptDialect::Loon,
+                                                            )
+                                                            .disabled(true),
+                                                    )
+                                                    .child(
+                                                        Button::new("remote-dialect-qx")
+                                                            .label("QX")
+                                                            .selected(
+                                                                self.dialect
+                                                                    == ScriptDialect::QuantumultX,
                                                             )
                                                             .disabled(disabled)
                                                             .on_click(cx.listener(
                                                                 |this, _, _, cx| {
                                                                     this.set_dialect(
-                                                                        ScriptDialect::Loon,
+                                                                        ScriptDialect::QuantumultX,
                                                                         cx,
                                                                     )
                                                                 },
                                                             )),
+                                                    )
+                                                    .child(
+                                                        Button::new("remote-dialect-stash")
+                                                            .label("Stash（暂不可选）")
+                                                            .selected(
+                                                                self.dialect == ScriptDialect::Stash,
+                                                            )
+                                                            .disabled(true),
                                                     ),
                                             ),
                                     )
@@ -245,6 +280,12 @@ impl ScriptsView {
                                             })),
                                     ),
                             )
+                            .children(self.resource_dialect_status().map(|status| {
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().warning)
+                                    .child(status)
+                            }))
                             .children((!self.arguments.is_empty()).then(|| {
                                 div()
                                     .flex()
@@ -316,7 +357,9 @@ impl ScriptsView {
                                                 _ => "保存",
                                             })
                                             .primary()
-                                            .disabled(disabled || !self.resource_dirty)
+                                            .disabled(
+                                                disabled || !self.resource_dirty || !dialect_allowed,
+                                            )
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.save_resource(window, cx)
                                             })),

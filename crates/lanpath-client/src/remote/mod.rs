@@ -24,9 +24,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::import::{ArgSpec, ConfigMeta};
 
+mod activation;
 mod cache;
+mod cached_rewrite;
+mod cached_script;
+mod context;
+#[cfg(feature = "mitm")]
+mod import_store;
 mod manager;
 mod notify;
+mod refresh;
 mod service;
 #[cfg(feature = "scripts")]
 mod task_session;
@@ -35,8 +42,12 @@ mod task_session;
 mod tests;
 
 pub use cache::*;
+pub use cached_rewrite::*;
+pub use cached_script::*;
+pub use context::RemoteFetchContext;
 pub use manager::*;
 pub use notify::*;
+pub(crate) use refresh::atomic_write_with_context;
 pub use service::*;
 #[cfg(feature = "scripts")]
 pub use task_session::*;
@@ -147,6 +158,8 @@ pub struct FetchReport {
     pub rewrites: usize,
     /// Task scripts parsed from Snippet.
     pub tasks: usize,
+    /// Active hostname contributions from fetched snippets, including current parameters.
+    pub hostnames: usize,
     /// Fetch/parse/backfill failure and deviation warnings.
     pub warnings: Vec<String>,
 }
@@ -183,6 +196,8 @@ pub struct MergedRemoteConfig {
     pub hostnames: Vec<String>,
     /// Config header metadata from each remote resource (including `#!arguments` declarations and defaults).
     pub metas: Vec<ConfigMeta>,
+    /// Recoverable cache migration and activation diagnostics, without configuration secrets.
+    pub warnings: Vec<String>,
 }
 
 /// Replace Surge/Loon module `argument=` template placeholders `{key}` / `{{{key}}}` with concrete values.
@@ -197,66 +212,32 @@ pub fn resolve_argument_template(
     user_values: &HashMap<String, String>,
     defaults: &HashMap<String, String>,
 ) -> String {
-    // User values override defaults (duplicate keys use user config).
-    let mut values: HashMap<String, String> = HashMap::new();
-    values.extend(defaults.iter().map(|(k, v)| (k.clone(), v.clone())));
-    values.extend(user_values.iter().map(|(k, v)| (k.clone(), v.clone())));
-
-    let mut out = template.to_string();
-    // Replace long form `{{{key}}}` first, then short form `{key}`;
-    // undeclared placeholders (no value) keep original.
-    for (key, value) in &values {
-        out = out.replace(&placeholder(key, true), value);
-    }
-    for (key, value) in &values {
-        out = out.replace(&placeholder(key, false), value);
-    }
-    out
-}
-
-/// Construct placeholder literal: `triple=true` generates `{{{key}}}` (Surge triple-brace standard),
-/// otherwise generates `{key}` (short form).
-fn placeholder(key: &str, triple: bool) -> String {
-    let (open, close) = if triple { ("{{{", "}}}") } else { ("{", "}") };
-    format!("{open}{key}{close}")
-}
-
-/// Apply argument template replacement to cached merged script hook rules: `{key}` / `{{{key}}}` →
-/// user values → parameter declaration defaults → keep original (see [`resolve_argument_template`]).
-///
-/// `remotes` provides user-configured parameter values ([`RemoteResource::argument_values`]),
-/// `metas` provides each resource's `#!arguments=` declared keys and defaults ([`ConfigMeta::arguments`]).
-#[cfg(feature = "mitm")]
-pub fn apply_argument_templates(
-    rules: Vec<ScriptRule>,
-    metas: &[ConfigMeta],
-    remotes: &[RemoteResource],
-) -> Vec<ScriptRule> {
-    let mut user_values = HashMap::new();
-    for remote in remotes {
-        for (key, value) in &remote.argument_values {
-            user_values.insert(key.clone(), value.clone());
+    // Scan the original template once: inserted values are literal data, not a
+    // second template whose expansion could depend on HashMap iteration order.
+    let mut output = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        output.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let (open, close) = if rest.starts_with("{{{") {
+            (3, "}}}")
+        } else {
+            (1, "}")
+        };
+        let Some(end) = rest[open..].find(close).map(|end| end + open) else {
+            break;
+        };
+        let key = &rest[open..end];
+        let token_end = end + close.len();
+        if let Some(value) = user_values.get(key).or_else(|| defaults.get(key)) {
+            output.push_str(value);
+        } else {
+            output.push_str(&rest[..token_end]);
         }
+        rest = &rest[token_end..];
     }
-    let mut defaults = HashMap::new();
-    for meta in metas {
-        for arg in &meta.arguments {
-            defaults.insert(arg.key.clone(), arg.default_value.clone());
-        }
-    }
-    rules
-        .into_iter()
-        .map(|mut rule| {
-            if let Some(template) = rule.argument.take() {
-                rule.argument = Some(resolve_argument_template(
-                    &template,
-                    &user_values,
-                    &defaults,
-                ));
-            }
-            rule
-        })
-        .collect()
+    output.push_str(rest);
+    output
 }
 
 /// Filename safety: replace path separators with `_` to prevent directory traversal.

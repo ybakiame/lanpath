@@ -6,7 +6,7 @@
 //! (inject MITM routing rules and return inbound) → start core → enable system proxy (pointing to core
 //! mixed main entry). Roll back completed steps on any failure.
 //!
-//! **Stop**: Shut down in reverse order of startup (best-effort, single-item failure does not affect the rest).
+//! **Stop**: Restore owned proxy settings first; any restore error retains the core and services.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -54,6 +54,7 @@ pub struct ClientState {
     #[cfg(feature = "mitm")]
     mitm_service: MitmService,
     sysproxy: Arc<dyn SystemProxy>,
+    http: Arc<crate::http_exec::ReqwestHttpExecutor>,
     /// Script notifier (`$notify` / `$notification`); default [`TracingNotifier`] (logs only).
     notifier: Arc<dyn Notifier>,
     /// Remote subscription task script scheduler (starts before core, stops on stop).
@@ -107,8 +108,11 @@ impl ClientState {
         sysproxy: Arc<dyn SystemProxy>,
         notifier: Arc<dyn Notifier>,
     ) -> Self {
+        let http = Arc::new(crate::http_exec::ReqwestHttpExecutor::for_data_dir(
+            config.data_dir.clone(),
+        ));
         #[cfg(feature = "mitm")]
-        let mitm_service = MitmService::new(config.data_dir.clone());
+        let mitm_service = MitmService::new(config.data_dir.clone(), http.clone());
         Self {
             config,
             core: None,
@@ -117,6 +121,7 @@ impl ClientState {
             #[cfg(feature = "mitm")]
             mitm_service,
             sysproxy,
+            http,
             notifier,
             scheduler: None,
             connection_tracker: None,
@@ -177,16 +182,19 @@ impl ClientState {
         self.start_with_progress(&|_| {}).await
     }
 
-    /// 停止：按启动逆序逐项关闭（best-effort）。
-    pub async fn stop(&mut self) {
-        let _ = self.sysproxy.disable().await;
-        self.stop_mitm().await;
+    /// Restore owned proxy settings before shutting down its referenced core.
+    /// An error leaves all services alive so the user can resolve/retry restoration.
+    pub async fn stop(&mut self) -> LanpathResult<()> {
+        self.sysproxy.disable().await?;
+        self.http.set_system_proxy_owned(false);
+        self.stop_core().await?;
+        self.http.set_core_port(None);
         self.stop_scheduler().await;
         self.stop_connection_tracker().await;
-        self.stop_core().await;
-        // 未运行时规则条数清零。
+        self.stop_mitm().await?;
         self.rule_count = 0;
-        self.missing_rule_sets = Vec::new();
+        self.missing_rule_sets.clear();
+        Ok(())
     }
 
     /// 当前运行状态。
@@ -205,10 +213,18 @@ impl ClientState {
         let mitm_addr = self.mitm.as_ref().map(MitmSession::addr);
         #[cfg(not(feature = "mitm"))]
         let mitm_addr = None;
+        let proxy = self.sysproxy.is_enabled().await;
+        let ownership = self.sysproxy.ownership();
+        let system_proxy_error = match (&proxy, &ownership) {
+            (Err(error), _) | (_, Err(error)) => Some(error.to_string()),
+            _ => None,
+        };
         ClientStatus {
             core_running,
             mitm_addr,
-            system_proxy: self.sysproxy.is_enabled().await,
+            system_proxy: proxy.ok(),
+            system_proxy_ownership: ownership.ok(),
+            system_proxy_error,
             rule_mode: self.config.normalized_rule_mode().to_string(),
             rule_count: self.rule_count,
             clash_api_url,
@@ -231,9 +247,12 @@ impl ClientState {
         Ok(None)
     }
 
-    pub(crate) async fn rollback_mitm_started(&mut self) {
+    pub(crate) async fn rollback_mitm_started(&mut self, cause: LanpathError) -> LanpathError {
         self.stop_scheduler().await;
+        cause
     }
 
-    pub(crate) async fn stop_mitm(&mut self) {}
+    pub(crate) async fn stop_mitm(&mut self) -> LanpathResult<()> {
+        Ok(())
+    }
 }

@@ -4,7 +4,12 @@ use futures::StreamExt as _;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tokio_tungstenite::{
     connect_async_with_config,
-    tungstenite::{Error, Message, protocol::WebSocketConfig},
+    tungstenite::{
+        Error, Message,
+        client::IntoClientRequest,
+        http::{HeaderValue, header::AUTHORIZATION},
+        protocol::WebSocketConfig,
+    },
 };
 
 use crate::{
@@ -50,15 +55,23 @@ impl LogService {
             .or_else(|| self.disk.as_ref().and_then(|disk| disk.error()))
     }
 
-    pub(crate) async fn start(&self, port: u16) -> Result<(), String> {
+    pub(crate) async fn start(&self, port: u16, secret: &str) -> Result<(), String> {
         let mut stream = self.stream.lock().await;
         if stream.is_some() {
             return Err("核心日志订阅已经运行".into());
         }
+        let mut request = format!("ws://127.0.0.1:{port}/logs?level=trace")
+            .into_client_request()
+            .map_err(|error| format!("创建核心日志请求失败：{error}"))?;
+        if !secret.is_empty() {
+            let mut authorization = HeaderValue::from_str(&format!("Bearer {secret}"))
+                .map_err(|_| "核心日志认证请求头无效".to_string())?;
+            authorization.set_sensitive(true);
+            request.headers_mut().insert(AUTHORIZATION, authorization);
+        }
         let buffer = self.buffer.clone();
         let disk = self.disk.clone();
         *stream = Some(tokio::spawn(async move {
-            let url = format!("ws://127.0.0.1:{port}/logs?level=trace");
             loop {
                 buffer.set_core(CoreLogState::Connecting);
                 let config = WebSocketConfig::default()
@@ -66,7 +79,7 @@ impl LogService {
                     .max_frame_size(Some(64 * 1024));
                 let connected = tokio::time::timeout(
                     Duration::from_secs(5),
-                    connect_async_with_config(&url, Some(config), false),
+                    connect_async_with_config(request.clone(), Some(config), false),
                 )
                 .await;
                 let error = match connected {

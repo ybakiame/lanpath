@@ -109,7 +109,7 @@ fn managed_mixed_inbound(
     Ok(())
 }
 
-pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathResult<()> {
+pub(super) fn check(root: &Path, value: &Value, bindings: &Bindings) -> LanpathResult<()> {
     let obj = object(value, "$")?;
     fields(
         obj,
@@ -117,8 +117,8 @@ pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathRe
         &["$schema log dns ntp certificate http_clients inbounds outbounds route experimental"],
     )?;
     if bindings.mixed_port == 0
-        || bindings.api_port == 0
-        || bindings.mixed_port == bindings.api_port
+        || (bindings.api_enabled
+            && (bindings.api_port == 0 || bindings.mixed_port == bindings.api_port))
     {
         return Err(denied(
             "bindings",
@@ -129,34 +129,67 @@ pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathRe
         .get("inbounds")
         .ok_or_else(|| denied("inbounds", "one managed mixed inbound is required"))?;
     let inbounds = array(inbounds, "inbounds")?;
-    if !(1..=2).contains(&inbounds.len()) {
+    let tun_count = inbounds
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("tun"))
+        .count();
+    if tun_count != usize::from(bindings.tun_enabled) {
         return Err(denied(
             "inbounds",
-            "one managed mixed inbound, plus the optional managed MITM return inbound, is allowed",
+            "TUN inbounds must match the saved, explicitly enabled system setting",
         ));
     }
-    let mitm_enabled = inbounds.len() == 2;
+    for (index, inbound) in inbounds
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.get("type").and_then(Value::as_str) == Some("tun"))
+    {
+        let location = format!("inbounds[{index}]");
+        let inbound = object(inbound, &location)?;
+        fields(
+            inbound,
+            &location,
+            &[
+                "type tag interface_name address mtu auto_route strict_route stack sniff sniff_override_destination sniff_timeout domain_strategy route_address route_exclude_address udp_timeout endpoint_independent_nat",
+            ],
+        )?;
+        if inbound.get("tag").and_then(Value::as_str) != Some("tun-in") {
+            return Err(denied(&location, "the managed TUN tag must be tun-in"));
+        }
+    }
+    let mut mixed = inbounds
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.get("type").and_then(Value::as_str) != Some("tun"));
+    let (main_index, main) = mixed
+        .next()
+        .ok_or_else(|| denied("inbounds", "one managed mixed inbound is required"))?;
+    let returned = mixed.next();
+    if mixed.next().is_some() {
+        return Err(denied(
+            "inbounds",
+            "only the main and optional MITM return mixed inbounds are allowed",
+        ));
+    }
     managed_mixed_inbound(
-        &inbounds[0],
-        0,
+        main,
+        main_index,
         bindings.mixed_port,
-        mitm_enabled.then_some("main-in"),
+        returned.map(|_| "main-in"),
         false,
     )?;
-    if mitm_enabled {
-        let return_port = bindings.mixed_port.checked_add(1).ok_or_else(|| {
-            denied(
-                "inbounds[1].listen_port",
-                "managed MITM return port overflow",
-            )
-        })?;
-        if return_port == bindings.api_port {
+    if let Some((index, returned)) = returned {
+        let port = bindings
+            .mixed_port
+            .checked_add(1)
+            .ok_or_else(|| denied("inbounds", "MITM return port overflow"))?;
+        if bindings.api_enabled && port == bindings.api_port {
             return Err(denied(
                 "bindings",
-                "managed MITM return and Clash API ports must be distinct",
+                "MITM return and Clash API ports must be distinct",
             ));
         }
-        managed_mixed_inbound(&inbounds[1], 1, return_port, Some("mitm-return"), true)?;
+        managed_mixed_inbound(returned, index, port, Some("mitm-return"), true)?;
     }
     experimental(root, obj.get("experimental"), bindings)?;
     if let Some(value) = obj.get("log") {
@@ -216,45 +249,61 @@ pub(super) fn check(root: &Path, value: &Value, bindings: Bindings) -> LanpathRe
     Ok(())
 }
 
-fn experimental(root: &Path, value: Option<&Value>, bindings: Bindings) -> LanpathResult<()> {
-    let value = value.ok_or_else(|| {
-        denied(
-            "experimental.clash_api",
-            "the managed Clash API is required",
-        )
-    })?;
+fn experimental(root: &Path, value: Option<&Value>, bindings: &Bindings) -> LanpathResult<()> {
+    let Some(value) = value else {
+        return if bindings.api_enabled {
+            Err(denied(
+                "experimental.clash_api",
+                "the saved Clash API endpoint is required",
+            ))
+        } else {
+            Ok(())
+        };
+    };
     let exp = object(value, "experimental")?;
     fields(exp, "experimental", &["clash_api cache_file"])?;
-    let clash = exp.get("clash_api").ok_or_else(|| {
-        denied(
+    if bindings.api_enabled {
+        let clash = exp.get("clash_api").ok_or_else(|| {
+            denied(
+                "experimental.clash_api",
+                "the saved Clash API endpoint is required",
+            )
+        })?;
+        let clash = object(clash, "experimental.clash_api")?;
+        fields(
+            clash,
             "experimental.clash_api",
-            "the managed Clash API is required",
-        )
-    })?;
-    let clash = object(clash, "experimental.clash_api")?;
-    // external_ui is rejected even without an explicit download URL: sing-box
-    // can supply a default URL. No UI assets are downloaded implicitly.
-    fields(
-        clash,
-        "experimental.clash_api",
-        &[
-            "external_controller secret default_mode access_control_allow_origin access_control_allow_private_network",
-        ],
-    )?;
-    let controller = format!("127.0.0.1:{}", bindings.api_port);
-    if clash.get("external_controller").and_then(Value::as_str) != Some(&controller) {
+            &[
+                "external_controller secret default_mode access_control_allow_origin access_control_allow_private_network",
+            ],
+        )?;
+        let controller = format!("127.0.0.1:{}", bindings.api_port);
+        if clash.get("external_controller").and_then(Value::as_str) != Some(&controller) {
+            return Err(denied(
+                "experimental.clash_api.external_controller",
+                "endpoint must match the saved loopback API port",
+            ));
+        }
+        let secret = match clash.get("secret") {
+            None => "",
+            Some(Value::String(secret)) => secret,
+            Some(_) => {
+                return Err(denied(
+                    "experimental.clash_api.secret",
+                    "API secret must be a string",
+                ));
+            }
+        };
+        if secret != bindings.api_secret {
+            return Err(denied(
+                "experimental.clash_api.secret",
+                "API authentication must match the saved setting",
+            ));
+        }
+    } else if exp.contains_key("clash_api") {
         return Err(denied(
-            "experimental.clash_api.external_controller",
-            &format!("must be exactly {controller}"),
-        ));
-    }
-    if clash
-        .get("secret")
-        .is_some_and(|secret| secret.as_str() != Some(""))
-    {
-        return Err(denied(
-            "experimental.clash_api.secret",
-            "current observers are unauthenticated; remove the secret explicitly or use an empty string",
+            "experimental.clash_api",
+            "Clash API is disabled in the saved settings",
         ));
     }
     if let Some(value) = exp.get("cache_file") {
@@ -269,7 +318,7 @@ fn experimental(root: &Path, value: Option<&Value>, bindings: Bindings) -> Lanpa
         if cache.get("enabled") == Some(&Value::Bool(true)) && !cache.contains_key("path") {
             return Err(denied(
                 "experimental.cache_file.path",
-                "enabled caching requires an explicit cache/ file path; the implicit cache.db is unsupported",
+                "enabled caching requires an explicit cache/ file path",
             ));
         }
         if let Some(path) = cache.get("path") {

@@ -15,7 +15,7 @@ impl DesktopView {
             dialog
                 .title("放弃修改并关闭实验版？")
                 .description(
-                    "订阅、覆写、结构化配置、规则、脚本、MITM 或网络请求有未保存修改。关闭会丢弃这些修改；已保存数据不会删除。",
+                    "订阅、覆写、配置、脚本、MITM、网络或迁移来源有未保存草稿。关闭会丢弃草稿；已准备的迁移或回退事务及已保存数据会保留。",
                 )
                 .confirm()
                 .ok_text("放弃修改并关闭")
@@ -36,6 +36,10 @@ impl DesktopView {
         self.logs.update(cx, |view, cx| view.set_closing(true, cx));
         self.requests
             .update(cx, |view, cx| view.set_closing(true, cx));
+        self.system.update(cx, |view, cx| {
+            view.set_closing(true, cx);
+            view.set_running(false, cx);
+        });
         self.appearance
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.cores.update(cx, |view, cx| view.set_closing(true, cx));
@@ -43,6 +47,8 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.about.update(cx, |view, cx| view.set_closing(true, cx));
         self.backups
+            .update(cx, |view, cx| view.set_closing(true, cx));
+        self.distribution
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.sync_request_lock(cx);
         self.scripts
@@ -57,8 +63,9 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_running(false, cx));
         let core = self.core.clone();
         self.close_task = Some(cx.spawn_in(window, async move |this, cx| {
-            // Finish accepted config/check/save and core/proxy operations before
-            // checking draft state or releasing runtime and directory ownership.
+            // Automatic network work is cancelled by the root lock above, but
+            // remains busy until its real worker exits. Manual accepted work
+            // still completes before runtime and directory ownership are released.
             loop {
                 let Ok(busy) = this.update(cx, |this, cx| {
                     this.core_busy.is_some()
@@ -74,9 +81,11 @@ impl DesktopView {
                         || this.stats.read(cx).busy()
                         || this.logs.read(cx).busy(cx)
                         || this.requests.read(cx).busy()
+                        || this.system.read(cx).busy()
                         || this.cores.read(cx).busy()
                         || this.diagnostics.read(cx).busy()
                         || this.backups.read(cx).busy()
+                        || this.distribution.read(cx).busy()
                         || this.restore_task.is_some()
                 }) else {
                     return;
@@ -90,13 +99,16 @@ impl DesktopView {
             }
             let Ok(dirty) = this.update(cx, |this, cx| {
                 !this.backups.read(cx).is_pending()
+                    && !this.distribution.read(cx).is_pending()
                     && (this.subscriptions.read(cx).dirty()
                         || this.profiles.read(cx).dirty()
                         || this.structured.read(cx).dirty()
                         || this.rules.read(cx).dirty()
                         || this.scripts.read(cx).dirty()
                         || this.mitm.read(cx).dirty()
-                        || this.requests.read(cx).dirty())
+                        || this.requests.read(cx).dirty()
+                        || this.system.read(cx).dirty()
+                        || this.distribution.read(cx).dirty())
             }) else {
                 return;
             };
@@ -109,6 +121,10 @@ impl DesktopView {
                         this.logs.update(cx, |view, cx| view.set_closing(false, cx));
                         this.requests
                             .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.system.update(cx, |view, cx| {
+                            view.set_closing(false, cx);
+                            view.set_running(this.core_running, cx);
+                        });
                         this.appearance
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.cores
@@ -118,6 +134,8 @@ impl DesktopView {
                         this.about
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.backups
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.distribution
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.configuration
@@ -155,7 +173,7 @@ impl DesktopView {
             let result = cx
                 .background_spawn(async move {
                     if core.is_configured() {
-                        core.stop()
+                        core.stop().map(|_| ())
                     } else {
                         Ok(())
                     }
@@ -171,6 +189,10 @@ impl DesktopView {
                         this.logs.update(cx, |view, cx| view.set_closing(false, cx));
                         this.requests
                             .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.system.update(cx, |view, cx| {
+                            view.set_closing(false, cx);
+                            view.set_running(this.core_running, cx);
+                        });
                         this.appearance
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.cores
@@ -180,6 +202,8 @@ impl DesktopView {
                         this.about
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.backups
+                            .update(cx, |view, cx| view.set_closing(false, cx));
+                        this.distribution
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.sync_request_lock(cx);
                         this.core_error = Some(error);

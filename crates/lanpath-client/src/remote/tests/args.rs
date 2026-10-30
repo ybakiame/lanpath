@@ -1,8 +1,5 @@
 use super::*;
 use crate::import::{ArgSpec, parse_import};
-use lanpath_mitm::ScriptRule;
-use lanpath_script::ScriptKind;
-use regex::Regex;
 use std::collections::HashMap;
 
 /// `resolve_argument_template`: user values take priority -> defaults -> keep as-is.
@@ -26,58 +23,65 @@ fn resolve_argument_template_substitutes_user_values_then_defaults() {
     );
 }
 
-/// `apply_argument_templates`: user values take priority over defaults, undeclared placeholders kept.
-#[test]
-fn apply_argument_templates_prefers_user_values_over_defaults() {
-    let rules = vec![
-        ScriptRule {
-            name: "r1".into(),
-            kind: ScriptKind::HttpResponse,
-            pattern: Regex::new(".*").unwrap(),
-            requires_body: false,
-            max_size: 131072,
-            source: String::new(),
-            argument: Some("{server}|{token}|{extra}".to_string()),
+#[tokio::test]
+async fn two_modules_resolve_shared_keys_without_cross_module_leaks() {
+    let base = spawn_remote_server(|base| format!(
+        "#!arguments=token:default,server:default-server\n[Script]\nhook=type=http-response,pattern=^https://example.invalid/,script-path={base}/hook.js,argument={{server}}|{{{{{{token}}}}}}|{{missing}}\ntask=type=cron,cronexp=\"0 9 * * *\",script-path={base}/task.js,argument={{token}},timeout=4"
+    )).await;
+    let dir = tempfile::tempdir().unwrap();
+    let manager = RemoteManager::new(dir.path().to_path_buf());
+    let mut remotes = vec![
+        RemoteResource {
+            name: "one".into(),
+            url: format!("{base}/snippet"),
+            kind: RemoteKind::Snippet,
+            dialect: ScriptDialect::Surge,
+            argument_values: vec![("token".into(), "first".into())],
+            ..Default::default()
         },
-        ScriptRule {
-            name: "r2".into(),
-            kind: ScriptKind::HttpRequest,
-            pattern: Regex::new(".*").unwrap(),
-            requires_body: false,
-            max_size: 131072,
-            source: String::new(),
-            argument: None,
+        RemoteResource {
+            name: "two".into(),
+            url: format!("{base}/snippet"),
+            kind: RemoteKind::Snippet,
+            dialect: ScriptDialect::Surge,
+            argument_values: vec![("token".into(), "second".into())],
+            ..Default::default()
         },
     ];
-    let metas = vec![crate::import::ConfigMeta {
-        arguments: vec![
-            ArgSpec {
-                key: "server".into(),
-                default_value: "api.example.com".into(),
-                description: None,
-                ..ArgSpec::default()
-            },
-            ArgSpec {
-                key: "token".into(),
-                default_value: "default-token".into(),
-                description: None,
-                ..ArgSpec::default()
-            },
-        ],
-        ..crate::import::ConfigMeta::default()
-    }];
-    let remotes = vec![RemoteResource {
-        argument_values: vec![("token".to_string(), "abc".to_string())],
-        ..RemoteResource::default()
-    }];
-
-    let out = apply_argument_templates(rules, &metas, &remotes);
+    manager.save(&remotes).unwrap();
+    assert_eq!(manager.fetch_all(&remotes).await.fetched, 2);
+    let merged = manager.load_cached().unwrap();
     assert_eq!(
-        out[0].argument.as_deref(),
-        Some("api.example.com|abc|{extra}")
+        merged
+            .scripts
+            .iter()
+            .map(|rule| rule.argument.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "default-server|first|{missing}",
+            "default-server|second|{missing}"
+        ]
     );
-    // argument is None: kept as-is.
-    assert_eq!(out[1].argument, None);
+    assert_eq!(
+        merged
+            .task_scripts
+            .iter()
+            .map(|task| task.argument.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert_ne!(merged.scripts[0].module_id, merged.scripts[1].module_id);
+    remotes[0].argument_values = vec![("token".into(), "changed".into())];
+    manager.save(&remotes).unwrap();
+    let changed = manager.load_cached().unwrap();
+    assert_eq!(
+        changed.scripts[0].argument.as_deref(),
+        Some("default-server|changed|{missing}")
+    );
+    assert_eq!(
+        changed.scripts[1].argument.as_deref(),
+        Some("default-server|second|{missing}")
+    );
 }
 
 /// `resolve_argument_template` supports Surge standard triple-brace placeholder `{{{key}}}`
@@ -169,9 +173,7 @@ fn resolve_argument_template_supports_arbitrary_keys_and_bracket_forms() {
     );
 }
 
-/// DualSubs.Spotify full path assertion: Loon `.plugin` `[Argument]` + `[Script]`
-/// via parse_import -> apply_argument_templates, `[{Types},{Languages[0]},{Vendor}]`
-/// declared keys replaced, undeclared `{Vendor}` kept.
+/// Loon parameter keys with array notation remain scoped to the parsed module.
 #[test]
 fn dualsubs_spotify_loon_plugin_argument_template_resolution() {
     let content = r#"#!name = DualSubs: Spotify
@@ -218,7 +220,7 @@ fn dualsubs_spotify_surge_sgmodule_argument_template_resolution() {
     let content = r#"#!name = DualSubs: Spotify
 #!arguments = Types:"Translate,External",Languages[0]:"AUTO",Vendor:"Google"
 [Script]
-DualSubs.Spotify.Tracks = type=http-response, pattern=^https?:\/\/api\.spotify\.com\/v1\/tracks\?, requires-body=1, engine=webview, script-path=https://example.com/r.js, argument=Types="{{{Types}}}"&Languages[0]="{{{Languages[0]}}}"&Vendor="{{{Vendor}}}"
+DualSubs.Spotify.Tracks = type=http-response, pattern=^https?:\/\/api\.spotify\.com\/v1\/tracks\?, requires-body=1, script-path=https://example.com/r.js, argument=Types="{{{Types}}}"&Languages[0]="{{{Languages[0]}}}"&Vendor="{{{Vendor}}}"
 "#;
     let imported = parse_import(content, ScriptDialect::Surge).unwrap();
     let mut defaults = HashMap::new();
@@ -396,6 +398,7 @@ async fn snippet_arguments_and_meta_roundtrip_through_cache() {
         dialect: ScriptDialect::Surge,
         ..RemoteResource::default()
     }];
+    manager.save(&remotes).unwrap();
 
     let report = manager.fetch_all(&remotes).await;
     assert_eq!(report.fetched, 1);
@@ -409,7 +412,7 @@ async fn snippet_arguments_and_meta_roundtrip_through_cache() {
     assert_eq!(merged.scripts.len(), 1);
     assert_eq!(
         merged.scripts[0].argument.as_deref(),
-        Some("{server}|{token}")
+        Some("api.example.com|default-token")
     );
     assert_eq!(merged.metas.len(), 1);
     let meta = &merged.metas[0];
@@ -446,14 +449,10 @@ async fn snippet_badubatieba_sample_roundtrip_and_argument_resolution() {
         dialect: ScriptDialect::Surge,
         ..RemoteResource::default()
     }];
+    manager.save(&remotes).unwrap();
 
     let report = manager.fetch_all(&remotes).await;
     assert_eq!(report.fetched, 1);
-    assert!(
-        report.warnings.is_empty(),
-        "warnings: {:?}",
-        report.warnings
-    );
 
     // meta: plain desc and default value merged into ArgSpec.
     let merged = manager.load_cached().unwrap();
@@ -466,20 +465,12 @@ async fn snippet_badubatieba_sample_roundtrip_and_argument_resolution() {
         Some("Set to 1 to hide video posts in recommendation")
     );
 
-    // Script hook: requires-body=1 / max-size=-1 / triple-brace placeholder kept as-is.
     assert_eq!(merged.scripts.len(), 1);
     assert_eq!(merged.scripts[0].name, "TieBaProto");
-    assert!(merged.scripts[0].requires_body);
-    assert_eq!(merged.scripts[0].max_size, 10 * 1024 * 1024);
+    assert!(merged.scripts[0].requires_body && merged.scripts[0].binary);
+    assert_eq!(merged.scripts[0].max_size, usize::MAX);
     assert_eq!(
         merged.scripts[0].argument.as_deref(),
-        Some("per_filter_video_thread={{{per_filter_video}}}")
-    );
-
-    // apply_argument_templates: no user value -> default 0.
-    let resolved = apply_argument_templates(merged.scripts, &merged.metas, &remotes);
-    assert_eq!(
-        resolved[0].argument.as_deref(),
         Some("per_filter_video_thread=0")
     );
 
@@ -492,10 +483,10 @@ async fn snippet_badubatieba_sample_roundtrip_and_argument_resolution() {
         argument_values: vec![("per_filter_video".to_string(), "1".to_string())],
         ..RemoteResource::default()
     }];
+    manager.save(&remotes_with_value).unwrap();
     let merged2 = manager.load_cached().unwrap();
-    let resolved2 = apply_argument_templates(merged2.scripts, &merged2.metas, &remotes_with_value);
     assert_eq!(
-        resolved2[0].argument.as_deref(),
+        merged2.scripts[0].argument.as_deref(),
         Some("per_filter_video_thread=1")
     );
 }

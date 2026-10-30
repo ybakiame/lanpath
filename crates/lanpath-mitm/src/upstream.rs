@@ -115,8 +115,8 @@ impl UpstreamConnector {
     /// `http/1.1`。hudsucker 通过 `with_websocket_connector`
     /// （`tokio_tungstenite::Connector`）消费该配置。
     ///
-    /// 注意：hudsucker 0.25 的 WebSocket 上游连接由 tokio-tungstenite 内部
-    /// 直连 `TcpStream` 建立，该配置仅控制 TLS 层，无法让 TCP 走上游代理链。
+    /// The local hudsucker fork uses HttpHandler::connect_raw for the TCP layer;
+    /// this configuration verifies TLS over that same parent-routed stream.
     pub fn websocket_tls_config(&self) -> Arc<ClientConfig> {
         Arc::clone(&self.ws_tls)
     }
@@ -206,7 +206,15 @@ impl hyper::rt::Write for UpstreamConnection {
 
 impl Connection for UpstreamConnection {
     fn connected(&self) -> Connected {
-        Connected::new()
+        let connected = Connected::new();
+        match &self.inner {
+            UpstreamIo::Tls(stream)
+                if stream.inner().get_ref().1.alpn_protocol() == Some(b"h2") =>
+            {
+                connected.negotiated_h2()
+            }
+            _ => connected,
+        }
     }
 }
 
@@ -234,11 +242,15 @@ fn parse_target(dst: &Uri) -> Result<(String, u16, bool), UpstreamError> {
     let use_tls = dst.scheme_str() == Some("https");
     let default_port = if use_tls { 443 } else { 80 };
     let port = authority.port_u16().unwrap_or(default_port);
-    Ok((authority.host().to_string(), port, use_tls))
+    Ok((
+        authority.host().trim_matches(['[', ']']).to_string(),
+        port,
+        use_tls,
+    ))
 }
 
 /// 建立到目标的 TCP 连接：直连或经父代理隧道。
-async fn connect_tcp(
+pub(crate) async fn connect_tcp(
     upstream: UpstreamProxy,
     host: &str,
     port: u16,
@@ -262,13 +274,18 @@ async fn http_connect(
     host: &str,
     port: u16,
 ) -> Result<TcpStream, UpstreamError> {
-    let target = format!("{host}:{port}");
+    let target = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
     let request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
     stream.write_all(request.as_bytes()).await?;
     stream.flush().await?;
 
     let mut buf = Vec::new();
-    let mut chunk = [0u8; 256];
+    // Read exactly the response head; tunneled bytes may follow immediately.
+    let mut chunk = [0u8; 1];
     loop {
         let n = stream.read(&mut chunk).await?;
         if n == 0 {
@@ -277,17 +294,21 @@ async fn http_connect(
             )));
         }
         buf.extend_from_slice(&chunk[..n]);
-        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            if pos + 4 != buf.len() {
+        if buf.ends_with(b"\r\n\r\n") {
+            let line_end = buf
+                .windows(2)
+                .position(|w| w == b"\r\n")
+                .unwrap_or(buf.len());
+            let line = std::str::from_utf8(&buf[..line_end])
+                .map_err(|_| UpstreamError::Proxy("non-ASCII CONNECT status line".into()))?;
+            let mut fields = line.split_whitespace();
+            let version = fields.next().unwrap_or_default();
+            let status = fields.next().and_then(|s| s.parse::<u16>().ok());
+            if !matches!(version, "HTTP/1.0" | "HTTP/1.1")
+                || !status.is_some_and(|s| (200..300).contains(&s))
+            {
                 return Err(UpstreamError::Proxy(format!(
-                    "CONNECT {target}: unexpected data after response"
-                )));
-            }
-            let head = String::from_utf8_lossy(&buf[..pos]);
-            let status = head.split_whitespace().nth(1).unwrap_or_default();
-            if status != "200" {
-                return Err(UpstreamError::Proxy(format!(
-                    "CONNECT {target} failed: {head}"
+                    "CONNECT {target} failed: {line}"
                 )));
             }
             return Ok(stream);
@@ -322,11 +343,22 @@ async fn socks5_connect(
     if host.len() > 255 {
         return Err(UpstreamError::Proxy("socks5 target host too long".into()));
     }
-    // CONNECT 请求：ATYP=0x03（域名）。
     let mut request = Vec::with_capacity(7 + host.len());
-    request.extend_from_slice(&[0x05, 0x01, 0x00, 0x03]);
-    request.push(host.len() as u8);
-    request.extend_from_slice(host.as_bytes());
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            request.extend_from_slice(&[0x05, 0x01, 0x00, 0x01]);
+            request.extend_from_slice(&ip.octets());
+        }
+        Ok(IpAddr::V6(ip)) => {
+            request.extend_from_slice(&[0x05, 0x01, 0x00, 0x04]);
+            request.extend_from_slice(&ip.octets());
+        }
+        Err(_) => {
+            request.extend_from_slice(&[0x05, 0x01, 0x00, 0x03]);
+            request.push(host.len() as u8);
+            request.extend_from_slice(host.as_bytes());
+        }
+    }
     request.extend_from_slice(&port.to_be_bytes());
     stream.write_all(&request).await?;
     stream.flush().await?;
@@ -334,7 +366,7 @@ async fn socks5_connect(
     // 响应头：VER REP RSV ATYP。
     let mut head = [0u8; 4];
     stream.read_exact(&mut head).await?;
-    if head[0] != 0x05 || head[1] != 0x00 {
+    if head[0] != 0x05 || head[1] != 0x00 || head[2] != 0x00 {
         return Err(UpstreamError::Proxy(format!(
             "socks5 connect failed: ver={} rep={}",
             head[0], head[1]

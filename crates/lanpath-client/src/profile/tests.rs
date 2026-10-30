@@ -379,40 +379,6 @@ async fn build_core_config_singbox_end_to_end() {
     assert_eq!(cfg["log"]["level"], "error");
 }
 
-// ---------- ⑧ Regression: compose_* injection (template baseline rules prepending OK) ----------
-
-#[tokio::test(flavor = "current_thread")]
-async fn compose_singbox_injects_inbounds_and_mitm_into_profile_output() {
-    let cfg = build_core_config(&sample_singbox_sub(), &ProfileOverrides::default())
-        .await
-        .unwrap();
-    assert_eq!(
-        cfg["route"]["rules"],
-        json!([]),
-        "2026-09 起模板不再携带基线路由规则（内置 CN 分流规则由 local_override 物化注入）"
-    );
-
-    let composed = compose_singbox_config(&cfg, 17890, Some(mitm_chain())).unwrap();
-
-    // inbounds injection (main entry + return flow).
-    let inbounds = composed["inbounds"].as_array().unwrap();
-    assert_eq!(inbounds.len(), 2);
-    assert_eq!(inbounds[0]["tag"], "main-in");
-    assert_eq!(inbounds[1]["tag"], "mitm-return");
-
-    // 模板不再携带基线路由规则：compose 后只剩 MITM 白名单（内置 CN 分流规则改由
-    // local_override 物化注入，见 BUILTIN_ROUTE_RULES）。
-    let rules = composed["route"]["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0]["outbound"], "lanpath-mitm");
-    assert_eq!(rules[0]["domain_suffix"], json!(["example.com"]));
-    assert_eq!(composed["route"]["final"], "final");
-    // Groups and nodes preserved.
-    let outbounds = composed["outbounds"].as_array().unwrap();
-    assert!(outbounds.iter().any(|o| o["tag"] == "proxy"));
-    assert!(outbounds.iter().any(|o| o["tag"] == "n1"));
-}
-
 // ---------- Real core check (when test-cores exists, must verify template field compatibility) ----------
 
 #[test]

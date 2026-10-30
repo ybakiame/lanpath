@@ -17,14 +17,24 @@ impl ClientState {
         Ok(chain)
     }
 
-    pub(crate) async fn rollback_mitm_started(&mut self) {
-        self.stop_mitm().await;
+    pub(crate) async fn rollback_mitm_started(
+        &mut self,
+        cause: lanpath_common::LanpathError,
+    ) -> lanpath_common::LanpathError {
         self.stop_scheduler().await;
+        match self.stop_mitm().await {
+            Ok(()) => cause,
+            Err(cleanup) => lanpath_common::LanpathError::Client(format!(
+                "{cause}; MITM rollback failed: {cleanup}"
+            )),
+        }
     }
 
-    pub(crate) async fn stop_mitm(&mut self) {
-        if let Some(session) = self.mitm.take() {
-            session.stop();
+    pub(crate) async fn stop_mitm(&mut self) -> LanpathResult<()> {
+        if let Some(session) = self.mitm.as_mut() {
+            session.stop().await?;
         }
+        self.mitm = None;
+        Ok(())
     }
 }

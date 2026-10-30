@@ -48,7 +48,8 @@ impl ConnectionsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let list = cx.new(|cx| ListState::new(ConnectionListDelegate::default(), window, cx));
+        let list =
+            cx.new(|cx| crate::keyboard::list_state(ConnectionListDelegate::default(), window, cx));
         let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let observer = cx.observe_in(&list, window, |this, list, window, cx| {
             list.update(cx, |list, cx| {
@@ -189,9 +190,18 @@ impl ConnectionsView {
             let (close_result, result) = cx
                 .background_spawn(async move {
                     core.block_on(async {
+                        let endpoint = core.business().and_then(|business| {
+                            business
+                                .clash_api_endpoint()
+                                .map_err(|error| error.to_string())
+                        });
+                        let (port, secret) = match endpoint {
+                            Ok(endpoint) => endpoint,
+                            Err(error) => return (None, Err(error)),
+                        };
                         let close_result = if let Some(id) = close_id {
                             Some(
-                                clash_close_connection(core.api_port(), "", &id)
+                                clash_close_connection(port, &secret, &id)
                                     .await
                                     .map_err(|e| e.to_string()),
                             )
@@ -200,7 +210,7 @@ impl ConnectionsView {
                         };
                         // Retain the HTTP health/error contract; tracker.closed()
                         // alone cannot distinguish a stale snapshot from a live one.
-                        let result = match clash_get_connections(core.api_port(), "").await {
+                        let result = match clash_get_connections(port, &secret).await {
                             Ok(_) => match core.observations() {
                                 Ok(observations) if show_closed => {
                                     let connections = observations.closed().await;
@@ -294,11 +304,14 @@ impl Render for ConnectionsView {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .gap_2()
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child("连接")
                     .child(
@@ -330,6 +343,8 @@ impl Render for ConnectionsView {
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child(
                         Button::new("connections-active")
@@ -367,13 +382,16 @@ impl Render for ConnectionsView {
                 self.upload_total,
                 self.download_total
             )))
-            .child(List::new(&self.list).flex_1().min_h_0())
+            .child(List::new(&self.list).flex_1().min_h_0().min_w_0())
             .children((!self.detail_text.is_empty()).then(|| {
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
                     .h_48()
+                    .max_h(gpui_kit::relative(0.35))
+                    .min_h_0()
+                    .min_w_0()
                     .flex_shrink_0()
                     .child("连接详情（只读，可选择和复制）")
                     .child(Editor::new(&self.details).readonly(true).size_full())

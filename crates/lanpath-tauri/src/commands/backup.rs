@@ -109,7 +109,10 @@ pub async fn backup_prepare_restore(
         .map_err(|e| e.to_string())?;
     let mut lock = state.client.lock().await;
     if let Some(client) = lock.as_mut() {
-        client.stop().await;
+        client
+            .stop()
+            .await
+            .map_err(|e| format!("系统代理或核心未能安全停止；未恢复备份: {e}"))?;
     }
     *lock = None;
     let dir = state.data_dir.clone();

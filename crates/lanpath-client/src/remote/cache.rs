@@ -1,138 +1,191 @@
-//! Cache serialization types for remote Snippet aggregation.
-//!
-//! Rewrite rule `Regex` is persisted as pattern string, recompiled on readback.
-
-#[cfg(feature = "mitm")]
-use lanpath_mitm::{Phase, RewriteKind, RewriteRule, ScriptRule};
-use lanpath_script::{ScriptKind, TaskScript};
-use serde::{Deserialize, Serialize};
-
+//! Versioned cache records. Legacy records remain recoverable but never invent hook identity.
 use crate::import::ConfigMeta;
 #[cfg(feature = "mitm")]
 use crate::import::ImportedConfig;
+use lanpath_common::{LanpathError, LanpathResult};
+use lanpath_script::TaskScript;
+use serde::{Deserialize, Serialize};
 
-/// Cached Snippet aggregation result (JSON persistence).
+pub const REMOTE_CACHE_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CachedRemoteConfig {
+    pub version: u32,
+    /// Exact enabled manifest identity, or an explicitly registered local collection ID.
+    pub module_id: String,
     #[cfg(feature = "mitm")]
-    pub rewrites: Vec<CachedRewriteRule>,
+    pub rewrites: Vec<super::CachedRewriteRule>,
     #[cfg(feature = "mitm")]
-    pub scripts: Vec<CachedScriptRule>,
+    pub scripts: Vec<super::CachedScriptRule>,
     pub task_scripts: Vec<TaskScript>,
     pub hostnames: Vec<String>,
+    /// Raw parameterized hostname declarations; absent in older v2 caches.
+    /// Static hostnames remain authoritative only for non-parameterized lines.
+    #[serde(default)]
+    pub mitm_templates: Vec<String>,
     pub meta: Option<ConfigMeta>,
 }
 
 impl CachedRemoteConfig {
-    /// Build from parsed [`ImportedConfig`].
     #[cfg(feature = "mitm")]
     pub fn from_imported(imported: &ImportedConfig) -> Self {
         Self {
+            version: REMOTE_CACHE_VERSION,
             rewrites: imported
                 .rewrites
                 .iter()
-                .map(CachedRewriteRule::from)
+                .map(super::CachedRewriteRule::from)
                 .collect(),
             scripts: imported
                 .scripts
                 .iter()
-                .map(CachedScriptRule::from)
+                .map(super::CachedScriptRule::from)
                 .collect(),
             task_scripts: imported
                 .task_scripts
                 .iter()
-                .map(|(t, _)| t.clone())
+                .map(|(task, _)| task.clone())
                 .collect(),
             hostnames: imported.hostnames.clone(),
-            meta: if imported.meta == ConfigMeta::default() {
-                None
-            } else {
-                Some(imported.meta.clone())
-            },
+            mitm_templates: imported.mitm_templates.clone(),
+            meta: (imported.meta != ConfigMeta::default()).then(|| imported.meta.clone()),
+            module_id: String::new(),
         }
     }
 
-    /// Convert cache to runtime merged config (recompile regex patterns).
-    pub fn into_merged(self) -> super::MergedRemoteConfig {
-        super::MergedRemoteConfig {
-            #[cfg(feature = "mitm")]
-            rewrites: self
-                .rewrites
-                .into_iter()
-                .filter_map(|r| r.try_into().ok())
-                .collect(),
-            #[cfg(feature = "mitm")]
-            scripts: self
-                .scripts
-                .into_iter()
-                .filter_map(|s| s.try_into().ok())
-                .collect(),
-            task_scripts: self.task_scripts,
-            hostnames: self.hostnames,
-            metas: self.meta.into_iter().collect(),
+    /// Bind only freshly parsed content to its known owner, never legacy cache records.
+    pub(crate) fn bind_module(&mut self, module_id: &str) {
+        self.module_id = module_id.to_string();
+        #[cfg(feature = "mitm")]
+        for rule in &mut self.scripts {
+            rule.module_id = Some(module_id.to_string());
         }
+        for task in &mut self.task_scripts {
+            task.module_id = Some(module_id.to_string());
+        }
+    }
+
+    pub fn into_merged(self) -> LanpathResult<super::MergedRemoteConfig> {
+        self.into_merged_for_remote(None)
+    }
+
+    #[cfg(feature = "mitm")]
+    pub(crate) fn resolved_hostnames(
+        &self,
+        remote: Option<&super::RemoteResource>,
+    ) -> (Vec<String>, Vec<String>) {
+        let (user_values, defaults) =
+            super::activation::module_argument_values(self.meta.as_ref(), remote);
+        let (derived, warnings) =
+            crate::import::resolve_mitm_templates(&self.mitm_templates, &user_values, &defaults);
+        let mut hostnames = self.hostnames.clone();
+        for hostname in derived {
+            if !hostnames.contains(&hostname) {
+                hostnames.push(hostname);
+            }
+        }
+        (hostnames, warnings)
+    }
+
+    /// Runtime aggregation and source provenance share this activation path.
+    pub(crate) fn into_merged_for_remote(
+        self,
+        remote: Option<&super::RemoteResource>,
+    ) -> LanpathResult<super::MergedRemoteConfig> {
+        if self.version != REMOTE_CACHE_VERSION || self.module_id.is_empty() {
+            return Err(LanpathError::Client("legacy or unsupported cache retained; refetch the remote resource or explicitly reimport the local snippet".into()));
+        }
+        let (user_values, defaults) =
+            super::activation::module_argument_values(self.meta.as_ref(), remote);
+        #[cfg(feature = "mitm")]
+        let (derived, warnings) =
+            crate::import::resolve_mitm_templates(&self.mitm_templates, &user_values, &defaults);
+        #[cfg(not(feature = "mitm"))]
+        let warnings = Vec::new();
+        #[cfg(feature = "mitm")]
+        let mut hostnames = self.hostnames;
+        #[cfg(not(feature = "mitm"))]
+        let hostnames = self.hostnames;
+        #[cfg(feature = "mitm")]
+        for hostname in derived {
+            if !hostnames.contains(&hostname) {
+                hostnames.push(hostname);
+            }
+        }
+        #[cfg(feature = "mitm")]
+        let rewrites = self
+            .rewrites
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, lanpath_mitm::PatternError>>()
+            .map_err(|error| {
+                LanpathError::Client(format!(
+                    "cached rewrite not activated: {error}; refetch or reimport"
+                ))
+            })?;
+        #[cfg(feature = "mitm")]
+        let scripts = self
+            .scripts
+            .into_iter()
+            .filter(|rule| rule.enabled)
+            .map(TryInto::try_into)
+            .collect::<LanpathResult<Vec<_>>>()?;
+        let mut merged = super::MergedRemoteConfig {
+            #[cfg(feature = "mitm")]
+            rewrites,
+            #[cfg(feature = "mitm")]
+            scripts,
+            task_scripts: self
+                .task_scripts
+                .into_iter()
+                .filter(|task| task.enabled)
+                .collect(),
+            hostnames,
+            metas: self.meta.into_iter().collect(),
+            warnings,
+        };
+        #[cfg(feature = "mitm")]
+        {
+            merged
+                .scripts
+                .retain(|rule| rule.module_id.as_deref() == Some(self.module_id.as_str()));
+            for rule in &mut merged.scripts {
+                if let Some(argument) = &mut rule.argument {
+                    *argument = super::resolve_argument_template(argument, &user_values, &defaults);
+                }
+            }
+        }
+        merged.task_scripts.retain(|task| {
+            task.module_id.as_deref() == Some(self.module_id.as_str()) && !task.source_id.is_empty()
+        });
+        for task in &mut merged.task_scripts {
+            if let Some(argument) = &mut task.argument {
+                *argument = super::resolve_argument_template(argument, &user_values, &defaults);
+            }
+        }
+        Ok(merged)
     }
 }
 
-/// 派生白名单条目：hostname + 来源列表（远程资源名 / 「本地导入」）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DerivedHostname {
     pub hostname: String,
     pub sources: Vec<String>,
 }
 
-/// 本地导入的固定缓存文件名（`RemoteManager::merge_imported` 写入目标）。
-const IMPORTED_CACHE_FILE: &str = "imported.json";
-
-/// 本地导入来源展示名。
-const IMPORTED_SOURCE: &str = "本地导入";
-
-/// 读取 `data_dir/remote_cache/*.json`，聚合每个 hostname 的来源列表（按 hostname 排序）。
-///
-/// 与运行时 `RemoteManager::load_cached` 同语义（读取全部缓存文件），使派生白名单
-/// 视图与 MITM 实际生效范围一致。来源标注：缓存文件名经 `safe_name` 反查远程资源名；
-/// `imported.json` 标注「本地导入」；无法匹配的以文件名原样标注。
+/// Provenance uses exactly the active aggregate selection, never directory enumeration.
 pub fn collect_hostname_sources(data_dir: &std::path::Path) -> Vec<DerivedHostname> {
-    use std::collections::BTreeMap;
-
-    let remotes = super::RemoteManager::new(data_dir.to_path_buf())
-        .load()
-        .unwrap_or_default();
-    let source_of = |stem: &str| -> String {
-        if stem == IMPORTED_CACHE_FILE.trim_end_matches(".json") {
-            return IMPORTED_SOURCE.to_string();
-        }
-        remotes
-            .iter()
-            .find(|r| super::safe_name(&r.name) == stem)
-            .map(|r| r.name.clone())
-            .unwrap_or_else(|| stem.to_string())
+    let manager = super::RemoteManager::new(data_dir.to_path_buf());
+    let Ok((parts, _)) = manager.active_cached_parts() else {
+        return Vec::new();
     };
-
-    let cache_dir = data_dir.join("remote_cache");
-    let mut paths: Vec<std::path::PathBuf> = match std::fs::read_dir(&cache_dir) {
-        Ok(entries) => entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
-            .collect(),
-        Err(_) => return Vec::new(),
-    };
-    paths.sort();
-
-    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for path in paths {
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+    let mut map = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for (source, remote, cached) in parts {
+        let Ok(active) = cached.into_merged_for_remote(remote.as_ref()) else {
             continue;
         };
-        let source = source_of(stem);
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(cached) = serde_json::from_str::<CachedRemoteConfig>(&text) else {
-            continue;
-        };
-        for hostname in cached.hostnames {
+        for hostname in active.hostnames {
             let sources = map.entry(hostname).or_default();
             if !sources.contains(&source) {
                 sources.push(source.clone());
@@ -142,319 +195,4 @@ pub fn collect_hostname_sources(data_dir: &std::path::Path) -> Vec<DerivedHostna
     map.into_iter()
         .map(|(hostname, sources)| DerivedHostname { hostname, sources })
         .collect()
-}
-
-/// Cache serialization of a rewrite rule (regex stored as string, recompiled on readback).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedRewriteRule {
-    pub pattern: String,
-    pub kind: CachedRewriteKind,
-}
-
-#[cfg(feature = "mitm")]
-impl From<&RewriteRule> for CachedRewriteRule {
-    fn from(rule: &RewriteRule) -> Self {
-        Self {
-            pattern: rule.pattern.as_str().to_string(),
-            kind: CachedRewriteKind::from(&rule.kind),
-        }
-    }
-}
-
-#[cfg(feature = "mitm")]
-impl TryFrom<CachedRewriteRule> for RewriteRule {
-    type Error = regex::Error;
-
-    fn try_from(cached: CachedRewriteRule) -> Result<Self, Self::Error> {
-        Ok(RewriteRule {
-            pattern: regex::Regex::new(&cached.pattern)?,
-            kind: cached.kind.try_into()?,
-        })
-    }
-}
-
-/// Cache serialization of rewrite rule kind.
-///
-/// 兼容说明：`Reject` 保留 unit 形式（映射为 404 空 body）以读取旧缓存；
-/// 富语义的拒绝规则用 [`CachedRewriteKind::RejectResponse`]；`BodyRewrite` 的
-/// `body_pattern` 以 `#[serde(default)]` 追加，旧缓存缺字段时回退 `None`
-/// （复用 URL pattern 的旧行为）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CachedRewriteKind {
-    UrlRewrite {
-        target: String,
-    },
-    Redirect {
-        status: u16,
-        target: String,
-    },
-    HeaderRewrite {
-        phase: CachedPhase,
-        name: String,
-        value: Option<String>,
-    },
-    HeaderValueRewrite {
-        phase: CachedPhase,
-        name: String,
-        value_pattern: String,
-        replacement: String,
-    },
-    HeaderBlockRewrite {
-        phase: CachedPhase,
-        block_pattern: String,
-        replacement: String,
-    },
-    BodyRewrite {
-        phase: CachedPhase,
-        #[serde(default)]
-        body_pattern: Option<String>,
-        replacement: String,
-    },
-    Mock {
-        status: u16,
-        body: String,
-        headers: Vec<(String, String)>,
-    },
-    Reject,
-    RejectResponse {
-        status: u16,
-        body: Vec<u8>,
-        content_type: Option<String>,
-    },
-}
-
-#[cfg(feature = "mitm")]
-impl From<&RewriteKind> for CachedRewriteKind {
-    fn from(kind: &RewriteKind) -> Self {
-        match kind {
-            RewriteKind::UrlRewrite { target } => CachedRewriteKind::UrlRewrite {
-                target: target.clone(),
-            },
-            RewriteKind::Redirect { status, target } => CachedRewriteKind::Redirect {
-                status: *status,
-                target: target.clone(),
-            },
-            RewriteKind::HeaderRewrite { phase, name, value } => CachedRewriteKind::HeaderRewrite {
-                phase: CachedPhase::from(*phase),
-                name: name.clone(),
-                value: value.clone(),
-            },
-            RewriteKind::HeaderValueRewrite {
-                phase,
-                name,
-                value_pattern,
-                replacement,
-            } => CachedRewriteKind::HeaderValueRewrite {
-                phase: CachedPhase::from(*phase),
-                name: name.clone(),
-                value_pattern: value_pattern.as_str().to_string(),
-                replacement: replacement.clone(),
-            },
-            RewriteKind::HeaderBlockRewrite {
-                phase,
-                block_pattern,
-                replacement,
-            } => CachedRewriteKind::HeaderBlockRewrite {
-                phase: CachedPhase::from(*phase),
-                block_pattern: block_pattern.as_str().to_string(),
-                replacement: replacement.clone(),
-            },
-            RewriteKind::BodyRewrite {
-                phase,
-                body_pattern,
-                replacement,
-            } => CachedRewriteKind::BodyRewrite {
-                phase: CachedPhase::from(*phase),
-                body_pattern: body_pattern.as_ref().map(|p| p.as_str().to_string()),
-                replacement: replacement.clone(),
-            },
-            RewriteKind::Mock {
-                status,
-                body,
-                headers,
-            } => CachedRewriteKind::Mock {
-                status: *status,
-                body: String::from_utf8_lossy(body).into_owned(),
-                headers: headers.clone(),
-            },
-            RewriteKind::Reject {
-                status: 404,
-                body,
-                content_type: None,
-            } if body.is_empty() => CachedRewriteKind::Reject,
-            RewriteKind::Reject {
-                status,
-                body,
-                content_type,
-            } => CachedRewriteKind::RejectResponse {
-                status: *status,
-                body: body.clone(),
-                content_type: content_type.clone(),
-            },
-        }
-    }
-}
-
-#[cfg(feature = "mitm")]
-impl TryFrom<CachedRewriteKind> for RewriteKind {
-    type Error = regex::Error;
-
-    fn try_from(kind: CachedRewriteKind) -> Result<Self, Self::Error> {
-        Ok(match kind {
-            CachedRewriteKind::UrlRewrite { target } => RewriteKind::UrlRewrite { target },
-            CachedRewriteKind::Redirect { status, target } => {
-                RewriteKind::Redirect { status, target }
-            }
-            CachedRewriteKind::HeaderRewrite { phase, name, value } => RewriteKind::HeaderRewrite {
-                phase: phase.into(),
-                name,
-                value,
-            },
-            CachedRewriteKind::HeaderValueRewrite {
-                phase,
-                name,
-                value_pattern,
-                replacement,
-            } => RewriteKind::HeaderValueRewrite {
-                phase: phase.into(),
-                name,
-                value_pattern: regex::Regex::new(&value_pattern)?,
-                replacement,
-            },
-            CachedRewriteKind::HeaderBlockRewrite {
-                phase,
-                block_pattern,
-                replacement,
-            } => RewriteKind::HeaderBlockRewrite {
-                phase: phase.into(),
-                block_pattern: regex::Regex::new(&block_pattern)?,
-                replacement,
-            },
-            CachedRewriteKind::BodyRewrite {
-                phase,
-                body_pattern,
-                replacement,
-            } => RewriteKind::BodyRewrite {
-                phase: phase.into(),
-                body_pattern: body_pattern.map(|p| regex::Regex::new(&p)).transpose()?,
-                replacement,
-            },
-            CachedRewriteKind::Mock {
-                status,
-                body,
-                headers,
-            } => RewriteKind::Mock {
-                status,
-                body: body.into_bytes(),
-                headers,
-            },
-            CachedRewriteKind::Reject => RewriteKind::reject(),
-            CachedRewriteKind::RejectResponse {
-                status,
-                body,
-                content_type,
-            } => RewriteKind::Reject {
-                status,
-                body,
-                content_type,
-            },
-        })
-    }
-}
-
-/// Cache serialization of HTTP phase.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum CachedPhase {
-    Request,
-    Response,
-}
-
-#[cfg(feature = "mitm")]
-impl From<Phase> for CachedPhase {
-    fn from(phase: Phase) -> Self {
-        match phase {
-            Phase::Request => CachedPhase::Request,
-            Phase::Response => CachedPhase::Response,
-        }
-    }
-}
-
-#[cfg(feature = "mitm")]
-impl From<CachedPhase> for Phase {
-    fn from(phase: CachedPhase) -> Self {
-        match phase {
-            CachedPhase::Request => Phase::Request,
-            CachedPhase::Response => Phase::Response,
-        }
-    }
-}
-
-/// Cache serialization of script hook rule (regex stored as string, recompiled on readback).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CachedScriptRule {
-    pub name: String,
-    pub kind: CachedScriptKind,
-    pub pattern: String,
-    pub requires_body: bool,
-    pub max_size: usize,
-    pub source: String,
-    pub argument: Option<String>,
-}
-
-#[cfg(feature = "mitm")]
-impl From<&ScriptRule> for CachedScriptRule {
-    fn from(rule: &ScriptRule) -> Self {
-        Self {
-            name: rule.name.clone(),
-            kind: CachedScriptKind::from(rule.kind),
-            pattern: rule.pattern.as_str().to_string(),
-            requires_body: rule.requires_body,
-            max_size: rule.max_size,
-            source: rule.source.clone(),
-            argument: rule.argument.clone(),
-        }
-    }
-}
-
-#[cfg(feature = "mitm")]
-impl TryFrom<CachedScriptRule> for ScriptRule {
-    type Error = regex::Error;
-
-    fn try_from(cached: CachedScriptRule) -> Result<Self, Self::Error> {
-        Ok(ScriptRule {
-            name: cached.name,
-            kind: cached.kind.into(),
-            pattern: regex::Regex::new(&cached.pattern)?,
-            requires_body: cached.requires_body,
-            max_size: cached.max_size,
-            source: cached.source,
-            argument: cached.argument,
-        })
-    }
-}
-
-/// Cache serialization of script kind.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum CachedScriptKind {
-    HttpRequest,
-    HttpResponse,
-}
-
-impl From<ScriptKind> for CachedScriptKind {
-    fn from(kind: ScriptKind) -> Self {
-        match kind {
-            ScriptKind::HttpRequest => CachedScriptKind::HttpRequest,
-            ScriptKind::HttpResponse => CachedScriptKind::HttpResponse,
-            ScriptKind::Cron | ScriptKind::Generic => CachedScriptKind::HttpResponse,
-        }
-    }
-}
-
-impl From<CachedScriptKind> for ScriptKind {
-    fn from(kind: CachedScriptKind) -> Self {
-        match kind {
-            CachedScriptKind::HttpRequest => ScriptKind::HttpRequest,
-            CachedScriptKind::HttpResponse => ScriptKind::HttpResponse,
-        }
-    }
 }

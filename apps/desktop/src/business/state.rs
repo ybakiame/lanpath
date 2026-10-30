@@ -26,6 +26,8 @@ impl BusinessService {
         if is_new {
             config.mitm_enabled = false;
             config.request_proxy_mode = RequestProxyMode::None;
+            config.mixed_port = self.bindings.mixed_port();
+            config.clash_api_port = self.bindings.api_port();
         }
         let changed = normalize(&mut config, self);
         if is_new || changed || !persisted_paths_match(&path, self)? {
@@ -95,18 +97,7 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) -> bool {
         config.core_binary.clear();
         changed = true;
     }
-    enforce!(config.mixed_port, service.bindings.mixed_port());
-    // MITM remains opt-in within the experimental root and loopback chain.
     enforce!(config.mitm.ca_dir, service.root.join("certs"));
-    enforce!(config.system_proxy_enabled, false);
-    enforce!(config.tun_enabled, false);
-    enforce!(config.tun_auto_route, false);
-    enforce!(config.clash_api_enabled, true);
-    enforce!(config.clash_api_port, service.bindings.api_port());
-    if !config.clash_api_secret.is_empty() {
-        config.clash_api_secret.clear();
-        changed = true;
-    }
     changed
 }
 

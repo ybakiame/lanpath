@@ -1,9 +1,11 @@
 use gpui_kit::{AppContext as _, Context, Window, component::WindowExt as _};
 
+use crate::script_dialects::validate_selection;
+
 use super::{
     Operation, ScriptsView,
     editing::{dialect_label, kind_label},
-    normalize_dialect, set_input,
+    set_input,
 };
 
 impl ScriptsView {
@@ -87,6 +89,10 @@ impl ScriptsView {
     }
 
     fn delete_resource(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        // The confirmation may outlive a ticker acceptance or a root lock.
+        if self.locked || self.busy() || self.resource_dirty {
+            return;
+        }
         let (Some(service), core) = (self.service.clone(), self.core.clone()) else {
             return;
         };
@@ -208,7 +214,7 @@ impl ScriptsView {
                                 this.kind = kind;
                             }
                             if let Some(dialect) = detected.dialect {
-                                this.dialect = normalize_dialect(dialect);
+                                this.dialect = dialect;
                             }
                             if let Some(meta) = detected.meta {
                                 this.icon = meta.icon;
@@ -216,12 +222,17 @@ impl ScriptsView {
                             }
                             this.syncing = false;
                             this.resource_dirty = true;
-                            this.notice = Some(format!(
+                            let mut notice = format!(
                                 "嗅探完成：{} / {}，模块参数 {} 个",
                                 kind_label(this.kind),
                                 dialect_label(this.dialect),
                                 this.arguments.len()
-                            ));
+                            );
+                            if let Some(status) = this.resource_dialect_status() {
+                                notice.push('；');
+                                notice.push_str(status);
+                            }
+                            this.notice = Some(notice);
                         }
                         Err(error) => this.error = Some(error),
                     }
@@ -274,6 +285,11 @@ impl ScriptsView {
         if self.locked || self.busy() || !self.import_dirty {
             return;
         }
+        if let Err(error) = validate_selection(self.import_dialect, None) {
+            self.error = Some(error.to_string());
+            cx.notify();
+            return;
+        }
         let content = self.inputs.import_content.read(cx).text().to_string();
         let dialect = self.import_dialect;
         let (Some(service), core) = (self.service.clone(), self.core.clone()) else {
@@ -314,20 +330,27 @@ impl ScriptsView {
         cx.notify();
     }
 
-    pub(super) fn run_task(&mut self, name: String, cx: &mut Context<Self>) {
+    pub(super) fn run_task(&mut self, id: String, cx: &mut Context<Self>) {
         if !self.running || self.busy() {
             return;
         }
+        let Some(task_name) = self
+            .tasks
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| task.name.clone())
+        else {
+            return;
+        };
         let core = self.core.clone();
         let generation = self.generation;
         self.operation = Some(Operation::RunTask);
         self.error = None;
         self.task_output = None;
         self.task = Some(cx.spawn(async move |this, cx| {
-            let task_name = name.clone();
             let result = cx
                 .background_spawn(async move {
-                    let output = core.run_script_task(&name)?;
+                    let output = core.run_script_task(&id)?;
                     let tasks = core.script_tasks()?;
                     Ok::<_, String>((output, tasks))
                 })
@@ -366,7 +389,7 @@ fn derive_name(url: &str) -> String {
     name.to_string()
 }
 
-fn fetch_notice(report: &lanpath_client::remote::FetchReport) -> String {
+pub(super) fn fetch_notice(report: &lanpath_client::remote::FetchReport) -> String {
     format!(
         "更新完成：资源 {}，脚本 {}，重写 {}，任务 {}，警告 {}",
         report.fetched,

@@ -3,7 +3,6 @@
 #![allow(dead_code)]
 
 pub use std::net::SocketAddr;
-pub use std::os::unix::fs::PermissionsExt;
 pub use std::path::{Path, PathBuf};
 pub use std::sync::Arc;
 pub use std::time::Duration;
@@ -16,33 +15,7 @@ pub use crate::config::ClientConfig;
 pub use crate::remote::{RemoteKind, RemoteResource};
 pub use crate::state::ClientState;
 pub use crate::subscription;
-pub use crate::sysproxy::{MockSystemProxy, SysProxyCall};
-
-/// Notifier that records notifications (verify injection chain: ClientState → ScriptHost → `$notify`).
-#[derive(Debug, Default)]
-pub struct RecordingNotifier {
-    calls: std::sync::Mutex<Vec<(String, String, String)>>,
-}
-
-impl RecordingNotifier {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn calls(&self) -> Vec<(String, String, String)> {
-        self.calls.lock().unwrap().clone()
-    }
-}
-
-impl lanpath_script::Notifier for RecordingNotifier {
-    fn notify(&self, title: &str, subtitle: &str, body: &str, _options: Option<serde_json::Value>) {
-        self.calls.lock().unwrap().push((
-            title.to_string(),
-            subtitle.to_string(),
-            body.to_string(),
-        ));
-    }
-}
+pub use crate::sysproxy::MockSystemProxy;
 
 /// Start a local axum server that returns `(status, body)` for all paths (for testing, no external requests).
 pub async fn spawn_server(status: StatusCode, body: &'static str) -> SocketAddr {
@@ -55,49 +28,122 @@ pub async fn spawn_server(status: StatusCode, body: &'static str) -> SocketAddr 
     addr
 }
 
-/// Write a fake core script that "ignores arguments and keeps running".
-pub fn fake_core_script(dir: &TempDir) -> PathBuf {
-    let path = dir.path().join("fake-core.sh");
-    std::fs::write(&path, "#!/bin/sh\nsleep 5\n").unwrap();
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&path, perms).unwrap();
+/// A native image, not an interpreter script: recovery must verify the exact executable.
+pub fn native_core_fixture(dir: &TempDir) -> PathBuf {
+    let path = dir.path().join("lifecycle-core");
+    std::fs::copy(compiled_core_fixture(), &path).unwrap();
     path
 }
 
-/// Write a fake core script that copies the config file corresponding to `-c <config>` argument to `capture`
-/// (used to assert the composed config actually received by core, verifying MITM starts before core).
-pub fn fake_core_capturing_args(dir: &TempDir, capture: &Path) -> PathBuf {
-    let path = dir.path().join("fake-core-capture.sh");
-    let script = format!(
-        "#!/bin/sh\n\
-             prev=\"\"\n\
-             for arg in \"$@\"; do\n\
-               if [ \"$prev\" = \"-c\" ]; then\n\
-                 cp \"$arg\" {}\n\
-               fi\n\
-               prev=\"$arg\"\n\
-             done\n\
-             sleep 5\n",
-        capture.display()
-    );
-    std::fs::write(&path, script).unwrap();
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&path, perms).unwrap();
+pub fn native_core_capturing_args(dir: &TempDir, capture: &Path) -> PathBuf {
+    let path = native_core_fixture(dir);
+    std::fs::write(path.with_extension("capture"), capture.to_str().unwrap()).unwrap();
     path
 }
 
 pub fn test_config(dir: &TempDir, hub_url: String) -> ClientConfig {
-    let cfg = ClientConfig::new(
+    let cfg = fixture_config(
         dir.path().to_path_buf(),
         hub_url,
         "tok",
-        fake_core_script(dir),
+        native_core_fixture(dir),
     );
     // start now always reloads config from disk: test config must first write client.json to disk.
     cfg.save().unwrap();
     cfg
+}
+
+fn compiled_core_fixture() -> &'static Path {
+    static COMPILED: std::sync::LazyLock<(TempDir, PathBuf)> = std::sync::LazyLock::new(|| {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let dependencies = executable.parent().unwrap();
+        let serde_json = std::fs::read_dir(dependencies)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with("libserde_json-") && name.ends_with(".rlib")
+                    })
+            })
+            .expect("Cargo-built serde_json library");
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2024", "--crate-name=lanpath_lifecycle_fixture"])
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/lifecycle_core.rs"
+            ))
+            .arg("--extern")
+            .arg(format!("serde_json={}", serde_json.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", dependencies.display()))
+            .arg("-o")
+            .arg(directory.path().join("core"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "native fixture compile failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let binary = directory.path().join("core");
+        (directory, binary)
+    });
+    &COMPILED.1
+}
+
+/// Keep native child listeners outside the OS's automatically allocated ports.
+/// Dropping a listener obtained with `:0` lets parallel HTTP clients/servers steal
+/// its port between config creation and the child's eventual bind.
+fn fixture_port_pair() -> u16 {
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT: AtomicU16 = AtomicU16::new(10_000);
+    static AUTOMATIC: std::sync::LazyLock<(u16, u16)> = std::sync::LazyLock::new(|| {
+        #[cfg(target_os = "linux")]
+        {
+            let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").unwrap();
+            let mut ports = range.split_whitespace();
+            (
+                ports.next().unwrap().parse().unwrap(),
+                ports.next().unwrap().parse().unwrap(),
+            )
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            (49_152, u16::MAX)
+        }
+    });
+    loop {
+        let port = NEXT.fetch_add(2, Ordering::Relaxed);
+        assert!(
+            (1_024..u16::MAX - 1).contains(&port),
+            "fixture port pool exhausted"
+        );
+        if (AUTOMATIC.0..=AUTOMATIC.1).contains(&port)
+            || (AUTOMATIC.0..=AUTOMATIC.1).contains(&(port + 1))
+        {
+            continue;
+        }
+        let Ok(_main) = std::net::TcpListener::bind(("127.0.0.1", port)) else {
+            continue;
+        };
+        if std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
+            return port;
+        }
+    }
+}
+
+pub fn fixture_config(
+    data_dir: PathBuf,
+    hub_url: impl Into<String>,
+    token: impl Into<String>,
+    binary: PathBuf,
+) -> ClientConfig {
+    let mut config = ClientConfig::new(data_dir, hub_url, token, binary);
+    config.mixed_port = fixture_port_pair();
+    config
 }
 
 /// 向 subscriptions.json 添加指向 `url` 的订阅并返回其 id（供测试设为 active_subscription_id；

@@ -13,7 +13,7 @@ use super::{
     prefill_argument_values,
 };
 
-static WRITE_LOCK: Mutex<()> = Mutex::const_new(());
+pub(super) static WRITE_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Metadata detected from a remote resource URL.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -55,7 +55,6 @@ impl RemoteResourceService {
         }
         resources.push(resource.clone());
         manager.save(&resources)?;
-        drop(_guard);
         self.cache_icon_warn_only(&resource).await;
         Ok(resource)
     }
@@ -70,7 +69,6 @@ impl RemoteResourceService {
         resource.name = name.clone();
         let _guard = WRITE_LOCK.lock().await;
         self.manager().update_resource(&name, resource.clone())?;
-        drop(_guard);
         self.cache_icon_warn_only(&resource).await;
         Ok(resource)
     }
@@ -131,8 +129,29 @@ impl RemoteResourceService {
     pub async fn fetch_all(&self) -> LanpathResult<FetchReport> {
         let _guard = WRITE_LOCK.lock().await;
         let manager = self.manager();
-        let resources = manager.load()?;
-        Ok(manager.fetch_all(&resources).await)
+        let resources = manager.load().map_err(|_| {
+            LanpathError::Client("remote resource manifest could not be read".into())
+        })?;
+        super::refresh::fetch(&manager, &resources, None)
+            .await?
+            .ok_or_else(|| LanpathError::Client("manual resource update returned no report".into()))
+    }
+
+    /// Refresh only enabled, due resources. Busy shared writers are skipped, not queued.
+    /// Dropping this future cancels network work and releases the shared write lock.
+    pub async fn fetch_due(
+        &self,
+        context: &super::RemoteFetchContext,
+    ) -> LanpathResult<Option<FetchReport>> {
+        let Ok(_guard) = WRITE_LOCK.try_lock() else {
+            return Ok(None);
+        };
+        context.require_network()?;
+        let manager = self.manager();
+        let resources = manager.load().map_err(|_| {
+            LanpathError::Client("remote resource manifest could not be read".into())
+        })?;
+        super::refresh::fetch(&manager, &resources, Some(context)).await
     }
 
     #[cfg(feature = "mitm")]
@@ -154,9 +173,13 @@ impl RemoteResourceService {
 
     async fn cache_icon_warn_only(&self, resource: &RemoteResource) {
         if let Some(icon) = resource.icon.as_deref()
-            && let Err(error) = self.manager().cache_icon(&resource.name, icon).await
+            && self
+                .manager()
+                .cache_icon(&resource.name, icon)
+                .await
+                .is_err()
         {
-            tracing::warn!(name = %resource.name, %error, "icon cache warmup failed");
+            tracing::warn!("resource icon cache warmup failed");
         }
     }
 }

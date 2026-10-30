@@ -16,6 +16,9 @@ use super::MitmChain;
 /// - outbounds append `lanpath-mitm` http outbound (pointing to MITM listen address)
 /// - route.rules prepend a whitelist rule: `inbound = [main-in]`, `*.` prefix hostnames go to
 ///   `domain_suffix`, IP addresses to exact `ip_cidr`, and other entries to `domain`.
+///   Panel injection keeps mode/local/IPv6 rules ahead of this whitelist, but its injected
+///   RealIP resolve exempts this exact predicate in rule mode. Mock responses can therefore
+///   complete without resolving the origin; forwarded traffic resolves on `mitm-return`.
 ///
 /// MITM chain with an empty effective whitelist (no non-exclusion hostname) leaves the config
 /// completely untouched: no route rule (a conditionless `inbound = [main-in]` rule would match
@@ -47,27 +50,21 @@ pub fn compose_singbox_config(
         return Ok(Value::Object(obj));
     };
 
-    // `-` / `!` prefix are exclusions (not intercepted), not generated into core routing rules:
-    // corresponding domain traffic goes direct, not sent to MITM inbound.
-    let mut domain = Vec::new();
-    let mut domain_suffix = Vec::new();
-    let mut ip_cidr = Vec::new();
+    // Exclusions are predicates on the MITM route, not direct-outbound rules.
+    // Failing this predicate leaves the original subscription routing untouched.
+    let mut included = Vec::new();
+    let mut excluded = Vec::new();
     for hostname in &chain.hostnames {
-        if hostname.starts_with('-') || hostname.starts_with('!') {
-            continue;
-        }
-        if let Some(suffix) = hostname.strip_prefix("*.") {
-            domain_suffix.push(Value::String(suffix.to_string()));
-        } else if let Ok(address) = hostname.parse::<std::net::IpAddr>() {
-            let prefix = if address.is_ipv4() { 32 } else { 128 };
-            ip_cidr.push(Value::String(format!("{address}/{prefix}")));
+        if let Some(pattern) = hostname
+            .strip_prefix('-')
+            .or_else(|| hostname.strip_prefix('!'))
+        {
+            excluded.push(hostname_rule(pattern)?);
         } else {
-            domain.push(Value::String(hostname.clone()));
+            included.push(hostname_rule(hostname)?);
         }
     }
-    // Empty effective whitelist: a route rule without domain conditions would hijack all
-    // main-in traffic into MITM. Leave the config untouched instead.
-    if domain.is_empty() && domain_suffix.is_empty() && ip_cidr.is_empty() {
+    if included.is_empty() {
         return Ok(Value::Object(obj));
     }
 
@@ -101,34 +98,98 @@ pub fn compose_singbox_config(
     }));
     obj.insert("outbounds".to_string(), Value::Array(outbounds));
 
-    // route rules prepend whitelist rule (create route when missing).
     let mut route = obj
         .remove("route")
         .and_then(|r| r.as_object().cloned())
         .unwrap_or_default();
-    let mut rule = serde_json::Map::new();
-    rule.insert("inbound".to_string(), json!(["main-in"]));
-    if !domain.is_empty() {
-        rule.insert("domain".to_string(), Value::Array(domain));
+    let mut predicates = vec![json!({ "inbound": ["main-in"] })];
+    if !excluded.is_empty() {
+        // Evaluate the exclusion before any broad suffix/wildcard inclusion.
+        predicates.push(json!({
+            "type": "logical", "mode": "or", "rules": excluded, "invert": true,
+        }));
     }
-    if !domain_suffix.is_empty() {
-        rule.insert("domain_suffix".to_string(), Value::Array(domain_suffix));
-    }
-    if !ip_cidr.is_empty() {
-        rule.insert("ip_cidr".to_string(), Value::Array(ip_cidr));
-    }
-    rule.insert(
-        "outbound".to_string(),
-        Value::String("lanpath-mitm".to_string()),
-    );
+    predicates.push(json!({ "type": "logical", "mode": "or", "rules": included }));
+    let rule = json!({
+        "type": "logical", "mode": "and", "rules": predicates, "outbound": "lanpath-mitm",
+    });
     let mut rules = route
         .remove("rules")
         .and_then(|r| r.as_array().cloned())
         .unwrap_or_default();
-    rules.insert(0, Value::Object(rule));
+    rules.insert(0, rule);
     route.insert("rules".to_string(), Value::Array(rules));
     obj.insert("route".to_string(), Value::Object(route));
     Ok(Value::Object(obj))
+}
+
+/// A port-qualified hostname is an AND pair; unrelated host/port pairs must not
+/// be flattened into a cross product. IPv6 literals retain their whole address.
+fn hostname_rule(pattern: &str) -> LanpathResult<Value> {
+    let invalid = || LanpathError::Client("invalid MITM hostname or port pattern".into());
+    let (host, port) = if let Some(bracketed) = pattern.strip_prefix('[') {
+        let (host, rest) = bracketed.split_once(']').ok_or_else(invalid)?;
+        let port = if rest.is_empty() {
+            None
+        } else {
+            Some(rest.strip_prefix(':').ok_or_else(invalid)?)
+        };
+        (host, port)
+    } else if pattern.parse::<std::net::IpAddr>().is_ok() {
+        (pattern, None)
+    } else if let Some((host, port)) = pattern.rsplit_once(':') {
+        if host.contains(':') {
+            return Err(invalid());
+        }
+        (host, Some(port))
+    } else {
+        (pattern, None)
+    };
+    if host.is_empty() {
+        return Err(invalid());
+    }
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty()
+        || (host.parse::<std::net::IpAddr>().is_err()
+            && !host
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | '*' | '?')))
+    {
+        return Err(invalid());
+    }
+    let mut rule = serde_json::Map::new();
+    if let Some(suffix) = host
+        .strip_prefix("*.")
+        .filter(|suffix| !suffix.contains(['*', '?']))
+    {
+        rule.insert("domain_suffix".into(), json!([suffix]));
+    } else if host.contains(['*', '?']) {
+        let regex = format!(
+            "^{}$",
+            regex::escape(&host)
+                .replace(r"\*", ".*")
+                .replace(r"\?", ".")
+        );
+        rule.insert("domain_regex".into(), json!([regex]));
+    } else if let Ok(address) = host.parse::<std::net::IpAddr>() {
+        rule.insert(
+            "ip_cidr".into(),
+            json!([format!(
+                "{address}/{}",
+                if address.is_ipv4() { 32 } else { 128 }
+            )]),
+        );
+    } else {
+        rule.insert("domain".into(), json!([host]));
+    }
+    if let Some(port) = port.filter(|port| *port != "*") {
+        let port = port.parse::<u16>().map_err(|_| invalid())?;
+        if port == 0 {
+            return Err(invalid());
+        }
+        rule.insert("port".into(), json!([port]));
+    }
+    Ok(Value::Object(rule))
 }
 
 /// sing-box 1.12+ DNS compatibility adaptation.

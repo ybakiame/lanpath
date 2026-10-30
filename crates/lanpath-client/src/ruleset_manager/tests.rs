@@ -56,45 +56,6 @@ fn mirror_urls_composition() {
     );
 }
 
-/// 镜像回退：jsDelivr 失败、GitHub raw（本地服务模拟）成功时完成下载并原子写入。
-#[tokio::test]
-async fn download_falls_back_to_github_mirror() {
-    // 本地 HTTP 服务模拟 GitHub raw；jsDelivr 域名在测试环境不可解析/不可达会先行失败。
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let app = axum::Router::new().route(
-            "/MetaCubeX/meta-rules-dat/sing/geo/geosite/cn.srs",
-            axum::routing::get(|| async { b"srs-bytes".as_slice() }),
-        );
-        axum::serve(listener, app).await.unwrap();
-    });
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .no_proxy()
-        .build()
-        .unwrap();
-    // 直接把 github 镜像替换为本地服务地址来验证回退逻辑：构造 mirrors 序列的手工版。
-    let github_url = format!("http://{addr}/MetaCubeX/meta-rules-dat/sing/geo/geosite/cn.srs");
-    let mirrors = [
-        ("jsdelivr", "http://127.0.0.1:1/should-fail.srs".to_string()),
-        ("github", github_url.clone()),
-    ];
-    let mut got = None;
-    for (name, url) in mirrors {
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                got = Some((resp.bytes().await.unwrap(), name));
-                break;
-            }
-            _ => continue,
-        }
-    }
-    let (bytes, mirror) = got.expect("second mirror must succeed");
-    assert_eq!(mirror, "github");
-    assert_eq!(&bytes[..], b"srs-bytes");
-}
-
 /// 原子写入：父目录自动创建，内容完整。
 #[test]
 fn write_atomic_creates_parent_and_writes() {
@@ -181,4 +142,65 @@ fn materialize_no_missing_keeps_all_rules() {
     assert_eq!(report.stripped_route_rules, 0);
     assert_eq!(config["route"]["rules"].as_array().unwrap().len(), 1);
     assert_eq!(config["route"]["rule_set"][0]["type"], "local");
+}
+
+#[test]
+fn materialize_keeps_authoritative_local_private_rules_without_legacy_cache() {
+    let dir = data_dir();
+    let local = dir.path().join("user-private.json");
+    std::fs::write(
+        &local,
+        r#"{"version":1,"rules":[{"domain_suffix":["owned.example"]}]}"#,
+    )
+    .unwrap();
+    let mut config = json!({
+        "dns": {"rules": [
+            {"rule_set": ["geosite-private"], "server": "local"},
+            {"rule_set": ["geoip-private"], "server": "remote"}
+        ]},
+        "route": {
+            "rule_set": [
+                {"type": "local", "tag": "geosite-private", "format": "source", "path": local},
+                {"type": "remote", "tag": "geoip-private", "format": "binary", "url": "https://owned.invalid/missing.srs"}
+            ],
+            "rules": [
+                {"rule_set": ["geosite-private"], "outbound": "direct"},
+                {"rule_set": ["geoip-private"], "outbound": "proxy"}
+            ]
+        }
+    });
+    let report = materialize_rule_sets(&mut config, dir.path(), &BTreeMap::new());
+    assert_eq!(
+        config["route"]["rules"],
+        json!([
+            {"rule_set": ["geosite-private"], "outbound": "direct"}
+        ])
+    );
+    assert_eq!(
+        config["dns"]["rules"],
+        json!([
+            {"rule_set": ["geosite-private"], "server": "local"}
+        ])
+    );
+    assert_eq!(
+        config["route"]["rule_set"],
+        json!([
+            {"type": "local", "tag": "geosite-private", "format": "source", "path": local}
+        ])
+    );
+    assert_eq!(report.missing_tags, ["geoip-private"]);
+    assert_eq!(report.stripped_route_rules, 1);
+    assert_eq!(report.stripped_dns_rules, 1);
+}
+
+#[test]
+fn materialize_does_not_report_unused_builtin_tags_as_missing() {
+    let dir = data_dir();
+    let mut config = json!({
+        "route": {"final": "direct", "rules": [{"domain": ["owned.example"], "outbound": "direct"}]}
+    });
+    let report = materialize_rule_sets(&mut config, dir.path(), &BTreeMap::new());
+    assert!(report.missing_tags.is_empty());
+    assert_eq!(report.stripped_route_rules, 0);
+    assert_eq!(report.stripped_dns_rules, 0);
 }

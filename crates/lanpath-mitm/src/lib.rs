@@ -9,10 +9,16 @@ pub mod ca;
 pub mod ca_trust;
 pub mod config;
 mod intercept;
+pub mod pattern;
+#[cfg(test)]
+mod pattern_tests;
+#[cfg(test)]
+mod pattern_transport_tests;
 pub mod proxy;
 #[cfg(test)]
 mod proxy_tests;
 pub mod recorder;
+mod request_url;
 pub mod rewrite;
 #[cfg(test)]
 mod rewrite_tests;
@@ -20,11 +26,15 @@ pub mod script_hook;
 
 #[cfg(test)]
 mod script_hook_tests;
+mod transport_body;
+#[cfg(test)]
+mod transport_tests;
 pub mod upstream;
 
 pub use ca::*;
 pub use ca_trust::*;
 pub use config::*;
+pub use pattern::{Pattern, PatternError};
 pub use proxy::*;
 pub use recorder::*;
 pub use rewrite::*;

@@ -3,86 +3,70 @@
 use lanpath_mitm::{Phase, RewriteKind};
 use lanpath_script::ScriptKind;
 
+use super::loon_current::{emit, parse_loon_current, parse_options, string_literal};
+
 use super::utils::*;
 use super::{ArgKind, ArgSpec, ConfigMeta};
 
-/// Loon `[Script]` line parsing: `http-request|http-response ^pattern param=value,...`.
-///
-/// Loon vs Surge syntax differences: type is the first token, no `name =` prefix,
-/// script name taken from `tag=`, `argument=` parameter percent-decoded (常为 URL 编码
-/// JSON), `engine` / `binary-body-mode` and other parameters ignored.
-/// 兼容参数与 pattern 逗号粘连的生态写法（`^pat,requires-body=0 script-path=...`）。
+/// Legacy contract: https://nsloon.app/en/docs/Script/
+/// Current entries are parsed separately; never discard an unsupported condition.
 pub(super) fn parse_loon_script(cfg: &mut super::ImportedConfig, line: &str) {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 2 {
+    let first = line.split_whitespace().next().unwrap_or_default();
+    if matches!(first, "request" | "response")
+        || (first == "cron" && line.contains(" then script("))
+    {
+        parse_loon_current(cfg, line);
+        return;
+    }
+    if parse_legacy_script(cfg, line).is_none() {
         cfg.warn(
             "script",
-            line,
-            "unrecognized line (expected '<type> ^pattern params...')",
+            "",
+            "unsupported or invalid legacy Loon entry; not activated",
         );
-        return;
     }
-    let kind = match tokens[0] {
-        "http-request" => ScriptKind::HttpRequest,
-        "http-response" => ScriptKind::HttpResponse,
-        other => {
-            cfg.warn(
-                "script",
-                line,
-                &format!("unrecognized script type '{other}'"),
-            );
-            return;
+}
+
+fn parse_legacy_script(cfg: &mut super::ImportedConfig, line: &str) -> Option<()> {
+    let (trigger, rest) = line.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start();
+    let (kind, pattern, cron, params) = match trigger {
+        "http-request" | "http-response" => {
+            let end = rest.find(char::is_whitespace)?;
+            let token = &rest[..end];
+            // Preserve the existing comma-attached option form without splitting regex
+            // quantifier commas (e.g. {1,2}).
+            let inline = token
+                .find(",requires-body=")
+                .or_else(|| token.find(",require-body="));
+            let (pattern, params) = if let Some(index) = inline {
+                (
+                    &token[..index],
+                    format!("{},{}", &token[index + 1..], rest[end..].trim()),
+                )
+            } else {
+                (token, rest[end..].trim().to_owned())
+            };
+            let pattern =
+                lanpath_mitm::Pattern::new(&format!("(?i){}", pattern.replace("\\/", "/"))).ok()?;
+            let kind = if trigger == "http-request" {
+                ScriptKind::HttpRequest
+            } else {
+                ScriptKind::HttpResponse
+            };
+            (kind, Some(pattern), None, params)
         }
+        "cron" => {
+            let (cron, rest) = string_literal(rest)?;
+            (ScriptKind::Cron, None, Some(cron), rest.trim().to_owned())
+        }
+        _ => return None,
     };
-    // 生态中存在参数与 pattern 逗号粘连的写法（`^pat,requires-body=0 script-path=...`），
-    // 拆出 pattern 后把粘连参数并入 kv 解析。
-    let (pattern_src, inline_params) = match tokens[1].split_once(',') {
-        Some((pattern, rest)) => (pattern, rest.to_string()),
-        None => (tokens[1], String::new()),
-    };
-    let param_src = if inline_params.is_empty() {
-        tokens[2..].join(" ")
-    } else {
-        // 粘连参数与后续 token 之间是空格分隔；拼入 kv 流时用逗号衔接，避免
-        // `requires-body=0 script-path=...` 被读成 requires-body 的值。
-        format!("{},{}", inline_params, tokens[2..].join(" "))
-    };
-    let params = parse_kv_params(&param_src);
-    let Some(pattern) = compile_pattern(pattern_src, cfg, "script", line) else {
-        return;
-    };
-    let Some(script_path) = params.get("script-path") else {
-        cfg.warn("script", line, "missing 'script-path' parameter");
-        return;
-    };
-    if !is_remote_url(script_path) {
-        cfg.warn("script", line, "local script path not supported, skipped");
-        return;
-    }
-    let name = params
-        .get("tag")
-        .map(|t| strip_quotes(t).to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| derive_name_from_url(script_path));
-    let requires_body = parse_bool(
-        params
-            .get("requires-body")
-            .or_else(|| params.get("require-body")),
-    );
-    // `argument=` 常为 URL 编码的 JSON，解码后透传；无 `%` 时原样返回。
-    // `max-size=-1`（Loon 不限）映射到 10MB 上限，语义同 Surge。
-    let argument = params.get("argument").map(|a| percent_decode(a));
-    let max_size = parse_max_size(params.get("max-size")).unwrap_or(131072);
-    cfg.script_urls.push((name.clone(), script_path.clone()));
-    cfg.scripts.push(lanpath_mitm::ScriptRule {
-        name,
-        kind,
-        pattern,
-        requires_body,
-        max_size,
-        source: String::new(),
-        argument,
-    });
+    let mut options = parse_options(&params, true)?;
+    let url = options.remove("script-path")?;
+    // Loon passes String arguments unchanged; percent decoding alters user data.
+    let argument = options.remove("argument");
+    emit(cfg, kind, pattern, cron, url, argument, options, 10_000)
 }
 
 /// Loon `[Argument]` section line parsing: `Key = input/select,"default","opt2",...,tag=...,desc=...`.
@@ -112,11 +96,11 @@ pub(super) fn parse_loon_argument(cfg: &mut super::ImportedConfig, line: &str) {
     let kind = match kind_src.trim().to_ascii_lowercase().as_str() {
         "input" => ArgKind::Input,
         "select" => ArgKind::Select,
-        other => {
+        _ => {
             cfg.warn(
                 "argument",
-                line,
-                &format!("unrecognized argument kind '{other}'"),
+                "",
+                "unsupported argument kind; declaration not imported",
             );
             return;
         }
@@ -223,10 +207,9 @@ pub(super) fn parse_loon_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
                 cfg.warn("rewrite", line, "header-del missing header name");
                 return;
             };
-            RewriteKind::HeaderRewrite {
+            RewriteKind::HeaderRemove {
                 phase: Phase::Request,
                 name: (*name).to_string(),
-                value: None,
             }
         }
         "header-replace" | "header-add" => {
@@ -234,10 +217,18 @@ pub(super) fn parse_loon_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
                 cfg.warn("rewrite", line, "missing header name");
                 return;
             };
-            RewriteKind::HeaderRewrite {
-                phase: Phase::Request,
-                name: (*name).to_string(),
-                value: Some(tokens[3..].join(" ")),
+            if tokens[1] == "header-add" {
+                RewriteKind::HeaderAppend {
+                    phase: Phase::Request,
+                    name: (*name).to_string(),
+                    value: tokens[3..].join(" "),
+                }
+            } else {
+                RewriteKind::HeaderReplace {
+                    phase: Phase::Request,
+                    name: (*name).to_string(),
+                    value: tokens[3..].join(" "),
+                }
             }
         }
         "header-replace-regex" => {
@@ -259,12 +250,8 @@ pub(super) fn parse_loon_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
                 replacement: tokens[4..].join(" "),
             }
         }
-        other => {
-            cfg.warn(
-                "rewrite",
-                line,
-                &format!("unrecognized rewrite action '{other}'"),
-            );
+        _ => {
+            cfg.warn("rewrite", "", "unsupported rewrite action; not activated");
             return;
         }
     };

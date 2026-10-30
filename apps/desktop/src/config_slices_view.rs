@@ -174,7 +174,7 @@ impl ConfigSlicesView {
         cx.notify();
     }
 
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.locked || self.busy() || !self.dirty || self.reject_invalid_input(cx) {
             return;
         }

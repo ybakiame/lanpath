@@ -73,6 +73,82 @@ fn rule_set_http_client_skipped_without_local_dns() {
     );
 }
 
+#[tokio::test]
+async fn takeover_dns_keeps_generated_dialers_bound_to_declared_resolvers() {
+    use crate::config_slices::{
+        ConfigSlices, DnsMode, DnsServer, DnsServerType, DnsSlice, DomainResolverSlice,
+    };
+    use crate::profile::{EffectiveOverrides, build_core_config_v2};
+
+    for explicit_bootstrap in [false, true] {
+        let mut slices = ConfigSlices {
+            dns: DnsSlice {
+                mode: DnsMode::Takeover,
+                servers: ["bootstrap", "final-dns"]
+                    .into_iter()
+                    .map(|tag| DnsServer {
+                        tag: tag.into(),
+                        server: "127.0.0.1".into(),
+                        server_type: DnsServerType::Udp,
+                        ..Default::default()
+                    })
+                    .collect(),
+                final_tag: "final-dns".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        if explicit_bootstrap {
+            slices.route.resolver = DomainResolverSlice {
+                server: "final-dns".into(),
+                strategy: None,
+            };
+        }
+        let config = build_core_config_v2(
+            &json!({"outbounds": []}),
+            &EffectiveOverrides::default(),
+            &slices,
+        )
+        .await
+        .unwrap();
+        let expected = if explicit_bootstrap {
+            "final-dns"
+        } else {
+            "bootstrap"
+        };
+        for resolver in [
+            &config["route"]["default_domain_resolver"],
+            &config["http_clients"][0]["domain_resolver"],
+        ] {
+            assert_eq!(resolver["server"], expected);
+            assert!(
+                config["dns"]["servers"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|server| server["tag"] == resolver["server"]),
+                "generated dialer must not retain a removed template DNS reference"
+            );
+        }
+        let overridden = build_core_config_v2(
+            &json!({"outbounds": []}),
+            &EffectiveOverrides {
+                local_yaml: "http_clients:\n  - tag: rule-set-direct\n    detour: explicit-proxy\n"
+                    .into(),
+                ..Default::default()
+            },
+            &slices,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            overridden["http_clients"],
+            json!([{"tag": "rule-set-direct", "detour": "explicit-proxy"}]),
+            "later user-owned clients must not be rebound"
+        );
+    }
+}
+
 #[test]
 fn singbox_template_empty_nodes_falls_back_to_direct() {
     let cfg = singbox_template(&[]);

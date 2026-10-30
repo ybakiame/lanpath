@@ -62,7 +62,10 @@ export interface ClientConfig {
 export interface ClientStatus {
   core_running: boolean;
   mitm_addr: string | null;
-  system_proxy: boolean;
+  /** Null is an unknown/unqueried effective state, never equivalent to disabled. */
+  system_proxy: boolean | null;
+  system_proxy_ownership: "unowned" | "owned" | "recovery_required" | null;
+  system_proxy_error: string | null;
   /** Current effective rule mode: `rule` / `global` / `direct`. */
   rule_mode: string;
   /** Number of rules in the composed config (0 when not running). */

@@ -1,7 +1,7 @@
 //! `rewrite` 模块单元测试。
 
 use super::rewrite::*;
-use regex::Regex;
+use crate::Pattern;
 
 fn engine(rules: Vec<RewriteRule>) -> RewriteEngine {
     RewriteEngine { rules }
@@ -10,7 +10,7 @@ fn engine(rules: Vec<RewriteRule>) -> RewriteEngine {
 fn rule(kind: RewriteKind, pattern: &str) -> RewriteRule {
     RewriteRule {
         kind,
-        pattern: Regex::new(pattern).unwrap(),
+        pattern: Pattern::new(pattern).unwrap(),
     }
 }
 
@@ -25,7 +25,7 @@ fn url_rewrite_supports_capture_groups() {
     let mut url = "http://static.example.com/foo/bar".to_string();
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(action, RewriteAction::Continue);
     assert_eq!(url, "https://cdn.example.com/v1/foo/bar");
 }
@@ -42,7 +42,7 @@ fn redirect_short_circuits_with_location() {
     let mut url = "http://www.example.com/a/b".to_string();
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(
         action,
         RewriteAction::Redirect {
@@ -65,12 +65,14 @@ fn redirect_skipped_in_response_pass() {
     let mut status = 200u16;
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_response(
-        "http://www.example.com/",
-        &mut status,
-        &mut headers,
-        &mut body,
-    );
+    let action = e
+        .apply_response(
+            "http://www.example.com/",
+            &mut status,
+            &mut headers,
+            &mut body,
+        )
+        .unwrap();
     assert_eq!(action, RewriteAction::Continue);
 }
 
@@ -101,7 +103,7 @@ fn request_header_rewrite_sets_and_deletes_case_insensitively() {
         ("X-Keep".to_string(), "me".to_string()),
     ];
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(action, RewriteAction::Continue);
     assert_eq!(
         headers,
@@ -118,7 +120,7 @@ fn header_value_rewrite_applies_regex_to_value() {
         RewriteKind::HeaderValueRewrite {
             phase: Phase::Request,
             name: "User-Agent".to_string(),
-            value_pattern: Regex::new("Mozilla/\\S+").unwrap(),
+            value_pattern: Pattern::new("Mozilla/\\S+").unwrap(),
             replacement: "CustomUA".to_string(),
         },
         ".*",
@@ -129,7 +131,7 @@ fn header_value_rewrite_applies_regex_to_value() {
         ("accept".to_string(), "*/*".to_string()),
     ];
     let mut body: Option<String> = None;
-    e.apply_request(&mut url, &mut headers, &mut body);
+    e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(
         headers,
         vec![
@@ -144,7 +146,7 @@ fn header_block_rewrite_matches_across_headers() {
     let e = engine(vec![rule(
         RewriteKind::HeaderBlockRewrite {
             phase: Phase::Response,
-            block_pattern: Regex::new("(?i)if-none-match: [^\r\n]+\r\n?").unwrap(),
+            block_pattern: Pattern::new("(?i)if-none-match: [^\r\n]+\r\n?").unwrap(),
             replacement: String::new(),
         },
         ".*",
@@ -156,7 +158,8 @@ fn header_block_rewrite_matches_across_headers() {
         ("x-other".to_string(), "1".to_string()),
     ];
     let mut body: Option<String> = None;
-    e.apply_response("http://example.com/", &mut status, &mut headers, &mut body);
+    e.apply_response("http://example.com/", &mut status, &mut headers, &mut body)
+        .unwrap();
     assert_eq!(
         headers,
         vec![
@@ -171,7 +174,7 @@ fn body_rewrite_with_separate_body_pattern() {
     let e = engine(vec![rule(
         RewriteKind::BodyRewrite {
             phase: Phase::Response,
-            body_pattern: Some(Regex::new(r#""is_pro":\s*false"#).unwrap()),
+            body_pattern: Some(Pattern::new(r#""is_pro":\s*false"#).unwrap()),
             replacement: r#""is_pro": true"#.to_string(),
         },
         r"^https://api\.example\.com/vip",
@@ -184,7 +187,8 @@ fn body_rewrite_with_separate_body_pattern() {
         &mut status,
         &mut headers,
         &mut body,
-    );
+    )
+    .unwrap();
     assert_eq!(body.as_deref(), Some(r#"{"is_pro": true}"#));
 
     // URL 不命中门控时 body 不变。
@@ -194,7 +198,8 @@ fn body_rewrite_with_separate_body_pattern() {
         &mut status,
         &mut headers,
         &mut body,
-    );
+    )
+    .unwrap();
     assert_eq!(body.as_deref(), Some(r#"{"is_pro": false}"#));
 }
 
@@ -211,12 +216,14 @@ fn body_rewrite_without_body_pattern_reuses_url_pattern() {
     let mut status = 200u16;
     let mut headers = Vec::new();
     let mut body = Some("hello secret world".to_string());
-    let action = e.apply_response(
-        "http://example.com/page?secret=1",
-        &mut status,
-        &mut headers,
-        &mut body,
-    );
+    let action = e
+        .apply_response(
+            "http://example.com/page?secret=1",
+            &mut status,
+            &mut headers,
+            &mut body,
+        )
+        .unwrap();
     assert_eq!(action, RewriteAction::Continue);
     assert_eq!(body.as_deref(), Some("hello REDACTED world"));
 
@@ -227,7 +234,8 @@ fn body_rewrite_without_body_pattern_reuses_url_pattern() {
         &mut status,
         &mut headers,
         &mut body,
-    );
+    )
+    .unwrap();
     assert_eq!(body.as_deref(), Some("hello secret world"));
 }
 
@@ -244,7 +252,7 @@ fn response_phase_rules_are_skipped_in_request_pass() {
     let mut url = "http://example.com/".to_string();
     let mut headers: Vec<(String, String)> = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(action, RewriteAction::Continue);
     assert!(headers.is_empty());
 }
@@ -273,7 +281,7 @@ fn reject_variants_map_to_mock_action() {
         let mut url = "http://example.com/blocked".to_string();
         let mut headers = Vec::new();
         let mut body: Option<String> = None;
-        let action = e.apply_request(&mut url, &mut headers, &mut body);
+        let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
         let RewriteAction::Mock {
             status: s,
             body: b,
@@ -296,7 +304,7 @@ fn reject_variants_map_to_mock_action() {
         let mut headers = Vec::new();
         let mut body: Option<String> = None;
         assert_eq!(
-            e.apply_request(&mut url, &mut headers, &mut body),
+            e.apply_request(&mut url, &mut headers, &mut body).unwrap(),
             RewriteAction::Continue
         );
     }
@@ -315,7 +323,7 @@ fn mock_short_circuits_with_synthetic_response() {
     let mut url = "http://example.com/anything".to_string();
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(
         action,
         RewriteAction::Mock {
@@ -351,12 +359,168 @@ fn mock_carries_headers_through_request_and_response() {
     let mut url = "http://example.com/".to_string();
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_request(&mut url, &mut headers, &mut body);
+    let action = e.apply_request(&mut url, &mut headers, &mut body).unwrap();
     assert_eq!(action, expected);
 
     let mut status = 200u16;
     let mut headers = Vec::new();
     let mut body: Option<String> = None;
-    let action = e.apply_response("http://example.com/", &mut status, &mut headers, &mut body);
+    let action = e
+        .apply_response("http://example.com/", &mut status, &mut headers, &mut body)
+        .unwrap();
     assert_eq!(action, expected);
+}
+
+#[test]
+fn static_url_retargets_host_with_capture_groups_and_port() {
+    let e = engine(vec![rule(
+        RewriteKind::UrlRewrite {
+            target: "https://new.example:8443/$1".to_owned(),
+        },
+        r"^https://old.example/(.*)$",
+    )]);
+    let mut url = "https://old.example/path?q=1".to_owned();
+    let mut headers = vec![
+        ("Host".into(), "custom.example".into()),
+        ("X-Keep".into(), "yes".into()),
+    ];
+    e.apply_request(&mut url, &mut headers, &mut None).unwrap();
+    assert_eq!(url, "https://new.example:8443/path?q=1");
+    assert_eq!(
+        headers,
+        vec![
+            ("X-Keep".into(), "yes".into()),
+            ("Host".into(), "new.example:8443".into())
+        ]
+    );
+}
+
+#[test]
+fn append_replace_remove_preserve_duplicate_fields_without_inserting_missing_replace() {
+    let e = engine(vec![
+        rule(
+            RewriteKind::HeaderAppend {
+                phase: Phase::Response,
+                name: "Set-Cookie".into(),
+                value: "three".into(),
+            },
+            ".*",
+        ),
+        rule(
+            RewriteKind::HeaderReplace {
+                phase: Phase::Response,
+                name: "set-cookie".into(),
+                value: "changed".into(),
+            },
+            ".*",
+        ),
+        rule(
+            RewriteKind::HeaderReplace {
+                phase: Phase::Response,
+                name: "X-Missing".into(),
+                value: "must not appear".into(),
+            },
+            ".*",
+        ),
+        rule(
+            RewriteKind::HeaderRemove {
+                phase: Phase::Response,
+                name: "X-Remove".into(),
+            },
+            ".*",
+        ),
+        rule(
+            RewriteKind::HeaderAppend {
+                phase: Phase::Response,
+                name: "Set-Cookie".into(),
+                value: "final".into(),
+            },
+            ".*",
+        ),
+    ]);
+    let mut headers = vec![
+        ("Set-Cookie".into(), "one".into()),
+        ("set-cookie".into(), "two".into()),
+        ("x-remove".into(), "yes".into()),
+    ];
+    e.apply_response("https://example.test/", &mut 200, &mut headers, &mut None)
+        .unwrap();
+    assert_eq!(
+        headers.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>(),
+        ["changed", "changed", "changed", "final"]
+    );
+    assert!(
+        headers
+            .iter()
+            .all(|(n, _)| n.eq_ignore_ascii_case("set-cookie"))
+    );
+}
+
+#[test]
+fn body_pairs_are_ordered_and_selected_after_url_and_request_line_rewrites() {
+    let e = engine(vec![
+        rule(
+            RewriteKind::UrlRewrite {
+                target: "http://example.test/intermediate".into(),
+            },
+            "^http://old.test/start$",
+        ),
+        rule(
+            RewriteKind::HeaderBlockRewrite {
+                phase: Phase::Request,
+                block_pattern: Pattern::new("^GET /intermediate").unwrap(),
+                replacement: "POST /final".into(),
+            },
+            "intermediate",
+        ),
+        rule(
+            RewriteKind::BodyRewritePairs {
+                phase: Phase::Request,
+                pairs: vec![
+                    (Pattern::new("one").unwrap(), "two".into()),
+                    (Pattern::new("two").unwrap(), "three".into()),
+                ],
+            },
+            "/final$",
+        ),
+    ]);
+    let headers = vec![("Host".into(), "old.test".into())];
+    assert_eq!(
+        e.request_body_plan("GET", "http://old.test/start", &headers)
+            .unwrap(),
+        (true, "http://example.test/final".into())
+    );
+    let mut method = "GET".to_owned();
+    let mut url = "http://old.test/start".to_owned();
+    let mut headers = headers;
+    let mut body = Some("one one".into());
+    e.apply_request_with_method(&mut method, &mut url, &mut headers, &mut body)
+        .unwrap();
+    assert_eq!(method, "POST");
+    assert_eq!(url, "http://example.test/final");
+    assert_eq!(body.as_deref(), Some("three three"));
+    assert_eq!(headers, vec![("Host".into(), "example.test".into())]);
+}
+
+#[test]
+fn invalid_header_block_rewrite_is_atomic_and_cannot_drop_other_headers() {
+    let e = engine(vec![rule(
+        RewriteKind::HeaderBlockRewrite {
+            phase: Phase::Response,
+            block_pattern: Pattern::new("X-Bad: valid").unwrap(),
+            replacement: "not a header".into(),
+        },
+        ".*",
+    )]);
+    let original = vec![
+        ("X-Bad".into(), "valid".into()),
+        ("Set-Cookie".into(), "a=1".into()),
+        ("Set-Cookie".into(), "b=2".into()),
+    ];
+    let mut headers = original.clone();
+    let mut status = 200;
+    e.apply_response("http://example.test/", &mut status, &mut headers, &mut None)
+        .unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(headers, original);
 }

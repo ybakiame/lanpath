@@ -7,10 +7,10 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 use std::path::PathBuf;
 
-use lanpath_common::LifecycleGuard;
+use lanpath_common::{LifecycleGuard, ProcessStopKind};
 use tokio::process::{ChildStderr, ChildStdout};
 
 /// Persist the original OS identity; changing the selected binary cannot redefine ownership.
@@ -68,32 +68,46 @@ where
     })
 }
 
-/// Recover only the recorded original process. Unknown/mismatched identities retain the record.
-pub fn reap_stale(pid_path: &Path) -> Result<(), String> {
+/// Recover only the recorded original process and report the operation after record cleanup.
+/// Unknown/mismatched identities and failed operations retain the record.
+pub fn reap_stale(pid_path: &Path) -> Result<ProcessStopKind, String> {
     let content = match std::fs::read(pid_path) {
         Ok(content) => content,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ProcessStopKind::AlreadyStopped);
+        }
         Err(e) => return Err(format!("cannot read recovery record: {e}")),
     };
     let record: PidFile = serde_json::from_slice(&content)
         .map_err(|e| format!("invalid recovery identity; record retained: {e}"))?;
-    match lanpath_common::ProcessIdentity::capture(record.identity.pid) {
-        Ok(actual) if actual == record.identity => {
-            record
-                .identity
-                .terminate_verified()
-                .map_err(|e| format!("core recovery unresolved; record retained: {e}"))?;
+    #[cfg(windows)]
+    let kind = match record.identity.terminate_verified() {
+        Ok(kind) => kind,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(87) => {
+            ProcessStopKind::AlreadyStopped
         }
+        Err(e) => return Err(format!("core recovery unresolved; record retained: {e}")),
+    };
+    // Unix capture supplies the platform's absent-process classification.
+    #[cfg(not(windows))]
+    let kind = match lanpath_common::ProcessIdentity::capture(record.identity.pid) {
+        Ok(actual) if actual == record.identity => record
+            .identity
+            .terminate_verified()
+            .map_err(|e| format!("core recovery unresolved; record retained: {e}"))?,
         Ok(_) => return Err("process identity mismatch; recovery record retained".into()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(87) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(87) => {
+            ProcessStopKind::AlreadyStopped
+        }
         Err(e) => {
             return Err(format!(
                 "cannot inspect original process; record retained: {e}"
             ));
         }
-    }
+    };
     std::fs::remove_file(pid_path)
-        .map_err(|e| format!("cannot remove resolved recovery record: {e}"))
+        .map_err(|e| format!("cannot remove resolved recovery record: {e}"))?;
+    Ok(kind)
 }
 
 pub fn write_pid_file(pid_path: &Path, pid: u32, binary: &Path) -> Result<(), String> {
@@ -137,13 +151,12 @@ pub fn remove_pid_file(pid_path: &Path) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Re-execute this test binary so the fixture has a stable native identity,
     /// independent of PATH, scripts, multicall coreutils or host wrappers.
-    #[cfg(unix)]
-    fn fixture_child() -> (std::process::Child, u32) {
+    pub(crate) fn fixture_child() -> (std::process::Child, u32) {
         let child = std::process::Command::new(fixture_binary())
             .args([
                 "--exact",
@@ -151,6 +164,7 @@ mod tests {
                 "--nocapture",
             ])
             .env("LANPATH_LIFECYCLE_CHILD_FIXTURE", "1")
+            .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -159,16 +173,15 @@ mod tests {
         (child, pid)
     }
 
-    #[cfg(unix)]
-    fn fixture_binary() -> PathBuf {
+    pub(crate) fn fixture_binary() -> PathBuf {
         std::env::current_exe().expect("current test binary")
     }
 
-    #[cfg(unix)]
     #[test]
     fn orphan_child_fixture() {
         if std::env::var_os("LANPATH_LIFECYCLE_CHILD_FIXTURE").is_some() {
-            std::thread::sleep(std::time::Duration::from_secs(30));
+            use std::io::Read;
+            let _ = std::io::stdin().read_exact(&mut [0]);
         }
     }
 
@@ -176,11 +189,14 @@ mod tests {
     fn reap_stale_no_pidfile_is_noop() {
         let dir = std::env::temp_dir().join(format!("pp-test-{}", std::process::id()));
         let pid_path = dir.join("sing-box.pid");
-        reap_stale(&pid_path).unwrap();
+        assert_eq!(
+            reap_stale(&pid_path).unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
         assert!(!pid_path.exists());
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "android"))]
     #[test]
     fn write_and_reap_kills_matching_orphan() {
         let dir = std::env::temp_dir().join(format!("pp-test-reap-{}", std::process::id()));
@@ -197,7 +213,7 @@ mod tests {
         assert!(pid_path.exists());
         assert!(lanpath_common::is_process_alive(pid));
 
-        reap_stale(&pid_path).unwrap();
+        assert_eq!(reap_stale(&pid_path).unwrap(), ProcessStopKind::Forced);
 
         assert!(!pid_path.exists(), "收割后 pidfile 应删除");
         let status = child.wait().unwrap();
@@ -231,12 +247,15 @@ mod tests {
         // The original Child remains authority for ordinary owned-child stop.
         child.kill().unwrap();
         child.wait().unwrap();
-        reap_stale(&pid_path).unwrap();
+        assert_eq!(
+            reap_stale(&pid_path).unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
         assert!(!pid_path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn reap_stale_skips_pid_reuse() {
         // A PID reused by the exact same executable is still a different process.
@@ -249,9 +268,11 @@ mod tests {
         let mut record: PidFile =
             serde_json::from_slice(&std::fs::read(&pid_path).unwrap()).unwrap();
         record.identity.created += 1;
-        std::fs::write(&pid_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let mismatched_record = serde_json::to_vec(&record).unwrap();
+        std::fs::write(&pid_path, &mismatched_record).unwrap();
         assert!(reap_stale(&pid_path).is_err());
         assert!(pid_path.exists(), "mismatched record must be retained");
+        assert_eq!(std::fs::read(&pid_path).unwrap(), mismatched_record);
         assert!(
             lanpath_common::is_process_alive(pid),
             "创建身份不匹配时不得误杀"
@@ -261,7 +282,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn reap_stale_removes_dead_pidfile() {
         let dir = std::env::temp_dir().join(format!("pp-test-dead-{}", std::process::id()));
@@ -274,8 +295,40 @@ mod tests {
         child.kill().unwrap();
         let _ = child.wait();
 
-        reap_stale(&pid_path).unwrap();
+        assert_eq!(
+            reap_stale(&pid_path).unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
         assert!(!pid_path.exists(), "进程已死时 pidfile 应清理");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reap_stale_cleanup_failure_retains_record_and_returns_error() {
+        use std::os::fd::AsRawFd;
+        let dir = std::env::temp_dir().join(format!("pp-test-cleanup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_path = dir.join("sing-box.pid");
+        let (mut child, pid) = fixture_child();
+        write_pid_file(&pid_path, pid, &fixture_binary()).unwrap();
+        let record = std::fs::read(&pid_path).unwrap();
+        let file = std::fs::File::open(&pid_path).unwrap();
+        // procfs permits reading the real record through this descriptor but forbids
+        // unlinking its entry, even for root; no permission or timing races are needed.
+        let unremovable_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+        let result = reap_stale(&unremovable_path);
+        if result.is_err() && child.try_wait().unwrap().is_none() {
+            let _ = child.kill();
+        }
+        let status = child.wait().unwrap();
+        let error = result.unwrap_err();
+
+        assert!(error.contains("cannot remove resolved recovery record"));
+        assert!(!status.success());
+        assert_eq!(std::fs::read(&pid_path).unwrap(), record);
+        assert_eq!(std::fs::read(&unremovable_path).unwrap(), record);
+        drop(file);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

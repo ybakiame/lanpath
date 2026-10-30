@@ -870,8 +870,6 @@ dependencies = [
  "compression-core",
  "flate2",
  "memchr",
- "zstd",
- "zstd-safe",
 ]
 
 [[package]]
@@ -1575,6 +1573,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20ed7f62ce0ae0da1a8b93c3c7104ab7e0760a74491e097c701fff966e945390"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1758,6 +1767,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2397,10 +2416,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "hudsucker"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a1d7c1c828ff6db12ddafb16768ecbac920df6301778d0eb78e95da0e44d94b"
 dependencies = [
- "async-compression",
  "bstr",
  "futures",
  "http",
@@ -2418,7 +2434,6 @@ dependencies = [
  "tokio-graceful",
  "tokio-rustls",
  "tokio-tungstenite",
- "tokio-util",
  "tracing",
 ]
 
@@ -3040,6 +3055,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "cron",
  "flate2",
  "futures",
  "lanpath-common",
@@ -3102,10 +3118,15 @@ name = "lanpath-mitm"
 version = "0.1.4-beta.1"
 dependencies = [
  "async-trait",
+ "brotli 8.0.4",
  "bytes",
  "chrono",
+ "fancy-regex",
+ "flate2",
+ "fs2",
  "futures",
  "http",
+ "http-body",
  "http-body-util",
  "hudsucker",
  "hyper",
@@ -3118,7 +3139,6 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
- "sha1 0.10.7",
  "sha2 0.10.9",
  "thiserror 2.0.19",
  "time",
@@ -3128,6 +3148,8 @@ dependencies = [
  "tracing",
  "uuid",
  "webpki-roots 0.26.11",
+ "windows-sys 0.61.2",
+ "x509-parser",
 ]
 
 [[package]]
@@ -3135,8 +3157,10 @@ name = "lanpath-script"
 version = "0.1.4-beta.1"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "cron",
+ "fs2",
  "lanpath-common",
  "rquickjs",
  "serde",
@@ -4615,6 +4639,7 @@ dependencies = [
  "cookie",
  "cookie_store",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -5278,17 +5303,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
 dependencies = [
  "stable_deref_trait",
-]
-
-[[package]]
-name = "sha1"
-version = "0.10.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -6630,7 +6644,7 @@ dependencies = [
  "rand 0.10.2",
  "rustls",
  "rustls-pki-types",
- "sha1 0.11.0",
+ "sha1",
  "thiserror 2.0.19",
 ]
 
@@ -7942,34 +7956,6 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
-]
-
-[[package]]
-name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
-dependencies = [
- "zstd-sys",
-]
-
-[[package]]
-name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
-dependencies = [
- "cc",
- "pkg-config",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _,
     button::{Button, ButtonVariants as _},
@@ -28,7 +29,14 @@ impl Render for DiagnosticsView {
         } else {
             "输入目标域名后运行；修改输入不会改变下方已完成报告的目标。".into()
         };
-        let mut report_content = div().flex().flex_col().gap_4().p_1();
+        let mut report_content = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .w_full()
+            .gap_4()
+            .p_1()
+            .max_w(gpui_kit::rems(64.0));
         if let Some(completed) = &self.completed {
             let report = &completed.report;
             let heading = format!(
@@ -83,6 +91,8 @@ impl Render for DiagnosticsView {
                         .children((!step.detail.is_empty()).then(|| {
                             div()
                                 .text_sm()
+                                .min_w_0()
+                                .whitespace_normal()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(step.detail.clone())
                         })),
@@ -95,8 +105,9 @@ impl Render for DiagnosticsView {
             );
         }
         div().flex().flex_col().flex_1().min_h_0().min_w_0().gap_3().overflow_y_scrollbar()
-            .child(div().flex().flex_col().gap_3().p_1().flex_shrink_0()
-                .child(div().text_lg().child("连通性诊断"))
+            .child(div().flex().flex_col().min_w_0().w_full().gap_3().p_1().flex_shrink_0()
+                .max_w(gpui_kit::rems(64.0))
+                .child(div().text_lg().font_semibold().child("连通性诊断"))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("检查显式请求路径，不设置系统代理、不启用 TUN，也不能证明系统隧道正常。诊断使用接受运行时已保存的实验配置；不会显示完整配置或 API 密钥。"))
                 .child(div().flex().flex_col().gap_2()
@@ -107,7 +118,7 @@ impl Render for DiagnosticsView {
                         .disabled(self.editing_disabled()))
                     .child(div().text_sm().text_color(cx.theme().muted_foreground)
                         .child("只填域名；留空使用 google.com。Enter 与“运行诊断”执行同一操作。")))
-                .child(div().flex().items_center().gap_2()
+                .child(div().flex().items_center().flex_wrap().gap_2()
                     .child(Button::new("diagnostics-run").primary()
                         .accessibility_id("diagnostics-run").label("运行诊断")
                         .disabled(self.editing_disabled()).loading(self.busy())

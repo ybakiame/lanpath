@@ -1,105 +1,237 @@
 use std::sync::Arc;
 
 use rquickjs::function::{Func, Opt};
-use rquickjs::{Ctx, Object};
+use rquickjs::{Ctx, Exception, IntoJs, Object, Value};
 
 use crate::host::ScriptHost;
+use crate::persistent_store::{DEFAULT_KEY, SHARED_SCOPE};
 
-/// QX 与 Surge 持久化 API 的 scope 前缀。
-const QX_SCOPE_PREFIX: &str = "prefs";
-const SURGE_SCOPE_PREFIX: &str = "pstore";
+/// Explicit vendor keys share one namespace across scripts and dialects. An
+/// omitted key has a private default slot: source identity for Surge, or the
+/// display script name for Stash/Loon.
+fn location<'js>(
+    ctx: &Ctx<'js>,
+    identity: &str,
+    key: Opt<Value<'js>>,
+) -> rquickjs::Result<(String, String)> {
+    match key.0 {
+        None => Ok((format!("script:{identity}"), DEFAULT_KEY.to_owned())),
+        Some(key) if key.is_undefined() => {
+            Ok((format!("script:{identity}"), DEFAULT_KEY.to_owned()))
+        }
+        Some(key) => {
+            let Some(key) = key.as_string() else {
+                return Err(Exception::throw_type(ctx, "storage key must be a string"));
+            };
+            Ok((SHARED_SCOPE.to_owned(), key.to_string()?))
+        }
+    }
+}
 
-/// 无 key 调用时的固定单值槽（模拟 QX 脚本级共享池）。
-const DEFAULT_KEY: &str = "__default__";
+fn read<'js>(
+    ctx: &Ctx<'js>,
+    host: &ScriptHost,
+    scope: &str,
+    key: &str,
+) -> rquickjs::Result<Value<'js>> {
+    match host
+        .store
+        .read(scope, key)
+        .map_err(|e| Exception::throw_message(ctx, &e.to_string()))?
+    {
+        Some(value) => value.into_js(ctx),
+        None => Ok(Value::new_null(ctx.clone())),
+    }
+}
 
-/// 注入 $prefs（QX）：valueForKey / setValueForKey / removeValueForKey。
+/// QX keys are required; removeAllValues clears the shared explicit-key namespace.
+/// Storage errors are thrown rather than returning an apparent successful write.
 pub(crate) fn install_qx<'js>(
     ctx: &Ctx<'js>,
     host: &Arc<ScriptHost>,
-    script_name: &str,
+    _script_name: &str,
+    execution: &super::execution::Execution,
 ) -> rquickjs::Result<()> {
     let prefs = Object::new(ctx.clone())?;
-    let base_scope = format!("{QX_SCOPE_PREFIX}:{script_name}");
-
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
+    let host_read = Arc::clone(host);
+    let read_execution = execution.clone();
     prefs.set(
         "valueForKey",
-        Func::from(
-            move |key: Opt<String>| -> rquickjs::Result<Option<String>> {
-                let k = key.0.unwrap_or_else(|| DEFAULT_KEY.to_string());
-                Ok(s.store.read(&scope, &k))
-            },
-        ),
+        Func::from(move |ctx: Ctx<'js>, key: String| {
+            read_execution.check(&ctx)?;
+            read(&ctx, &host_read, SHARED_SCOPE, &key)
+        }),
     )?;
 
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
+    let host_write = Arc::clone(host);
+    let write_execution = execution.clone();
     prefs.set(
         "setValueForKey",
         Func::from(
-            move |value: String, key: Opt<String>| -> rquickjs::Result<()> {
-                let k = key.0.unwrap_or_else(|| DEFAULT_KEY.to_string());
-                s.store.write(&scope, &k, &value);
-                Ok(())
+            move |ctx: Ctx<'js>, value: String, key: String| -> rquickjs::Result<bool> {
+                write_execution.check(&ctx)?;
+                host_write
+                    .store
+                    .write(SHARED_SCOPE, &key, &value)
+                    .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+                Ok(true)
             },
         ),
     )?;
 
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
+    let host_erase = Arc::clone(host);
+    let erase_execution = execution.clone();
     prefs.set(
         "removeValueForKey",
-        Func::from(move |key: Opt<String>| -> rquickjs::Result<()> {
-            let k = key.0.unwrap_or_else(|| DEFAULT_KEY.to_string());
-            s.store.erase(&scope, &k);
-            Ok(())
+        Func::from(
+            move |ctx: Ctx<'js>, key: String| -> rquickjs::Result<bool> {
+                erase_execution.check(&ctx)?;
+                host_erase
+                    .store
+                    .erase(SHARED_SCOPE, &key)
+                    .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+                Ok(true)
+            },
+        ),
+    )?;
+
+    let host_clear = Arc::clone(host);
+    let clear_execution = execution.clone();
+    prefs.set(
+        "removeAllValues",
+        Func::from(move |ctx: Ctx<'js>| -> rquickjs::Result<bool> {
+            clear_execution.check(&ctx)?;
+            host_clear
+                .store
+                .clear(SHARED_SCOPE)
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+            Ok(true)
         }),
     )?;
 
-    ctx.globals().set("$prefs", prefs)?;
-    Ok(())
+    ctx.globals().set("$prefs", prefs)
 }
 
-/// 注入 $persistentStore（Surge）：read / write / erase。
+/// Surge write(data, [key]): null deletes; successful writes/deletes return
+/// true. Omitted keys refer to the same script source, not its transient hook name.
+/// https://manual.nssurge.com/scripting/api.html
 pub(crate) fn install_surge<'js>(
     ctx: &Ctx<'js>,
     host: &Arc<ScriptHost>,
-    script_name: &str,
+    source_id: &str,
+    execution: &super::execution::Execution,
 ) -> rquickjs::Result<()> {
-    let pstore = Object::new(ctx.clone())?;
-    let base_scope = format!("{SURGE_SCOPE_PREFIX}:{script_name}");
+    let pstore = persistent_store(ctx, host, source_id, StoreDialect::Surge, execution)?;
+    ctx.globals().set("$persistentStore", pstore)
+}
 
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
+/// Stash permits string values only, and defaults to the display script name.
+/// https://stash.wiki/en/script/syntax-and-interface
+pub(crate) fn install_stash<'js>(
+    ctx: &Ctx<'js>,
+    host: &Arc<ScriptHost>,
+    script_name: &str,
+    execution: &super::execution::Execution,
+) -> rquickjs::Result<()> {
+    let pstore = persistent_store(ctx, host, script_name, StoreDialect::Stash, execution)?;
+    ctx.globals().set("$persistentStore", pstore)
+}
+
+/// Loon defaults to $script.name, permits undefined/null deletion, and remove()
+/// clears all script storage, not only the current default slot. Writes report
+/// I/O failure as false; read/reset errors throw instead of masquerading as misses.
+/// https://nsloon.app/en/docs/Script/script_api#5-persistent-storage
+pub(crate) fn install_loon<'js>(
+    ctx: &Ctx<'js>,
+    host: &Arc<ScriptHost>,
+    script_name: &str,
+    execution: &super::execution::Execution,
+) -> rquickjs::Result<()> {
+    let pstore = persistent_store(ctx, host, script_name, StoreDialect::Loon, execution)?;
+    let host_clear = Arc::clone(host);
+    let execution = execution.clone();
+    pstore.set(
+        "remove",
+        Func::from(move |ctx: Ctx<'js>| -> rquickjs::Result<()> {
+            execution.check(&ctx)?;
+            host_clear
+                .store
+                .clear_all()
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+        }),
+    )?;
+    ctx.globals().set("$persistentStore", pstore)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StoreDialect {
+    Surge,
+    Stash,
+    Loon,
+}
+
+fn persistent_store<'js>(
+    ctx: &Ctx<'js>,
+    host: &Arc<ScriptHost>,
+    default_identity: &str,
+    dialect: StoreDialect,
+    execution: &super::execution::Execution,
+) -> rquickjs::Result<Object<'js>> {
+    let pstore = Object::new(ctx.clone())?;
+    let identity = default_identity.to_owned();
+    let host_read = Arc::clone(host);
+    let read_execution = execution.clone();
     pstore.set(
         "read",
-        Func::from(move |key: String| -> rquickjs::Result<Option<String>> {
-            Ok(s.store.read(&scope, &key))
+        Func::from(move |ctx: Ctx<'js>, key: Opt<Value<'js>>| {
+            read_execution.check(&ctx)?;
+            let (scope, key) = location(&ctx, &identity, key)?;
+            read(&ctx, &host_read, &scope, &key)
         }),
     )?;
 
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
+    let identity = default_identity.to_owned();
+    let host_write = Arc::clone(host);
+    let write_execution = execution.clone();
     pstore.set(
         "write",
-        // Surge 语义：$persistentStore.write(data, key) —— 数据在前、key 在后。
-        Func::from(move |data: String, key: String| -> rquickjs::Result<()> {
-            s.store.write(&scope, &key, &data);
-            Ok(())
-        }),
+        Func::from(
+            move |ctx: Ctx<'js>,
+                  data: Opt<Value<'js>>,
+                  key: Opt<Value<'js>>|
+                  -> rquickjs::Result<bool> {
+                write_execution.check(&ctx)?;
+                let (scope, key) = location(&ctx, &identity, key)?;
+                let data = data.0.unwrap_or_else(|| Value::new_undefined(ctx.clone()));
+                let deletes = match dialect {
+                    StoreDialect::Surge => data.is_null(),
+                    StoreDialect::Stash => false,
+                    StoreDialect::Loon => data.is_null() || data.is_undefined(),
+                };
+                let result = if deletes {
+                    host_write.store.erase(&scope, &key).map(|_| ())
+                } else if let Some(value) = data.as_string() {
+                    host_write.store.write(&scope, &key, &value.to_string()?)
+                } else {
+                    let message = if dialect == StoreDialect::Stash {
+                        "storage data must be a string"
+                    } else {
+                        "storage data must be a string or null"
+                    };
+                    return Err(Exception::throw_type(&ctx, message));
+                };
+                if dialect == StoreDialect::Loon {
+                    Ok(result.is_ok())
+                } else {
+                    result.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+                    Ok(true)
+                }
+            },
+        ),
     )?;
-
-    let s = Arc::clone(host);
-    let scope = base_scope.clone();
-    pstore.set(
-        "erase",
-        Func::from(move |key: String| -> rquickjs::Result<()> {
-            s.store.erase(&scope, &key);
-            Ok(())
-        }),
-    )?;
-
-    ctx.globals().set("$persistentStore", pstore)?;
-    Ok(())
+    Ok(pstore)
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;

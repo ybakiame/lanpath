@@ -75,13 +75,12 @@ pub fn remote_kind_str(kind: crate::RemoteKind) -> &'static str {
 }
 
 /// String representation of `ScriptDialect` (matches frontend serde).
-///
-/// QX is merged into the Loon ecosystem; detected QuantumultX is mapped to `Loon`.
 pub fn script_dialect_str(dialect: ScriptDialect) -> &'static str {
     match dialect {
-        ScriptDialect::QuantumultX => "Loon",
+        ScriptDialect::QuantumultX => "QuantumultX",
         ScriptDialect::Surge => "Surge",
         ScriptDialect::Loon => "Loon",
+        ScriptDialect::Stash => "Stash",
     }
 }
 
@@ -188,13 +187,6 @@ mod tests {
         assert!(validate_subscription_url("https://x.com").is_ok());
         assert!(validate_subscription_url("http://x.com").is_ok());
         assert!(validate_subscription_url("ftp://x.com").is_err());
-    }
-
-    #[test]
-    fn script_dialect_str_maps_qx_to_loon() {
-        assert_eq!(script_dialect_str(ScriptDialect::QuantumultX), "Loon");
-        assert_eq!(script_dialect_str(ScriptDialect::Surge), "Surge");
-        assert_eq!(script_dialect_str(ScriptDialect::Loon), "Loon");
     }
 
     #[test]

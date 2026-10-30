@@ -4,6 +4,15 @@ use std::{io, path::PathBuf};
 #[cfg(target_os = "macos")]
 mod macos;
 
+/// The operation actually needed to stop an owned process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessStopKind {
+    /// A termination request succeeded and process exit was confirmed.
+    Forced,
+    /// The process had already exited; no termination request was needed.
+    AlreadyStopped,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessIdentity {
     pub pid: u32,
@@ -51,15 +60,26 @@ impl ProcessIdentity {
         }
     }
 
-    /// Validate and terminate using the SAME kernel object. A reused PID is never authority.
-    pub fn terminate_verified(&self) -> io::Result<()> {
+    /// Bind creation and the live image to one kernel object; never terminate a reused PID.
+    pub fn terminate_verified(&self) -> io::Result<ProcessStopKind> {
         #[cfg(windows)]
         {
             let process = WindowsProcess::open(self.pid, true)?;
-            if process.identity()? != *self {
+            if process.created()? != self.created {
                 return Err(io::Error::other("process identity mismatch"));
             }
-            process.terminate_and_wait(10_000)
+            if process.exited()? {
+                return Ok(ProcessStopKind::AlreadyStopped);
+            }
+            match process.executable() {
+                Ok(exe) if exe == self.exe => process.terminate_and_wait(10_000),
+                Ok(_) => Err(io::Error::other("process identity mismatch")),
+                // Image queries can stop working between the live check and
+                // this query. Only a signalled, creation-matched kernel object
+                // proves absence; an arbitrary query failure is not authority.
+                Err(_) if process.exited()? => Ok(ProcessStopKind::AlreadyStopped),
+                Err(error) => Err(error),
+            }
         }
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
@@ -92,7 +112,7 @@ impl ProcessIdentity {
             if unsafe { libc::poll(&mut poll, 1, 10_000) } <= 0 {
                 return Err(io::Error::other("process exit unresolved"));
             }
-            Ok(())
+            Ok(ProcessStopKind::Forced)
         }
         #[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
         {
@@ -154,13 +174,25 @@ impl WindowsProcess {
         self.0.as_raw_handle()
     }
     pub fn identity(&self) -> io::Result<ProcessIdentity> {
-        use std::os::windows::ffi::OsStringExt;
-        use windows_sys::Win32::{Foundation::FILETIME, System::Threading::*};
+        use windows_sys::Win32::System::Threading::GetProcessId;
+        Ok(ProcessIdentity {
+            pid: unsafe { GetProcessId(self.handle()) },
+            created: self.created()?,
+            exe: self.executable()?,
+        })
+    }
+    fn created(&self) -> io::Result<u64> {
+        use windows_sys::Win32::{Foundation::FILETIME, System::Threading::GetProcessTimes};
         let mut times: [FILETIME; 4] = unsafe { std::mem::zeroed() };
         let p = times.as_mut_ptr();
         if unsafe { GetProcessTimes(self.handle(), p, p.add(1), p.add(2), p.add(3)) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        Ok((u64::from(times[0].dwHighDateTime) << 32) | u64::from(times[0].dwLowDateTime))
+    }
+    fn executable(&self) -> io::Result<PathBuf> {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::System::Threading::QueryFullProcessImageNameW;
         let mut path = [0u16; 32_768];
         let mut size = path.len() as u32;
         if unsafe { QueryFullProcessImageNameW(self.handle(), 0, path.as_mut_ptr(), &mut size) }
@@ -168,11 +200,9 @@ impl WindowsProcess {
         {
             return Err(io::Error::last_os_error());
         }
-        Ok(ProcessIdentity {
-            pid: unsafe { GetProcessId(self.handle()) },
-            created: (u64::from(times[0].dwHighDateTime) << 32) | u64::from(times[0].dwLowDateTime),
-            exe: PathBuf::from(std::ffi::OsString::from_wide(&path[..size as usize])),
-        })
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(
+            &path[..size as usize],
+        )))
     }
     pub fn exited(&self) -> io::Result<bool> {
         use windows_sys::Win32::{
@@ -185,22 +215,102 @@ impl WindowsProcess {
             _ => Err(io::Error::last_os_error()),
         }
     }
-    pub fn terminate_and_wait(&self, timeout: u32) -> io::Result<()> {
+    pub fn terminate_and_wait(&self, timeout: u32) -> io::Result<ProcessStopKind> {
         use windows_sys::Win32::{Foundation::WAIT_OBJECT_0, System::Threading::*};
-        if !self.exited()? && unsafe { TerminateProcess(self.handle(), 1) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let kind = if self.exited()? {
+            ProcessStopKind::AlreadyStopped
+        } else if unsafe { TerminateProcess(self.handle(), 1) } != 0 {
+            ProcessStopKind::Forced
+        } else {
+            let error = io::Error::last_os_error();
+            if !self.exited()? {
+                return Err(error);
+            }
+            ProcessStopKind::AlreadyStopped
+        };
         if unsafe { WaitForSingleObject(self.handle(), timeout) } != WAIT_OBJECT_0 {
             return Err(io::Error::other("process exit unresolved"));
         }
-        Ok(())
+        Ok(kind)
     }
 }
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::WindowsProcess;
+    use super::{ProcessStopKind, WindowsProcess};
     use std::os::windows::io::AsHandle;
+
+    struct ChildFixture(std::process::Child);
+
+    impl ChildFixture {
+        fn spawn() -> Self {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "process::identity::tests::stop_child_fixture",
+                    "--nocapture",
+                ])
+                .env("LANPATH_PROCESS_STOP_FIXTURE", "1")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            Self(crate::no_window(&mut command).spawn().unwrap())
+        }
+    }
+
+    impl Drop for ChildFixture {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn stop_child_fixture() {
+        if std::env::var_os("LANPATH_PROCESS_STOP_FIXTURE").is_some() {
+            use std::io::Read;
+            let _ = std::io::stdin().read_exact(&mut [0]);
+        }
+    }
+
+    #[test]
+    fn native_termination_returns_forced_only_for_the_actual_request() {
+        let mut child = ChildFixture::spawn();
+        let process = WindowsProcess::duplicate(child.0.as_handle()).unwrap();
+        assert_eq!(
+            process.terminate_and_wait(10_000).unwrap(),
+            ProcessStopKind::Forced
+        );
+        assert!(!child.0.wait().unwrap().success());
+        assert_eq!(
+            process.terminate_and_wait(10_000).unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
+    }
+
+    #[test]
+    fn verified_identity_already_exited_is_not_a_forced_stop() {
+        let mut child = ChildFixture::spawn();
+        let identity = super::ProcessIdentity::capture(child.0.id()).unwrap();
+        // Keep an exact kernel handle alive after exit, as stale recovery may encounter.
+        let process = WindowsProcess::duplicate(child.0.as_handle()).unwrap();
+        let mut reused = identity.clone();
+        reused.created ^= 1;
+        assert!(reused.terminate_verified().is_err());
+        assert!(!process.exited().unwrap());
+        drop(child.0.stdin.take());
+        assert!(child.0.wait().unwrap().success());
+        assert!(reused.terminate_verified().is_err());
+        assert_eq!(
+            identity.terminate_verified().unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
+        assert_eq!(
+            process.terminate_and_wait(10_000).unwrap(),
+            ProcessStopKind::AlreadyStopped
+        );
+    }
 
     #[test]
     fn duplicated_process_handle_survives_original_owner_drop() {

@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+const DEFAULT_BYTE_CAPACITY: usize = 32 * 1024 * 1024;
 /// 一条被捕获的 HTTP 交换记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrafficRecord {
@@ -27,35 +28,76 @@ pub trait TrafficRecorder: Send + Sync {
     fn list(&self) -> Vec<TrafficRecord>;
 }
 
-/// 内存环形缓冲记录器，最多保留 `cap` 条记录。
+/// Retains the newest records within both the count and owned-allocation budgets.
 #[derive(Debug)]
 pub struct MemoryRecorder {
     cap: usize,
-    inner: Mutex<VecDeque<TrafficRecord>>,
+    byte_cap: usize,
+    inner: Mutex<RecordBuffer>,
+}
+
+#[derive(Debug, Default)]
+struct RecordBuffer {
+    bytes: usize,
+    records: VecDeque<(usize, TrafficRecord)>,
 }
 
 impl MemoryRecorder {
     pub fn new(cap: usize) -> Self {
+        Self::with_limits(cap, DEFAULT_BYTE_CAPACITY)
+    }
+
+    pub fn with_limits(cap: usize, byte_cap: usize) -> Self {
         Self {
             cap,
-            inner: Mutex::new(VecDeque::new()),
+            byte_cap,
+            inner: Mutex::new(RecordBuffer::default()),
         }
     }
 }
 
+fn retained_bytes(record: &TrafficRecord) -> usize {
+    let mut bytes = std::mem::size_of::<(usize, TrafficRecord)>()
+        .saturating_add(record.method.capacity())
+        .saturating_add(record.url.capacity())
+        .saturating_add(record.request_body.as_ref().map_or(0, String::capacity))
+        .saturating_add(record.response_body.as_ref().map_or(0, String::capacity));
+    for headers in [&record.request_headers, &record.response_headers] {
+        bytes = bytes.saturating_add(
+            headers
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(String, String)>()),
+        );
+        for (name, value) in headers {
+            bytes = bytes
+                .saturating_add(name.capacity())
+                .saturating_add(value.capacity());
+        }
+    }
+    bytes
+}
+
 impl TrafficRecorder for MemoryRecorder {
     fn record(&self, rec: TrafficRecord) {
-        if self.cap == 0 {
+        if self.cap == 0 || self.byte_cap == 0 {
+            return;
+        }
+        let cost = retained_bytes(&rec);
+        if cost > self.byte_cap {
             return;
         }
         let mut inner = self
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if inner.len() >= self.cap {
-            inner.pop_front();
+        while inner.records.len() >= self.cap || inner.bytes > self.byte_cap - cost {
+            let Some((removed, _)) = inner.records.pop_front() else {
+                break;
+            };
+            inner.bytes -= removed;
         }
-        inner.push_back(rec);
+        inner.bytes += cost;
+        inner.records.push_back((cost, rec));
     }
 
     fn list(&self) -> Vec<TrafficRecord> {
@@ -63,7 +105,11 @@ impl TrafficRecorder for MemoryRecorder {
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        inner.iter().cloned().collect()
+        inner
+            .records
+            .iter()
+            .map(|(_, record)| record.clone())
+            .collect()
     }
 }
 
@@ -103,5 +149,44 @@ mod tests {
         let recorder = MemoryRecorder::new(0);
         recorder.record(record("http://example.com/"));
         assert!(recorder.list().is_empty());
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_even_before_count_capacity() {
+        let recorder = MemoryRecorder::with_limits(10, 8192);
+        for path in ["first", "second", "third"] {
+            let mut rec = record(path);
+            rec.response_body = Some(path.repeat(600));
+            recorder.record(rec);
+        }
+        let records = recorder.list();
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.url.as_str())
+                .collect::<Vec<_>>(),
+            ["second", "third"]
+        );
+        assert_eq!(
+            records[0].response_body.as_deref(),
+            Some("second".repeat(600).as_str())
+        );
+    }
+
+    #[test]
+    fn one_oversized_record_does_not_destroy_existing_history() {
+        let recorder = MemoryRecorder::with_limits(10, 8192);
+        recorder.record(record("retained"));
+        let mut oversized = record("oversized");
+        oversized.request_body = Some("x".repeat(8193));
+        recorder.record(oversized);
+        assert_eq!(
+            recorder
+                .list()
+                .iter()
+                .map(|record| record.url.as_str())
+                .collect::<Vec<_>>(),
+            ["retained"]
+        );
     }
 }

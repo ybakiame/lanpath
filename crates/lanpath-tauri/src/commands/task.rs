@@ -20,7 +20,7 @@ pub async fn list_tasks(state: State<'_, AppState>) -> Result<Vec<TaskScriptView
 
 /// Manually run a scheduled task; returns the script `$done` output JSON string.
 #[tauri::command]
-pub async fn run_task(state: State<'_, AppState>, name: String) -> Result<String, String> {
+pub async fn run_task(state: State<'_, AppState>, id: String) -> Result<String, String> {
     let scheduler = {
         let lock = state.client.lock().await;
         let client = lock
@@ -31,7 +31,7 @@ pub async fn run_task(state: State<'_, AppState>, name: String) -> Result<String
             .ok_or_else(|| "任务调度器未就绪".to_string())?
     };
     let output = scheduler
-        .run_now(&name)
+        .run_now(&id)
         .await
         .map_err(|e| format!("运行任务失败: {e}"))?;
     Ok(output.0.to_string())

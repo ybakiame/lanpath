@@ -16,8 +16,9 @@ use super::PanelFeatures;
 /// - `clash_api_enabled` → `experimental.clash_api = {external_controller:
 ///   "127.0.0.1:port", external_ui: "ui-<choice>", external_ui_download_url:
 ///   <by choice>, default_mode: <rule_mode>}`, append `secret` when non-empty (when template
-///   already has `experimental.clash_api`, replace it wholesale); also injects baseline
-///   `clash_mode` rules at the head of `route.rules` (see [`inject_mode_baseline_rules`]).
+///   already has `experimental.clash_api`, replace it wholesale; when disabled, remove it,
+///   including inherited dashboard assets); also injects baseline `clash_mode` rules at the
+///   head of `route.rules` (see [`inject_mode_baseline_rules`]).
 /// - `dns_fakeip_enabled` (opt-in) → fakeip DNS server + the FakeIP DNS rule (non-CN A →
 ///   `geolocation-!cn` → fakeip) + `experimental.cache_file` deep merge (see
 ///   `apply_fakeip_mode` in `core_config::fakeip`); the CN-split `route.rule_set` registry is
@@ -123,6 +124,11 @@ pub fn apply_singbox_panel_features(composed: &mut Value, features: &PanelFeatur
         }
         // Outbound mode baseline rules (Clash API enabled implies mode switching is possible).
         inject_mode_baseline_rules(obj);
+    } else if let Some(experimental) = composed
+        .get_mut("experimental")
+        .and_then(Value::as_object_mut)
+    {
+        experimental.remove("clash_api");
     }
 
     // Android: after VpnService (TUN) takes over full traffic, system resolver is unavailable,
@@ -248,6 +254,14 @@ pub fn apply_singbox_panel_features(composed: &mut Value, features: &PanelFeatur
 /// override), omitted when on. Idempotent: any existing rule with `action = "resolve"` (user /
 /// template supplied) suppresses the injection. Positioned immediately after the hijack-dns
 /// rule (before the IPv6 reject), falling back to the rules head when hijack-dns is absent.
+///
+/// Resolve the MITM whitelist's complement, plus modes with a preceding terminal baseline.
+/// Reuse the whitelist's match-only AND children so exclusions, host/port pairs and `main-in`
+/// stay identical; never nest its outbound/action. This changes no routing priority: IPv6
+/// rejection, mode baselines and local overrides still precede MITM. A whitelisted domain
+/// remains unresolved until `mitm-return`, where this exemption cannot match; consequently
+/// IP-only policies cannot classify that domain before MITM. Explicit resolve rules and DNS
+/// takeover remain user-owned, and no whitelist means the original unconditional resolve.
 fn inject_resolve_rule(obj: &mut serde_json::Map<String, Value>, ipv6_enabled: bool) {
     let route = obj
         .entry("route")
@@ -271,6 +285,42 @@ fn inject_resolve_rule(obj: &mut serde_json::Map<String, Value>, ipv6_enabled: b
     rule.insert("action".to_string(), json!("resolve"));
     if !ipv6_enabled {
         rule.insert("strategy".to_string(), json!("ipv4_only"));
+    }
+    if let Some((mitm_at, predicates)) = rules_arr
+        .iter()
+        .enumerate()
+        .find(|(_, r)| {
+            r.get("outbound").and_then(Value::as_str) == Some("lanpath-mitm")
+                && r.get("type").and_then(Value::as_str) == Some("logical")
+                && r.get("mode").and_then(Value::as_str) == Some("and")
+        })
+        .and_then(|(at, r)| r.get("rules").map(|rules| (at, rules)))
+        .filter(|(_, rules)| rules.as_array().is_some_and(|rules| !rules.is_empty()))
+    {
+        let mut alternatives = Vec::with_capacity(3);
+        alternatives.push(json!({
+            "type": "logical", "mode": "and", "rules": predicates, "invert": true
+        }));
+        for mode in ["direct", "global"] {
+            let terminal_before_mitm = rules_arr[..mitm_at].iter().any(|candidate| {
+                candidate.as_object().is_some_and(|candidate| {
+                    candidate.get("clash_mode").and_then(Value::as_str) == Some(mode)
+                        && candidate.get("outbound").and_then(Value::as_str).is_some()
+                        && candidate
+                            .get("action")
+                            .is_none_or(|action| action == "route")
+                        && candidate
+                            .keys()
+                            .all(|key| matches!(key.as_str(), "clash_mode" | "outbound" | "action"))
+                })
+            });
+            if terminal_before_mitm {
+                alternatives.push(json!({ "clash_mode": mode }));
+            }
+        }
+        rule.insert("type".to_string(), json!("logical"));
+        rule.insert("mode".to_string(), json!("or"));
+        rule.insert("rules".to_string(), Value::Array(alternatives));
     }
     let at = rules_arr
         .iter()

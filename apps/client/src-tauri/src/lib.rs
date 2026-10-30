@@ -203,6 +203,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop::commands::install_mitm_ca,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop::commands::remove_mitm_ca,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop::commands::mitm_ca_trust_status,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop::commands::get_mitm_whitelist,
@@ -274,8 +276,11 @@ pub fn run() {
     // 由 lanpath-engine 的 OS 级父子绑定与 PID 收割兜底，本层不为此负责。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { .. } = event {
-            desktop::cleanup_on_exit(app_handle);
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            if let Err(error) = desktop::cleanup_on_exit(app_handle) {
+                tracing::error!(%error, "退出已取消：系统代理或核心仍需恢复");
+                api.prevent_exit();
+            }
         }
     });
     #[cfg(any(target_os = "android", target_os = "ios"))]

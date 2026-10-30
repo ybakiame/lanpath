@@ -14,12 +14,11 @@ pub(crate) struct MitmSettingsDocument {
 impl BusinessService {
     pub(crate) fn mitm_settings(&self) -> LanpathResult<MitmSettingsDocument> {
         let config = self.client_config()?;
-        let service = lanpath_client::mitm::MitmService::new(&self.root);
         Ok(MitmSettingsDocument {
             hostnames: config.mitm.hostnames.clone(),
             enabled: config.mitm_enabled,
             script_dialect: config.mitm.script_dialect,
-            whitelist: service.whitelist(&config),
+            whitelist: MitmWhitelistView::load(&self.root, &config),
         })
     }
 

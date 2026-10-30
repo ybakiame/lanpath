@@ -1,18 +1,24 @@
-//! An explicitly owned experimental directory, guarded by a lifetime OS file lock.
+//! Independent GPUI data directory, guarded by a lifetime OS file lock.
 
 use lanpath_common::{LanpathError, LanpathResult};
 use std::fs::{self, File, Metadata, OpenOptions, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-const OWNER_FILE: &str = ".lanpath-experimental";
-const OWNER_CONTENT: &[u8] = b"lanpath-experimental-data-root-v1\n";
-const LOCK_FILE: &str = ".lanpath-experimental.lock";
+#[path = "data_root_identity.rs"]
+mod identity;
+
+const OWNER_FILE: &str = ".lanpath-gpui";
+const OWNER_CONTENT: &[u8] = b"lanpath-gpui-data-root-v1\n";
+const LOCK_FILE: &str = ".lanpath-gpui.lock";
 
 pub(crate) struct DataRoot {
     path: PathBuf,
+    id: uuid::Uuid,
     // Never unlink this file: contenders must always lock the same inode.
     _lock: File,
+    #[cfg(windows)]
+    _directories: crate::windows_file::DirectoryLocks,
 }
 
 impl DataRoot {
@@ -27,7 +33,10 @@ impl DataRoot {
         // All production/foreign-directory checks precede even mkdir or lock creation.
         check_ancestors(&absolute)?;
         let _ = needs_initialization(&absolute)?;
+        #[cfg(not(windows))]
         fs::create_dir_all(&absolute)?;
+        #[cfg(windows)]
+        let directories = crate::windows_access::private_root(&absolute)?;
         check_ancestors(&absolute)?;
         let path = absolute.canonicalize()?;
         check_ancestors(&path)?;
@@ -54,8 +63,13 @@ impl DataRoot {
         check_ancestors(&path)?;
         check_open_file(&lock, &lock_path)?;
         if initialize {
-            // Another writer must not turn an initially empty directory into a
-            // foreign directory while we are claiming it.
+            // Restrict the newly claimed root before writing identity/secrets.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+            }
+            // Another writer must not turn this empty root into a foreign one.
             for entry in fs::read_dir(&path)? {
                 if entry?.file_name() != LOCK_FILE {
                     return Err(invalid(
@@ -75,11 +89,55 @@ impl DataRoot {
         check_tree(&path)?;
         fs::create_dir_all(path.join("logs"))?;
         fs::create_dir_all(path.join("cache"))?;
-        Ok(Self { path, _lock: lock })
+        let id = identity::load_or_create(&path)?;
+        Ok(Self {
+            path,
+            id,
+            _lock: lock,
+            #[cfg(windows)]
+            _directories: directories,
+        })
     }
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub(crate) fn id(&self) -> uuid::Uuid {
+        self.id
+    }
+
+    pub(crate) fn is_in_use(path: &Path) -> LanpathResult<bool> {
+        let path = validate_owned_root(path)?;
+        let lock_path = path.join(LOCK_FILE);
+        let file = file_options().read(true).write(true).open(&lock_path)?;
+        check_open_file(&file, &lock_path)?;
+        match file.try_lock() {
+            Ok(()) => {
+                file.unlock()?;
+                Ok(false)
+            }
+            Err(TryLockError::WouldBlock) => Ok(true),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn lock_activation(&self) -> LanpathResult<File> {
+        validate_owned_root(self.path())?;
+        let path = self.path.join(".gpui-activation.lock");
+        let file = file_options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)?;
+        check_open_file(&file, &path)?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(TryLockError::WouldBlock) => Err(invalid(
+                "an activation server is already bound to this root",
+            )),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 }
 
@@ -92,7 +150,7 @@ impl Drop for DataRoot {
 pub(crate) fn default_data_dir() -> LanpathResult<PathBuf> {
     #[cfg(windows)]
     {
-        Ok(environment_directory("LOCALAPPDATA")?.join("LanpathExperimental"))
+        Ok(environment_directory("LOCALAPPDATA")?.join(crate::product::DATA_DIR_NAME))
     }
     #[cfg(not(windows))]
     {
@@ -100,8 +158,82 @@ pub(crate) fn default_data_dir() -> LanpathResult<PathBuf> {
             Some(value) => absolute_environment_directory("XDG_DATA_HOME", value)?,
             None => environment_directory("HOME")?.join(".local/share"),
         };
-        Ok(base.join("lanpath-experimental"))
+        Ok(base.join(crate::product::DATA_DIR_NAME))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DataMode {
+    Standard,
+    Portable,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DataLocation {
+    pub mode: DataMode,
+    pub path: PathBuf,
+}
+
+impl DataLocation {
+    /// An invalid portable marker is an error, never a standard-directory fallback.
+    pub(crate) fn resolve(executable: &Path, explicit: Option<&Path>) -> LanpathResult<Self> {
+        let executable = std::path::absolute(executable)?;
+        let directory = executable
+            .parent()
+            .ok_or_else(|| invalid("executable has no parent"))?;
+        check_ancestors_for_links(directory)?;
+        let marker = directory.join(crate::product::PORTABLE_MARKER);
+        let mode = if metadata_if_present(&marker)?.is_some() {
+            if check_regular_file(&marker)?.len() != 0 {
+                return Err(invalid(
+                    "the GPUI Portable marker must be an empty ordinary file",
+                ));
+            }
+            DataMode::Portable
+        } else {
+            DataMode::Standard
+        };
+        let path = match explicit {
+            Some(path) => {
+                if path.as_os_str().is_empty()
+                    || path.components().any(|part| part == Component::ParentDir)
+                {
+                    return Err(invalid(
+                        "explicit GPUI data path must be nonempty and contain no '..'",
+                    ));
+                }
+                std::path::absolute(path)?
+            }
+            None if mode == DataMode::Portable => directory.join("data"),
+            None => default_data_dir()?,
+        };
+        // Admission remains DataRoot::open's responsibility; resolution never
+        // retries a legacy or production directory after any failure.
+        Ok(Self { mode, path })
+    }
+}
+
+pub(crate) fn validate_owned_root(path: &Path) -> LanpathResult<PathBuf> {
+    check_ancestors(path)?;
+    check_owner(path)?;
+    check_tree(path)?;
+    Ok(path.canonicalize()?)
+}
+
+pub(crate) fn validate_tree(path: &Path) -> LanpathResult<()> {
+    check_ancestors_for_links(path)?;
+    check_tree(path)
+}
+
+fn check_ancestors_for_links(path: &Path) -> LanpathResult<()> {
+    for ancestor in path.ancestors() {
+        if let Some(metadata) = metadata_if_present(ancestor)?
+            && (is_link(&metadata) || !metadata.is_dir())
+        {
+            return Err(invalid("source path contains a link or non-directory"));
+        }
+    }
+    Ok(())
 }
 
 fn environment_directory(name: &str) -> LanpathResult<PathBuf> {

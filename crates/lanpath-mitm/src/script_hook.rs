@@ -1,303 +1,496 @@
-//! 脚本钩子引擎。
-//!
-//! 将 http-request / http-response 类型的脚本按 URL 规则挂载到 MITM 流量路径：
-//! 请求/响应经过时命中规则的脚本依次执行，`$done` 返回值决定流量走向；脚本超时
-//! 或抛异常时 no-op（透传原值）并记录警告。
-//!
-//! `$done` 语义（对齐 Surge / Loon / QX 三方交集）：
-//!
-//! | 返回值 | 行为 |
-//! |--------|------|
-//! | `$done()` / `$done({})` | 透传 |
-//! | `$done({url})` | 替换请求 URL（请求阶段，不更新 Host 头） |
-//! | `$done({status})` / `{statusCode}` | 改写响应状态码（QX 别名兼容） |
-//! | `$done({headers})` | 整体替换 headers |
-//! | `$done({body})` | 替换 body |
-//! | `$done({response: {status, headers, body}})` | 脚本合成响应（请求阶段 mock） |
-//! | `$done({abort: true})` | 中止请求（502 断开语义） |
-//! | `$done("...")` | QX 风格：字符串直接作为新 body |
-
+//! Per-source script hooks. Traffic bodies remain bytes until a selected text API boundary.
+use crate::{Pattern, PatternError};
 use std::sync::Arc;
 
-use lanpath_script::{ScriptHost, ScriptKind, ScriptOutput, ScriptWorker};
+use lanpath_script::{
+    ScriptCompletion, ScriptDialect, ScriptExecutionMetadata, ScriptHost, ScriptKind, ScriptLimits,
+    ScriptOutput, ScriptWorker,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+use uuid::Uuid;
 
-/// 一条脚本钩子规则：URL 正则匹配 + 脚本源码。
+/// Explicit local memory envelope, including Surge's documented request hard cap.
+pub const SURGE_BODY_ENVELOPE: usize = 32 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HookMode {
+    #[default]
+    Modify,
+    Echo,
+}
+
 pub struct ScriptRule {
     pub name: String,
-    pub kind: lanpath_script::ScriptKind,
-    pub pattern: regex::Regex,
+    pub kind: ScriptKind,
+    pub pattern: Pattern,
     pub requires_body: bool,
     pub max_size: usize,
     pub source: String,
-    /// Surge/Loon 模块 `argument=` 模板（`{key}` 占位已由调用方替换后的字符串）；
-    /// `None` 表示脚本不声明模块参数（不注入 `$argument`）。
     pub argument: Option<String>,
+    pub dialect: ScriptDialect,
+    pub mode: HookMode,
+    pub enabled: bool,
+    pub timeout_ms: Option<u64>,
+    pub binary: bool,
+    pub full_headers: bool,
+    /// Stable source identity, not the display name or rule's ordinal position.
+    pub source_id: String,
+    pub module_id: Option<String>,
 }
 
-/// 脚本钩子对流量的处置结果。
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum HookOutcome {
-    /// 透传（url / headers / body 可能已被脚本就地改写）。
     #[default]
     Continue,
-    /// `$done({response: {...}})`：脚本合成响应。
     Mock(MockResponse),
-    /// `$done({abort: true})`：中止请求。
     Abort,
 }
 
-/// 脚本合成的响应（`$done({response: {...}})`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
-    pub body: Option<String>,
+    pub body: Option<Vec<u8>>,
 }
 
-/// 脚本钩子引擎：持有脚本执行 worker（收敛 `!Send` 的 QuickJS 执行）与规则列表。
+/// The outgoing request, retained for response scripts rather than rebuilt from response fields.
+#[derive(Debug, Clone, Default)]
+pub struct RequestContext {
+    pub id: Uuid,
+    pub url: String,
+    pub method: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
 pub struct ScriptHookEngine {
     worker: ScriptWorker,
-    dialect: lanpath_script::ScriptDialect,
     rules: Vec<ScriptRule>,
 }
 
-/// 单条脚本执行期间的可变流量上下文。
-struct HookCtx<'a> {
-    url: Option<&'a mut String>,
-    status: Option<&'a mut u16>,
-    headers: &'a mut Vec<(String, String)>,
-    body: &'a mut Option<String>,
-}
-
 impl ScriptHookEngine {
-    /// 构造脚本钩子引擎（内部创建 [`ScriptWorker`]，对外 API 保持不变）。
-    pub fn new(
-        host: Arc<ScriptHost>,
-        dialect: lanpath_script::ScriptDialect,
-        limits: lanpath_script::ScriptLimits,
-        rules: Vec<ScriptRule>,
-    ) -> Self {
-        let worker = ScriptWorker::new(host, limits);
+    pub fn new(host: Arc<ScriptHost>, limits: ScriptLimits, rules: Vec<ScriptRule>) -> Self {
         Self {
-            worker,
-            dialect,
+            worker: ScriptWorker::new(host, limits),
             rules,
         }
     }
 
-    /// 运行请求阶段钩子：命中规则且类型为 [`ScriptKind::HttpRequest`] 的脚本依次执行。
-    ///
-    /// 脚本 arg 为 `{url, method, path, headers, body}`（body 仅在 `requires_body`
-    /// 且不超过 `max_size` 时注入）。返回首个非透传的处置结果（Mock/Abort 短路后续
-    /// 脚本）。
+    fn selected(&self, url: &str, kind: ScriptKind) -> Result<Option<&ScriptRule>, PatternError> {
+        for rule in &self.rules {
+            if rule.enabled && rule.kind == kind && rule.pattern.is_match(url)? {
+                return Ok(Some(rule));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn request_body_limit(&self, url: &str) -> Result<Option<usize>, PatternError> {
+        self.transport_body_limit(url, ScriptKind::HttpRequest, usize::MAX)
+    }
+
+    pub fn response_body_limit(&self, url: &str) -> Result<Option<usize>, PatternError> {
+        self.transport_body_limit(url, ScriptKind::HttpResponse, usize::MAX)
+    }
+
+    /// Original request-body context is bounded by the selected response hook's own limit.
+    pub fn request_context_body_limit(&self, url: &str) -> Result<Option<usize>, PatternError> {
+        self.response_body_limit(url)
+    }
+
+    pub(crate) fn transport_body_limit(
+        &self,
+        url: &str,
+        kind: ScriptKind,
+        other_dialect_cap: usize,
+    ) -> Result<Option<usize>, PatternError> {
+        Ok(self
+            .selected(url, kind)?
+            .filter(|rule| rule.requires_body)
+            .map(|rule| {
+                if rule.dialect == ScriptDialect::Surge {
+                    rule.max_size.min(SURGE_BODY_ENVELOPE)
+                } else {
+                    rule.max_size.min(other_dialect_cap)
+                }
+            }))
+    }
+
+    pub fn rejects_request_body_overflow(&self, url: &str) -> Result<bool, PatternError> {
+        Ok(self
+            .selected(url, ScriptKind::HttpRequest)?
+            .is_some_and(|rule| rule.requires_body && rule.dialect == ScriptDialect::Surge))
+    }
+
     pub async fn run_request_hooks(
         &self,
+        request_id: Uuid,
         url: &mut String,
         method: &str,
         headers: &mut Vec<(String, String)>,
-        body: &mut Option<String>,
+        body: &mut Option<Vec<u8>>,
     ) -> HookOutcome {
-        let mut ctx = HookCtx {
-            url: Some(url),
-            status: None,
-            headers,
-            body,
+        let rule = match self.selected(url, ScriptKind::HttpRequest) {
+            Ok(Some(rule)) => rule,
+            Ok(None) => return HookOutcome::Continue,
+            Err(error) => {
+                tracing::warn!(%error, "request script regex rejected traffic");
+                return HookOutcome::Abort;
+            }
         };
-        for rule in self
-            .rules
-            .iter()
-            .filter(|r| r.kind == ScriptKind::HttpRequest)
+        if rule.requires_body
+            && rule.dialect == ScriptDialect::Surge
+            && body
+                .as_ref()
+                .is_some_and(|bytes| bytes.len() > rule.max_size.min(SURGE_BODY_ENVELOPE))
         {
-            let cur_url = ctx
-                .url
-                .as_deref()
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-            if !rule.pattern.is_match(&cur_url) {
-                continue;
-            }
-            let mut arg = serde_json::json!({
-                "url": cur_url,
-                "method": method,
-                "path": url_path(&cur_url),
-                "headers": headers_to_object(ctx.headers),
-            });
-            inject_body(&mut arg, rule, ctx.body);
-            let outcome = self.run_one(rule, Some(arg), &mut ctx).await;
-            if outcome != HookOutcome::Continue {
-                return outcome;
-            }
+            return HookOutcome::Abort;
         }
-        HookOutcome::Continue
+        if rule.requires_body && body.is_none() {
+            return if rule.dialect == ScriptDialect::Surge {
+                HookOutcome::Abort
+            } else {
+                HookOutcome::Continue
+            };
+        }
+        let Some(request) = request_value(request_id, url, method, headers, body.as_deref(), rule)
+        else {
+            return HookOutcome::Continue;
+        };
+        match self.run_one(rule, json!({"$request":request})).await {
+            Some(out) => apply_output(&out, rule, Some(url), None, headers, body),
+            None => HookOutcome::Continue,
+        }
     }
 
-    /// 运行响应阶段钩子：命中规则且类型为 [`ScriptKind::HttpResponse`] 的脚本依次执行。
-    ///
-    /// 脚本 arg 为 `{status, statusCode, headers, body}`（`statusCode` 为 QX 别名；
-    /// body 规则同请求阶段）。Mock 结果整体替换响应；Abort 语义由调用方处理。
     pub async fn run_response_hooks(
         &self,
-        url: &str,
+        request: &RequestContext,
         status: &mut u16,
         headers: &mut Vec<(String, String)>,
-        body: &mut Option<String>,
+        body: &mut Option<Vec<u8>>,
     ) -> HookOutcome {
-        let mut ctx = HookCtx {
-            url: None,
-            status: Some(status),
-            headers,
-            body,
+        let rule = match self.selected(&request.url, ScriptKind::HttpResponse) {
+            Ok(Some(rule)) => rule,
+            Ok(None) => return HookOutcome::Continue,
+            Err(error) => {
+                tracing::warn!(%error, "response script regex rejected traffic");
+                return HookOutcome::Abort;
+            }
         };
-        for rule in self
-            .rules
-            .iter()
-            .filter(|r| r.kind == ScriptKind::HttpResponse)
-        {
-            if !rule.pattern.is_match(url) {
-                continue;
-            }
-            let mut arg = serde_json::json!({
-                "status": *ctx.status.as_deref().unwrap_or(&0),
-                "statusCode": *ctx.status.as_deref().unwrap_or(&0),
-                "headers": headers_to_object(ctx.headers),
-            });
-            inject_body(&mut arg, rule, ctx.body);
-            let outcome = self.run_one(rule, Some(arg), &mut ctx).await;
-            if outcome != HookOutcome::Continue {
-                return outcome;
-            }
+        let mut response =
+            json!({"status":*status,"statusCode":*status,"headers":headers_value(headers, false)});
+        if !inject_body(&mut response, body.as_deref(), rule, true) {
+            return HookOutcome::Continue;
         }
-        HookOutcome::Continue
+        if rule.full_headers {
+            response["headers"] = headers_value(headers, true);
+        }
+        response["fullHeaders"] = headers_value(headers, true);
+        // The response's body mode does not require an original request to have a body.
+        let Some(mut request_arg) = request_value(
+            request.id,
+            &request.url,
+            &request.method,
+            &request.headers,
+            None,
+            rule,
+        ) else {
+            return HookOutcome::Continue;
+        };
+        if let Some(bytes) = request
+            .body
+            .as_deref()
+            .filter(|bytes| bytes.len() <= rule.max_size)
+        {
+            inject_body(&mut request_arg, Some(bytes), rule, false);
+        }
+        match self
+            .run_one(rule, json!({"$request":request_arg,"$response":response}))
+            .await
+        {
+            Some(out) => apply_output(&out, rule, None, Some(status), headers, body),
+            None => HookOutcome::Continue,
+        }
     }
 
-    /// 执行单条规则：经 [`ScriptWorker`] 串行执行，成功时回写输出，失败/超时仅记录警告。
-    async fn run_one(
-        &self,
-        rule: &ScriptRule,
-        arg: Option<serde_json::Value>,
-        ctx: &mut HookCtx<'_>,
-    ) -> HookOutcome {
+    async fn run_one(&self, rule: &ScriptRule, arg: Value) -> Option<ScriptOutput> {
+        let identity = if rule.source_id.is_empty() {
+            &rule.name
+        } else {
+            &rule.source_id
+        };
         match self
             .worker
-            .run_script(
+            .run_script_with_timeout(
                 &rule.source,
                 rule.kind,
-                arg,
+                Some(arg),
                 rule.argument.as_deref(),
-                self.dialect,
-                &rule.name,
+                rule.dialect,
+                ScriptExecutionMetadata {
+                    name: rule.name.clone(),
+                    source_id: identity.clone(),
+                    module_id: rule.module_id.clone(),
+                    binary_body_mode: rule.binary,
+                },
+                rule.timeout_ms,
             )
             .await
         {
-            Ok(ScriptOutput(out)) => apply_output(&out, ctx),
-            Err(e) => {
-                tracing::warn!(script = %rule.name, "hook script failed: {e}");
-                HookOutcome::Continue
+            Ok(output) => Some(output),
+            Err(error) => {
+                tracing::warn!(script = %rule.name, "hook script failed: {error}");
+                None
             }
         }
     }
 }
 
-/// headers 列表 → JSON 对象（同名键后者覆盖前者）。
-fn headers_to_object(headers: &[(String, String)]) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    for (k, v) in headers {
-        map.insert(k.clone(), serde_json::Value::String(v.clone()));
+fn request_value(
+    request_id: Uuid,
+    url: &str,
+    method: &str,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+    rule: &ScriptRule,
+) -> Option<Value> {
+    let mut value = json!({"id":request_id,"url":url,"method":method,"path":url_path(url),"headers":headers_value(headers,rule.full_headers),"fullHeaders":headers_value(headers,true)});
+    if !inject_body(&mut value, body, rule, body.is_some()) {
+        return None;
     }
-    serde_json::Value::Object(map)
+    Some(value)
 }
 
-/// 从绝对 URL 提取 path（含 query），供 QX 风格 `$request.path`。
+fn inject_body(value: &mut Value, body: Option<&[u8]>, rule: &ScriptRule, required: bool) -> bool {
+    if !rule.requires_body {
+        return true;
+    }
+    let Some(bytes) = body else { return !required };
+    if bytes.len() > rule.max_size {
+        return false;
+    }
+    value["__bodyBytes"] = json!(bytes);
+    value["__binary"] = json!(rule.binary);
+    if !rule.binary {
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return false;
+        };
+        value["body"] = json!(text);
+    }
+    true
+}
+
+fn headers_value(headers: &[(String, String)], full: bool) -> Value {
+    if full {
+        return json!(
+            headers
+                .iter()
+                .map(|(field, value)| json!({"field":field,"value":value}))
+                .collect::<Vec<_>>()
+        );
+    }
+    let mut map = Map::new();
+    for (name, value) in headers {
+        let key = map
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(name))
+            .cloned()
+            .unwrap_or_else(|| name.clone());
+        match map.get_mut(&key) {
+            Some(Value::Array(values)) => values.push(json!(value)),
+            Some(existing) => *existing = json!([existing.clone(), value]),
+            None => {
+                map.insert(key, if full { json!([value]) } else { json!(value) });
+            }
+        }
+    }
+    Value::Object(map)
+}
+
 fn url_path(url: &str) -> String {
-    let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
-    match after_scheme.find('/') {
-        Some(idx) => after_scheme[idx..].to_string(),
+    let authority = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    match authority.find(['/', '?']) {
+        Some(index) if authority.as_bytes()[index] == b'?' => format!("/{}", &authority[index..]),
+        Some(index) => authority[index..].to_string(),
         None => "/".to_string(),
     }
 }
 
-/// 规则要求 body 且未超过 `max_size` 时，把 body 注入 arg。
-fn inject_body(arg: &mut serde_json::Value, rule: &ScriptRule, body: &Option<String>) {
-    if !rule.requires_body {
-        return;
+fn apply_output(
+    output: &ScriptOutput,
+    rule: &ScriptRule,
+    url: Option<&mut String>,
+    status: Option<&mut u16>,
+    headers: &mut Vec<(String, String)>,
+    body: &mut Option<Vec<u8>>,
+) -> HookOutcome {
+    let out = &output.0;
+    if output.1 == ScriptCompletion::Undefined || out.is_null() {
+        return if matches!(rule.dialect, ScriptDialect::Loon | ScriptDialect::Stash) {
+            HookOutcome::Abort
+        } else {
+            HookOutcome::Continue
+        };
     }
-    let Some(b) = body else { return };
-    if b.len() > rule.max_size {
-        return;
-    }
-    if let Some(obj) = arg.as_object_mut() {
-        obj.insert("body".to_string(), serde_json::Value::String(b.clone()));
-    }
-}
-
-/// 把 `$done` 返回值回写到流量上下文，并给出处置结果。
-fn apply_output(out: &serde_json::Value, ctx: &mut HookCtx<'_>) -> HookOutcome {
-    // QX 风格：$done("...") 字符串直接作为新 body。
-    if let Some(s) = out.as_str() {
-        *ctx.body = Some(s.to_string());
+    if let Some(text) = out.as_str() {
+        if rule.requires_body {
+            *body = Some(text.as_bytes().to_vec());
+        }
         return HookOutcome::Continue;
     }
-    let Some(obj) = out.as_object() else {
+    let Some(object) = out.as_object() else {
         return HookOutcome::Continue;
     };
-    if obj.get("abort").and_then(|v| v.as_bool()) == Some(true) {
+    if let Some(option) = object.keys().find(|key| {
+        !matches!(
+            key.as_str(),
+            "url"
+                | "status"
+                | "statusCode"
+                | "headers"
+                | "body"
+                | "bodyBytes"
+                | "response"
+                | "abort"
+        )
+    }) {
+        tracing::warn!(script = %rule.name, %option, "unsupported script completion option; mutation rejected");
+        return HookOutcome::Continue;
+    }
+    if object.get("abort").and_then(Value::as_bool) == Some(true) {
         return HookOutcome::Abort;
     }
-    if let Some(resp) = obj.get("response").and_then(|v| v.as_object()) {
-        return HookOutcome::Mock(mock_from_json(resp));
+    if rule.mode == HookMode::Echo || object.contains_key("response") {
+        let response = if rule.mode == HookMode::Echo {
+            object
+        } else {
+            let Some(response) = object.get("response").and_then(Value::as_object) else {
+                return HookOutcome::Continue;
+            };
+            response
+        };
+        return match mock_response(response) {
+            Some(response) => HookOutcome::Mock(response),
+            None => {
+                tracing::warn!(script = %rule.name, "invalid script response ignored");
+                HookOutcome::Continue
+            }
+        };
     }
-    if let Some(u) = obj.get("url").and_then(|v| v.as_str())
-        && let Some(url) = ctx.url.as_deref_mut()
+    // Validate the whole mutation before committing any field.
+    if let Some(value) = object.get("url").filter(|_| url.is_some())
+        && !value.as_str().is_some_and(|value| {
+            value.parse::<http::Uri>().is_ok_and(|uri| {
+                matches!(uri.scheme_str(), Some("http" | "https")) && uri.authority().is_some()
+            })
+        })
     {
-        *url = u.to_string();
+        return HookOutcome::Continue;
     }
-    if let Some(status) = ctx.status.as_deref_mut() {
-        let new_status = obj
-            .get("status")
-            .or_else(|| obj.get("statusCode"))
-            .and_then(|v| v.as_u64())
-            .and_then(|s| u16::try_from(s).ok());
-        if let Some(s) = new_status {
-            *status = s;
+    let new_headers = match object.get("headers") {
+        Some(value) => match parse_headers(value) {
+            Some(headers) => Some(headers),
+            None => return HookOutcome::Continue,
+        },
+        None => None,
+    };
+    let new_body = if rule.requires_body {
+        match output_body(object) {
+            Ok(body) => body,
+            Err(()) => return HookOutcome::Continue,
         }
+    } else {
+        None
+    };
+    let new_status = match object.get("status").or_else(|| object.get("statusCode")) {
+        Some(value) => match parse_status(value) {
+            Some(status) => Some(status),
+            None => return HookOutcome::Continue,
+        },
+        None => None,
+    };
+    if let (Some(target), Some(value)) = (url, object.get("url").and_then(Value::as_str)) {
+        *target = value.to_owned();
     }
-    if let Some(h) = obj.get("headers").and_then(|v| v.as_object()) {
-        ctx.headers.clear();
-        ctx.headers.extend(
-            h.iter()
-                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())),
-        );
+    if let (Some(target), Some(value)) = (status, new_status) {
+        *target = value;
     }
-    if let Some(b) = obj.get("body").and_then(|v| v.as_str()) {
-        *ctx.body = Some(b.to_string());
+    if let Some(value) = new_headers {
+        *headers = value;
+    }
+    if let Some(value) = new_body {
+        *body = Some(value);
     }
     HookOutcome::Continue
 }
 
-/// `{response: {...}}` 对象 → [`MockResponse`]（status / statusCode 均可，缺省 200）。
-fn mock_from_json(resp: &serde_json::Map<String, serde_json::Value>) -> MockResponse {
-    let status = resp
-        .get("status")
-        .or_else(|| resp.get("statusCode"))
-        .and_then(|v| v.as_u64())
-        .and_then(|s| u16::try_from(s).ok())
-        .unwrap_or(200);
-    let headers = resp
-        .get("headers")
-        .and_then(|v| v.as_object())
-        .map(|h| {
-            h.iter()
-                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    let body = resp
-        .get("body")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    MockResponse {
+fn parse_status(value: &Value) -> Option<u16> {
+    let code = if let Some(code) = value.as_u64() {
+        u16::try_from(code).ok()?
+    } else {
+        let text = value.as_str()?;
+        text.split_whitespace()
+            .find_map(|part| part.parse::<u16>().ok())?
+    };
+    (100..=599).contains(&code).then_some(code)
+}
+
+fn parse_headers(value: &Value) -> Option<Vec<(String, String)>> {
+    let mut headers = Vec::new();
+    if let Some(fields) = value.as_array() {
+        for field in fields {
+            headers.push((
+                field.get("field")?.as_str()?.to_owned(),
+                field.get("value")?.as_str()?.to_owned(),
+            ));
+        }
+        return Some(headers);
+    }
+    for (name, value) in value.as_object()? {
+        match value {
+            Value::String(value) => headers.push((name.clone(), value.clone())),
+            Value::Array(values) => {
+                for value in values {
+                    headers.push((name.clone(), value.as_str()?.to_string()));
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(headers)
+}
+
+fn output_body(object: &Map<String, Value>) -> Result<Option<Vec<u8>>, ()> {
+    let Some(value) = object.get("bodyBytes").or_else(|| object.get("body")) else {
+        return Ok(None);
+    };
+    if let Some(text) = value.as_str() {
+        return Ok(Some(text.as_bytes().to_vec()));
+    }
+    let Some(values) = value.as_array() else {
+        return Err(());
+    };
+    values
+        .iter()
+        .map(|value| value.as_u64().and_then(|n| u8::try_from(n).ok()).ok_or(()))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn mock_response(object: &Map<String, Value>) -> Option<MockResponse> {
+    let status = match object.get("status").or_else(|| object.get("statusCode")) {
+        Some(status) => parse_status(status)?,
+        None => 200,
+    };
+    let headers = match object.get("headers") {
+        Some(headers) => parse_headers(headers)?,
+        None => Vec::new(),
+    };
+    Some(MockResponse {
         status,
         headers,
-        body,
-    }
+        body: output_body(object).ok()?,
+    })
 }

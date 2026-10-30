@@ -51,7 +51,7 @@ async fn fetch_snippet_aggregates_and_recompiles_cached_rules() {
     let base = spawn_remote_server(|base| {
         format!(
             "[rewrite_local]\n\
-                 ^https?://example\\.com/api/(.*) url-and-header https://cdn.example.com/api/$1\n\
+                 ^https?://example\\.com/api/(.*) url 302 https://cdn.example.com/api/$1\n\
                  ^https?://example\\.com/rsp script-response-body {base}/hook.js\n\
                  \n\
                  [task_local]\n\
@@ -71,18 +71,24 @@ async fn fetch_snippet_aggregates_and_recompiles_cached_rules() {
         dialect: ScriptDialect::QuantumultX,
         ..RemoteResource::default()
     }];
+    manager.save(&remotes).unwrap();
 
     let report = manager.fetch_all(&remotes).await;
     assert_eq!(report.fetched, 1);
     assert_eq!(report.rewrites, 1);
     assert_eq!(report.scripts, 1);
     assert_eq!(report.tasks, 1);
-    // url-and-header 的 header 部分无法表达，记一条偏差（见 import::qx）。
-    assert_eq!(report.warnings.len(), 1, "warnings: {:?}", report.warnings);
-    assert!(report.warnings[0].contains("url-and-header"));
-
-    // cache file generated
-    assert!(dir.path().join("remote_cache/rules.json").exists());
+    assert!(
+        report.warnings.is_empty(),
+        "warnings: {:?}",
+        report.warnings
+    );
+    let id = crate::remote::activation::remote_module_id(&remotes[0]);
+    assert!(
+        dir.path()
+            .join(format!("remote_cache/{}.json", id.replace(':', "-")))
+            .exists()
+    );
 
     // load_cached: recompile Regex, backfill source, deduplicate hostname
     let merged = manager.load_cached().unwrap();
@@ -92,7 +98,10 @@ async fn fetch_snippet_aggregates_and_recompiles_cached_rules() {
         r"^https?://example\.com/api/(.*)"
     );
     match &merged.rewrites[0].kind {
-        lanpath_mitm::RewriteKind::UrlRewrite { target } => {
+        lanpath_mitm::RewriteKind::Redirect {
+            target,
+            status: 302,
+        } => {
             assert_eq!(target, "https://cdn.example.com/api/$1");
         }
         other => panic!("unexpected kind: {other:?}"),
@@ -114,7 +123,7 @@ async fn partial_url_failure_records_warning_without_blocking_others() {
     let base = spawn_remote_server(|base| {
         format!(
             "[rewrite_local]\n\
-                 ^https?://example\\.com/api/(.*) url-and-header https://cdn.example.com/api/$1\n\
+                 ^https?://example\\.com/api/(.*) url 302 https://cdn.example.com/api/$1\n\
                  ^https?://example\\.com/rsp script-response-body {base}/missing.js\n"
         )
     })
@@ -136,6 +145,7 @@ async fn partial_url_failure_records_warning_without_blocking_others() {
             ..RemoteResource::default()
         },
     ];
+    manager.save(&remotes).unwrap();
 
     let report = manager.fetch_all(&remotes).await;
     // Both remotes fetched successfully; bad's hook script 404 skipped
@@ -143,7 +153,10 @@ async fn partial_url_failure_records_warning_without_blocking_others() {
     assert_eq!(report.scripts, 1); // only good script
     assert_eq!(report.rewrites, 1); // bad's rewrite still cached
     assert!(
-        report.warnings.iter().any(|w| w.contains("missing.js")),
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("download failed")),
         "warnings: {:?}",
         report.warnings
     );

@@ -61,7 +61,7 @@ impl ObservationService {
         self.store().await.map(|_| ())
     }
 
-    pub(crate) async fn start(&self, port: u16) -> Result<(), String> {
+    pub(crate) async fn start(&self, port: u16, secret: &str) -> Result<(), String> {
         let store = self.store().await?;
         let mut tracker = self.tracker.lock().await;
         if tracker.is_some() {
@@ -69,7 +69,7 @@ impl ObservationService {
         }
         *tracker = Some(start_connection_tracker(
             port,
-            String::new(),
+            secret.to_owned(),
             Some(store.clone()),
         ));
         Ok(())

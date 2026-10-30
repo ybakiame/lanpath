@@ -8,6 +8,8 @@ use lanpath_client::{core_management::ManagedCore, cores::CoreDownloadStage};
 use super::{CoreManagementView, CoreSelectionChanged};
 
 enum Mutation {
+    #[cfg(windows)]
+    Bundled,
     Download(String),
     Select(PathBuf),
     Delete(PathBuf),
@@ -72,6 +74,13 @@ impl CoreManagementView {
             });
         }));
         cx.notify();
+    }
+
+    #[cfg(windows)]
+    pub(super) fn install_bundled(&mut self, cx: &mut Context<Self>) {
+        if !self.selection_disabled() {
+            self.mutate(Mutation::Bundled, cx);
+        }
     }
 
     pub(super) fn download(&mut self, version: String, cx: &mut Context<Self>) {
@@ -141,6 +150,8 @@ impl CoreManagementView {
         self.working = true;
         self.error = None;
         self.stage = Some(match &mutation {
+            #[cfg(windows)]
+            Mutation::Bundled => "正在验证并安装内置管理核心".into(),
             Mutation::Download(version) => format!("准备下载 {version}"),
             Mutation::Select(_) => "正在探测并保存选中核心".into(),
             Mutation::Delete(_) => "正在删除核心版本目录".into(),
@@ -150,33 +161,28 @@ impl CoreManagementView {
         self.task = Some(cx.spawn(async move |this, cx| {
             let (sender, mut receiver) = mpsc::unbounded();
             let work = cx.background_spawn(async move {
-                // Runtime's blocking status getter must run outside its Tokio block_on.
-                let result = core
-                    .running()
-                    .and_then(|running| {
-                        if running {
-                            Err("核心运行期间不可修改核心文件或选择".into())
-                        } else {
-                            Ok(())
-                        }
-                    })
-                    .and_then(|()| match mutation {
-                        Mutation::Download(version) => {
-                            let progress = |stage| {
-                                let _ = sender.unbounded_send(Update::Stage(stage));
-                            };
-                            core.block_on(service.download_with_progress(&version, &progress))
-                                .and_then(|result| {
-                                    result.map(|_| ()).map_err(|error| error.to_string())
-                                })
-                        }
-                        Mutation::Select(path) => {
-                            service.select(&path).map_err(|error| error.to_string())
-                        }
-                        Mutation::Delete(path) => {
-                            service.delete(&path).map_err(|error| error.to_string())
-                        }
-                    });
+                let result = core.mutate_core_inventory(|| match mutation {
+                    #[cfg(windows)]
+                    Mutation::Bundled => core.business().and_then(|business| {
+                        crate::privileged::install_bundled_core(business.data_dir())
+                            .map_err(|error| error.to_string())
+                    }),
+                    Mutation::Download(version) => {
+                        let progress = |stage| {
+                            let _ = sender.unbounded_send(Update::Stage(stage));
+                        };
+                        core.block_on(service.download_with_progress(&version, &progress))
+                            .and_then(|result| {
+                                result.map(|_| ()).map_err(|error| error.to_string())
+                            })
+                    }
+                    Mutation::Select(path) => {
+                        service.select(&path).map_err(|error| error.to_string())
+                    }
+                    Mutation::Delete(path) => {
+                        service.delete(&path).map_err(|error| error.to_string())
+                    }
+                });
                 let local = service.list_local().map_err(|error| error.to_string());
                 let _ = sender.unbounded_send(Update::Finished(result, local));
             });

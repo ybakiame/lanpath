@@ -19,7 +19,7 @@ export default function TasksTab({ tasks, isLoading, error }: TasksTabProps) {
   const [runningTask, setRunningTask] = useState<string | null>(null);
 
   const runMutation = useMutation({
-    mutationFn: ({ name }: { name: string }) => runTask(name),
+    mutationFn: ({ id }: { id: string; name: string }) => runTask(id),
     onSuccess: (output, { name }) => {
       setRunResult({ name, output });
       setActionError(null);
@@ -32,11 +32,11 @@ export default function TasksTab({ tasks, isLoading, error }: TasksTabProps) {
     onSettled: () => setRunningTask(null),
   });
 
-  const handleRunTask = (name: string) => {
-    setRunningTask(name);
+  const handleRunTask = (task: TaskScriptView) => {
+    setRunningTask(task.id);
     setActionError(null);
     setRunResult(null);
-    runMutation.mutate({ name });
+    runMutation.mutate({ id: task.id, name: task.name });
   };
 
   const displayError = error ?? actionError;
@@ -72,7 +72,7 @@ export default function TasksTab({ tasks, isLoading, error }: TasksTabProps) {
                   </Table.Header>
                   <Table.Body>
                     {tasks.map((task) => (
-                      <Table.Row key={task.name}>
+                      <Table.Row key={task.id}>
                         <Table.Cell className="max-w-[180px] truncate">
                           <span title={task.name}>{task.name}</span>
                         </Table.Cell>
@@ -86,9 +86,9 @@ export default function TasksTab({ tasks, isLoading, error }: TasksTabProps) {
                           <Button
                             size="sm"
                             variant="secondary"
-                            isPending={runningTask === task.name}
+                            isPending={runningTask === task.id}
                             isDisabled={runningTask !== null}
-                            onPress={() => void handleRunTask(task.name)}
+                            onPress={() => void handleRunTask(task)}
                           >
                             运行
                           </Button>

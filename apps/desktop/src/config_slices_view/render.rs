@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _,
     button::{Button, ButtonVariants as _},
@@ -32,11 +33,14 @@ impl Render for ConfigSlicesView {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .gap_2()
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child("结构化配置")
                     .child(
@@ -62,6 +66,10 @@ impl Render for ConfigSlicesView {
                     .role(Role::Status)
                     .aria_label(status.clone())
                     .text_sm()
+                    .flex_shrink_0()
+                    .min_w_0()
+                    .max_h_16()
+                    .overflow_y_scrollbar()
                     .text_color(if self.error.is_some() {
                         cx.theme().danger
                     } else {
@@ -72,6 +80,8 @@ impl Render for ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child(
                         Button::new("slices-section-dns")
@@ -102,6 +112,7 @@ impl Render for ConfigSlicesView {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
                     .overflow_y_scrollbar()
                     .child(match self.section {
                         Section::Dns => self.render_dns(disabled, cx).into_any_element(),
@@ -126,6 +137,7 @@ pub(super) fn field(
         .flex()
         .flex_col()
         .flex_1()
+        .min_w_0()
         .gap_1()
         .child(div().text_sm().child(label.clone()))
         .child(Input::new(input).aria_label(label).disabled(disabled))
@@ -140,7 +152,7 @@ pub(super) fn section_title(
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().child(title.into()))
+        .child(div().font_semibold().child(title.into()))
         .child(
             div()
                 .text_sm()

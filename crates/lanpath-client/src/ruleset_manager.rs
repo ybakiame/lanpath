@@ -114,29 +114,96 @@ pub async fn ensure_builtin_rule_sets(
     .await
 }
 
+/// GPUI preparation localizes only declared remote built-ins, using the same
+/// admitted request policy as the rest of this preparation batch.
+pub async fn prepare_builtin_rule_sets(
+    data_dir: &Path,
+    config: &Value,
+    context: &crate::RemoteFetchContext,
+) -> BTreeMap<String, PathBuf> {
+    let needed = |tag: &str| {
+        config
+            .pointer("/route/rule_set")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| {
+                entries.iter().any(|entry| {
+                    is_remote_entry(entry) && entry.get("tag").and_then(Value::as_str) == Some(tag)
+                })
+            })
+    };
+    ensure_selected_with_downloader(data_dir, needed, Some(context), |rel| async move {
+        if !context.allows_network() {
+            return Err("core request proxy is not ready; no cached rule set".into());
+        }
+        // The shared fetcher applies the saved GitHub prefix once. Never append
+        // the old direct-download fallback or wrap an already-prefixed URL.
+        for (_, url) in mirror_urls(rel, "") {
+            // Preserve the whole-mirror budget even when the shared transport retries.
+            match tokio::time::timeout(MIRROR_TIMEOUT, context.fetch_bytes(&url, MIRROR_TIMEOUT))
+                .await
+            {
+                Ok(Ok(bytes)) if !bytes.is_empty() => return Ok(bytes),
+                _ => {}
+            }
+        }
+        Err("rule set mirrors unavailable through the saved request policy".into())
+    })
+    .await
+}
+
 /// 下载逻辑可注入的 ensure 实现（测试用桩替换真实镜像下载，消除网络依赖）。
 async fn ensure_with_downloader<F, Fut>(data_dir: &Path, download: F) -> BTreeMap<String, PathBuf>
 where
-    F: Fn(&str) -> Fut,
-    Fut: std::future::Future<Output = Result<bytes::Bytes, String>>,
+    F: Fn(&'static str) -> Fut,
+    Fut: Future<Output = Result<bytes::Bytes, String>>,
+{
+    ensure_selected_with_downloader(data_dir, |_| true, None, download).await
+}
+
+async fn ensure_selected_with_downloader<F, Fut>(
+    data_dir: &Path,
+    needed: impl Fn(&str) -> bool,
+    context: Option<&crate::RemoteFetchContext>,
+    download: F,
+) -> BTreeMap<String, PathBuf>
+where
+    F: Fn(&'static str) -> Fut,
+    Fut: Future<Output = Result<bytes::Bytes, String>>,
 {
     let mut available = BTreeMap::new();
     for (tag, rel) in BUILTIN_RULE_SETS {
+        if !needed(tag) {
+            continue;
+        }
         let path = rule_set_path(data_dir, tag);
         if std::fs::metadata(&path).is_ok_and(|m| m.len() > 0) {
             available.insert(tag.to_string(), path);
             continue;
         }
+        if let Some(context) = context
+            && let Err(error) = context.check_write(&path)
+        {
+            tracing::warn!(tag, %error, "规则集发布被活动输入保护拒绝");
+            continue;
+        }
         match download(rel).await {
-            Ok(bytes) if !bytes.is_empty() => match write_atomic(&path, &bytes) {
-                Ok(()) => {
-                    tracing::info!(tag, "内置规则集下载完成");
-                    available.insert(tag.to_string(), path);
+            Ok(bytes) if !bytes.is_empty() => {
+                let written: lanpath_common::LanpathResult<()> = match context {
+                    Some(context) => {
+                        crate::remote::atomic_write_with_context(&path, &bytes, Some(context))
+                    }
+                    None => write_atomic(&path, &bytes).map_err(Into::into),
+                };
+                match written {
+                    Ok(()) => {
+                        tracing::info!(tag, "内置规则集下载完成");
+                        available.insert(tag.to_string(), path);
+                    }
+                    Err(e) => {
+                        tracing::warn!(tag, error = %e, "内置规则集写入失败");
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(tag, error = %e, "内置规则集写入失败");
-                }
-            },
+            }
             Ok(_) => tracing::warn!(tag, "内置规则集下载为空，降级启动"),
             Err(e) => {
                 tracing::warn!(tag, error = %e, "内置规则集全部镜像下载失败，降级启动");
@@ -207,7 +274,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// 规则集物化报告（缺失 tag + 被移除的引用规则数）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MaterializeReport {
-    /// 未能本地化的内置 tag（降级移除）。
+    /// 实际声明但未能本地化、或被引用却未定义的内置 tag。
     pub missing_tags: Vec<String>,
     /// 因引用缺失规则集而被移除的 `route.rules` 条数。
     pub stripped_route_rules: usize,
@@ -217,7 +284,7 @@ pub struct MaterializeReport {
 
 /// 对合成完成的配置做规则集物化（见模块文档方案第 2 步）。
 ///
-/// - `route.rule_set` 中属于内置 5 tag 的条目：可用 → 改写为 `type: local`（保留 tag /
+/// - `route.rule_set` 中的内置远程条目：可用 → 改写为 `type: local`（保留 tag /
 ///   format，指向本地绝对路径）；缺失 → 移除条目；
 /// - `route.rules` / `dns.rules` 中引用任一缺失 tag 的规则整条移除（降级）；
 /// - 非内置 tag（用户自定义 local / remote 规则集）一律不动。
@@ -228,14 +295,26 @@ pub fn materialize_rule_sets(
     data_dir: &Path,
     available: &BTreeMap<String, PathBuf>,
 ) -> MaterializeReport {
-    let mut report = MaterializeReport::default();
-    let builtin: Vec<String> = builtin_tags().into_iter().map(String::from).collect();
-    let missing: Vec<String> = builtin
+    let missing_tags = BUILTIN_RULE_SETS
         .iter()
-        .filter(|tag| !available.contains_key(*tag))
-        .cloned()
+        .filter(|(tag, _)| {
+            !available.contains_key(*tag)
+                && config
+                    .pointer("/route/rule_set")
+                    .and_then(Value::as_array)
+                    .is_some_and(|entries| {
+                        entries.iter().any(|entry| {
+                            is_remote_entry(entry)
+                                && entry.get("tag").and_then(Value::as_str) == Some(*tag)
+                        })
+                    })
+        })
+        .map(|(tag, _)| (*tag).to_owned())
         .collect();
-    report.missing_tags = missing.clone();
+    let mut report = MaterializeReport {
+        missing_tags,
+        ..Default::default()
+    };
 
     // route.rule_set：把 remote 内置条目改写为本地文件；仍不可用的 remote 条目移除。
     // 已经是 `type: local` 的条目（例如用户自行下载、与内置 tag 同名的自定义规则集）保持
@@ -265,15 +344,16 @@ pub fn materialize_rule_sets(
                 return true;
             };
             !(is_remote_entry(entry)
-                && builtin.iter().any(|b| b == tag)
+                && BUILTIN_RULE_SETS.iter().any(|(builtin, _)| *builtin == tag)
                 && !available.contains_key(tag))
         });
     }
 
-    // 引用缺失 tag 的规则整条移除（route.rules / dns.rules）。
+    // Local/inline definitions are authoritative even when the legacy cache is absent.
     report.stripped_route_rules =
-        strip_rules_referencing(config.pointer_mut("/route/rules"), &missing);
-    report.stripped_dns_rules = strip_rules_referencing(config.pointer_mut("/dns/rules"), &missing);
+        strip_rules_referencing(config.pointer_mut("/route/rules"), &report.missing_tags);
+    report.stripped_dns_rules =
+        strip_rules_referencing(config.pointer_mut("/dns/rules"), &report.missing_tags);
 
     // 兜底：任何引用「route.rule_set 中不存在」的 tag 的规则都会被 sing-box 拒绝启动
     // （规则集可被用户删除、或尚未下载），这里统一剥离，核心仍然可起。
@@ -282,6 +362,13 @@ pub fn materialize_rule_sets(
         strip_rules_referencing(config.pointer_mut("/route/rules"), &undefined);
     report.stripped_dns_rules +=
         strip_rules_referencing(config.pointer_mut("/dns/rules"), &undefined);
+    for tag in undefined {
+        if BUILTIN_RULE_SETS.iter().any(|(builtin, _)| *builtin == tag)
+            && !report.missing_tags.contains(&tag)
+        {
+            report.missing_tags.push(tag);
+        }
+    }
     let _ = data_dir; // 路径已包含在 available 中；保留参数以稳定 API 语义
     report
 }

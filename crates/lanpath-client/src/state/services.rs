@@ -40,8 +40,7 @@ impl ClientState {
                 ports.push((self.config.mixed_port.saturating_add(1), "MITM 回流入站"));
             }
             if let Err(e) = (self.port_probe)(&ports) {
-                self.rollback_mitm_started().await;
-                return Err(e);
+                return Err(self.rollback_mitm_started(e).await);
             }
         }
 
@@ -76,32 +75,83 @@ impl ClientState {
         }
 
         if let Err(e) = core.start(config_json).await {
-            self.rollback_mitm_started().await;
-            return Err(e);
+            return Err(self.rollback_mitm_started(e).await);
         }
         self.core = Some(core);
 
+        // Script core-policy requests must avoid recursion via the actual MITM return inbound.
+        let port = config_json
+            .get("inbounds")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|inbounds| {
+                inbounds
+                    .iter()
+                    .find(|inbound| inbound["tag"] == "mitm-return")
+            })
+            .and_then(|inbound| inbound["listen_port"].as_u64())
+            .and_then(|port| u16::try_from(port).ok())
+            .unwrap_or(self.config.mixed_port);
+        let endpoint = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        if let Err(error) = self.wait_for_core_endpoint(endpoint).await {
+            self.stop().await?;
+            return Err(error);
+        }
+        self.http.set_core_port(Some(port));
         if self.config.system_proxy_enabled {
             // System proxy always points to core mixed main entry (MITM hangs after core).
             let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), self.config.mixed_port);
+            self.http.set_system_proxy_owned(true);
             if let Err(e) = self.sysproxy.enable(addr).await {
-                tracing::error!(%addr, "Enabling system proxy failed, rolling back core and MITM");
-                self.stop_core().await;
-                self.rollback_mitm_started().await;
-                return Err(e);
+                // Apply/notification failure may already have changed global settings.
+                if let Err(restore) = self.sysproxy.disable().await {
+                    return Err(lanpath_common::LanpathError::Client(format!(
+                        "{e}; system proxy restoration failed, core retained: {restore}"
+                    )));
+                }
+                self.http.set_system_proxy_owned(false);
+                self.stop_core().await?;
+                self.http.set_core_port(None);
+                return Err(self.rollback_mitm_started(e).await);
             }
         }
 
         Ok(())
     }
 
-    pub(crate) async fn stop_core(&mut self) {
-        if let Some(core) = self.core.take()
-            && let Err(e) = core.stop().await
-        {
-            // Stop failure is not silent: when Android bridge stop (VpnService orderly shutdown) fails, log
-            // warning for problem diagnosis; frontend polling still reflects real running state via is_running.
-            tracing::warn!(error = %e, "Stopping core failed");
+    pub(crate) async fn stop_core(&mut self) -> LanpathResult<()> {
+        if let Some(core) = self.core.as_ref() {
+            core.stop().await?;
+            self.core = None;
+        }
+        Ok(())
+    }
+
+    async fn wait_for_core_endpoint(&self, endpoint: SocketAddr) -> LanpathResult<()> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if !match self.core.as_ref() {
+                Some(core) => core.is_running().await,
+                None => false,
+            } {
+                return Err(lanpath_common::LanpathError::Client(
+                    "核心在就绪前退出".into(),
+                ));
+            }
+            if tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                tokio::net::TcpStream::connect(endpoint),
+            )
+            .await
+            .is_ok_and(|result| result.is_ok())
+            {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(lanpath_common::LanpathError::Client(format!(
+                    "核心入口 {endpoint} 未就绪"
+                )));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
 }

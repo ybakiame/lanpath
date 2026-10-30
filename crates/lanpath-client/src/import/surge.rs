@@ -1,385 +1,402 @@
-//! Surge dialect parsing (`[Script]`, `[URL Rewrite]`, `[Header Rewrite]`,
-//! `[Body Rewrite]`, `[Map Local]`).
+//! Public plaintext Surge grammar. Specifications: https://manual.nssurge.com/scripting/overview.html
+//! and https://manual.nssurge.com/http/{url-rewrite,header-rewrite,body-rewrite,map-local}.html.
 
-use lanpath_mitm::{Phase, RewriteKind};
-use lanpath_script::{ScriptDialect, ScriptKind};
+use lanpath_mitm::{HookMode, Phase, RewriteKind, RewriteRule, ScriptRule};
+use lanpath_script::{ScriptDialect, ScriptKind, TaskScript};
+use std::collections::HashMap;
 
 use super::utils::*;
 
-/// Surge / Loon `[Script]` line parsing: `name = type=...,pattern=...,script-path=...`.
-///
-/// | type | Internal Rule | Description |
-/// |------|----------|------|
-/// | `http-response` | `ScriptRule{HttpResponse}` | default `requires-body=false`, `max-size=131072` |
-/// | `http-request` | `ScriptRule{HttpRequest}` | same as above |
-/// | `cron` | `TaskScript` | `cronexp` 5-part prefixed with `"0 "` to become 6-part |
-///
-/// Loon and Surge parameter name differences (`http-types` / `require-body`) are aliased.
 pub(super) fn parse_surge_script(
     cfg: &mut super::ImportedConfig,
     dialect: ScriptDialect,
     line: &str,
 ) {
-    let Some(eq) = line.find('=') else {
+    let first = line.split_whitespace().next().unwrap_or_default();
+    let (name, params) = if matches!(first, "http-request" | "http-response" | "cron") {
+        let parts = split_tokens_keep_quoted(line);
+        let kind = parts.first().map(String::as_str).unwrap_or_default();
+        let value = parts
+            .get(1)
+            .map(|value| strip_quotes(value))
+            .unwrap_or_default();
+        let Some(mut params) = parse_kv_params(&parts.get(2..).unwrap_or_default().join(" "))
+        else {
+            cfg.warn(
+                "script",
+                line,
+                "malformed or duplicate script option; not activated",
+            );
+            return;
+        };
+        params.insert("type".into(), kind.into());
+        params.insert(
+            if kind == "cron" { "cronexp" } else { "pattern" }.into(),
+            value.into(),
+        );
+        let name = params
+            .get("script-path")
+            .map(|url| derive_name_from_url(url))
+            .unwrap_or_default();
+        (name, params)
+    } else if let Some((name, rest)) = line.split_once('=') {
+        let Some(params) = parse_kv_params(rest) else {
+            cfg.warn(
+                "script",
+                line,
+                "malformed or duplicate script option; not activated",
+            );
+            return;
+        };
+        (name.trim().to_string(), params)
+    } else {
         cfg.warn(
             "script",
             line,
-            "unrecognized line (expected 'name = type=...')",
+            "unsupported script declaration; not activated",
         );
         return;
     };
-    let name = line[..eq].trim();
     if name.is_empty() {
-        cfg.warn("script", line, "empty script name");
+        cfg.warn("script", line, "missing script name; not activated");
         return;
     }
-    let params = parse_kv_params(&line[eq + 1..]);
-    let Some(type_val) = params
-        .get("type")
-        .or_else(|| params.get("http-types"))
-        .map(String::as_str)
-    else {
-        cfg.warn("script", line, "missing 'type' parameter");
+    let Some(options) = script_options(cfg, "script", line, &params) else {
         return;
     };
-    match type_val {
-        "http-response" | "http-request" => {
-            let Some(pattern_src) = params.get("pattern") else {
-                cfg.warn("script", line, "missing 'pattern' parameter");
+    let Some(path) = params.get("script-path").filter(|path| is_remote_url(path)) else {
+        cfg.warn(
+            "script",
+            line,
+            "missing or local script source unsupported; not activated",
+        );
+        return;
+    };
+    match params.get("type").map(String::as_str) {
+        Some("http-request" | "http-response") => {
+            let Some(src) = params.get("pattern") else {
+                cfg.warn("script", line, "missing URL pattern; not activated");
                 return;
             };
-            let Some(script_path) = params.get("script-path") else {
-                cfg.warn("script", line, "missing 'script-path' parameter");
+            let Some(pattern) = compile_pattern(src, cfg, "script", line) else {
                 return;
             };
-            let Some(pattern) = compile_pattern(pattern_src, cfg, "script", line) else {
-                return;
-            };
-            if !is_remote_url(script_path) {
-                cfg.warn("script", line, "local script path not supported, skipped");
-                return;
-            }
-            let kind = if type_val == "http-request" {
+            let kind = if params["type"] == "http-request" {
                 ScriptKind::HttpRequest
             } else {
                 ScriptKind::HttpResponse
             };
-            let requires_body = parse_bool(
-                params
-                    .get("requires-body")
-                    .or_else(|| params.get("require-body")),
-            );
-            // `max-size=-1` / `0` (Surge unlimited) mapped to 10MB upper bound, see [`parse_max_size`].
-            let max_size = parse_max_size(params.get("max-size")).unwrap_or(131072);
-            // Surge/Loon script line parameter `argument={key}|...` (template placeholder replaced at runtime).
-            let argument = params.get("argument").cloned();
-            cfg.script_urls
-                .push((name.to_string(), script_path.clone()));
-            cfg.scripts.push(lanpath_mitm::ScriptRule {
-                name: name.to_string(),
+            let max_size = match params.get("max-size").map(String::as_str) {
+                None => 10 * 1024 * 1024,
+                Some("-1") if kind == ScriptKind::HttpRequest => 32 * 1024 * 1024,
+                Some("-1") => usize::MAX,
+                Some(value) => match value.parse::<usize>() {
+                    Ok(size) => size,
+                    Err(_) => {
+                        cfg.warn("script", line, "invalid body size; not activated");
+                        return;
+                    }
+                },
+            };
+            if dialect == ScriptDialect::Surge {
+                if params.get("max-size").is_some_and(|value| value == "-1")
+                    && kind == ScriptKind::HttpResponse
+                {
+                    cfg.warn("script", line, "response max-size=-1 uses Lanpath's bounded 32 MiB inspection envelope; larger responses skip the script and pass through unchanged");
+                } else if max_size > lanpath_mitm::SURGE_BODY_ENVELOPE {
+                    cfg.warn("script", line, "body limit exceeds the supported 32 MiB inspection envelope; not activated");
+                    return;
+                }
+            }
+            let rule = ScriptRule {
+                name: name.clone(),
                 kind,
                 pattern,
-                requires_body,
+                requires_body: parse_bool(
+                    params
+                        .get("requires-body")
+                        .or_else(|| params.get("require-body")),
+                ),
                 max_size,
                 source: String::new(),
-                argument,
-            });
+                argument: params.get("argument").cloned(),
+                dialect,
+                mode: HookMode::Modify,
+                enabled: options.enabled,
+                timeout_ms: Some(options.timeout_ms.unwrap_or(5000)),
+                binary: parse_bool(params.get("binary-body-mode")),
+                full_headers: parse_bool(params.get("full-header-mode")),
+                source_id: path.clone(),
+                module_id: None,
+            };
+            // Reject unsupported sources before adding either side of the source/rule pair.
+            cfg.script_urls.push((name, path.clone()));
+            cfg.scripts.push(rule);
         }
-        "cron" => {
-            let Some(cron5) = params.get("cronexp") else {
-                cfg.warn("script", line, "missing 'cronexp' parameter");
+        Some("cron") => {
+            let Some(cron_expr) = params
+                .get("cronexp")
+                .and_then(|value| cron_expression(value))
+            else {
+                cfg.warn("script", line, "unsupported cron expression; not activated");
                 return;
             };
-            let Some(script_path) = params.get("script-path") else {
-                cfg.warn("script", line, "missing 'script-path' parameter");
-                return;
-            };
-            if !is_remote_url(script_path) {
-                cfg.warn("script", line, "local script path not supported, skipped");
-                return;
-            }
-            let cron_expr = format!("0 {}", cron5.trim());
             cfg.task_scripts.push((
-                lanpath_script::TaskScript {
-                    name: name.to_string(),
+                TaskScript {
+                    name,
                     cron_expr,
                     source: String::new(),
                     dialect,
-                    enabled: true,
+                    enabled: options.enabled,
+                    source_id: path.clone(),
+                    module_id: None,
+                    argument: params.get("argument").cloned(),
+                    timeout_ms: Some(options.timeout_ms.unwrap_or(5000)),
                 },
-                script_path.clone(),
+                path.clone(),
             ));
         }
-        other => cfg.warn(
-            "script",
-            line,
-            &format!("unrecognized script type '{other}'"),
-        ),
+        _ => cfg.warn("script", line, "unsupported script type; not activated"),
     }
 }
 
-/// Surge / Loon `[URL Rewrite]` line parsing.
-///
-/// - `pattern target` → `UrlRewrite`
-/// - `pattern target 302|307` → `Redirect`（尾部 mode token，QX 兼容写法）
-/// - `pattern - reject` → `Reject`（`-` 占位 target + reject mode）
-/// - `pattern target header` → `UrlRewrite` + 偏差（request-header 参数无法表达）
+pub(super) struct ScriptOptions {
+    pub enabled: bool,
+    pub timeout_ms: Option<u64>,
+}
+
+pub(super) fn script_options(
+    cfg: &mut super::ImportedConfig,
+    section: &str,
+    line: &str,
+    params: &HashMap<String, String>,
+) -> Option<ScriptOptions> {
+    if params.get("engine").is_some_and(|engine| engine != "auto")
+        || params
+            .get("debug")
+            .is_some_and(|value| parse_bool(Some(value)))
+        || params
+            .get("wake-system")
+            .is_some_and(|value| parse_bool(Some(value)))
+        || params.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "type"
+                    | "script-path"
+                    | "pattern"
+                    | "cronexp"
+                    | "argument"
+                    | "enabled"
+                    | "timeout"
+                    | "requires-body"
+                    | "require-body"
+                    | "binary-body-mode"
+                    | "full-header-mode"
+                    | "max-size"
+                    | "engine"
+                    | "debug"
+                    | "wake-system"
+                    | "script-update-interval"
+                    | "tag"
+                    | "img-url"
+            )
+        })
+    {
+        cfg.warn(
+            section,
+            line,
+            "unsupported script engine or option; not activated",
+        );
+        return None;
+    }
+    if params.contains_key("engine") {
+        cfg.warn(
+            section,
+            line,
+            "QuickJS host-API envelope only; vendor engine auto selection is not reproduced",
+        );
+    }
+    if params.contains_key("script-update-interval") {
+        cfg.warn(section, line, "per-script update interval is not scheduled independently; resource refresh policy applies");
+    }
+    for key in [
+        "enabled",
+        "requires-body",
+        "require-body",
+        "binary-body-mode",
+        "full-header-mode",
+        "debug",
+        "wake-system",
+    ] {
+        if params.get(key).is_some_and(|value| {
+            !matches!(value.as_str(), "true" | "false" | "1" | "0" | "yes" | "no")
+        }) {
+            cfg.warn(section, line, "invalid Boolean option; not activated");
+            return None;
+        }
+    }
+    let timeout_ms = if let Some(value) = params.get("timeout") {
+        let Ok(seconds) = value.parse::<f64>() else {
+            cfg.warn(section, line, "invalid script timeout; not activated");
+            return None;
+        };
+        if !seconds.is_finite() || seconds <= 0.0 || seconds * 1000.0 >= u64::MAX as f64 {
+            cfg.warn(section, line, "invalid script timeout; not activated");
+            return None;
+        }
+        Some((seconds * 1000.0).ceil() as u64)
+    } else {
+        None
+    };
+    Some(ScriptOptions {
+        enabled: params
+            .get("enabled")
+            .is_none_or(|value| parse_bool(Some(value))),
+        timeout_ms,
+    })
+}
+
+pub(super) fn cron_expression(value: &str) -> Option<String> {
+    let fields: Vec<_> = value.split_whitespace().collect();
+    let expression = match fields.len() {
+        5 => format!("0 {}", fields.join(" ")),
+        6 => fields.join(" "),
+        _ => return None,
+    };
+    expression
+        .parse::<cron::Schedule>()
+        .ok()
+        .map(|_| expression)
+}
+
 pub(super) fn parse_surge_url_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 2 {
+    let tokens: Vec<_> = line.split_whitespace().collect();
+    if !(2..=3).contains(&tokens.len()) {
         cfg.warn(
             "url rewrite",
             line,
-            "unrecognized line (expected 'pattern target')",
+            "unsupported URL rewrite declaration; not activated",
         );
         return;
     }
     let Some(pattern) = compile_pattern(tokens[0], cfg, "url rewrite", line) else {
         return;
     };
-    let kind = match tokens.last() {
-        Some(&"reject") => RewriteKind::reject(),
-        Some(mode @ (&"302" | &"307")) => RewriteKind::Redirect {
-            status: if *mode == "307" { 307 } else { 302 },
-            target: tokens[1].to_string(),
+    let kind = match tokens.get(2).copied().unwrap_or("header") {
+        "header" => RewriteKind::UrlRewrite {
+            target: tokens[1].into(),
         },
+        "302" | "307" => RewriteKind::Redirect {
+            status: if tokens[2] == "307" { 307 } else { 302 },
+            target: tokens[1].into(),
+        },
+        "reject" => RewriteKind::reject(),
         _ => {
-            if tokens.len() > 2 {
-                cfg.warn(
-                    "url rewrite",
-                    line,
-                    "request-header argument cannot be expressed, only URL rewritten",
-                );
-            }
-            RewriteKind::UrlRewrite {
-                target: tokens[1].to_string(),
-            }
+            cfg.warn(
+                "url rewrite",
+                line,
+                "unsupported URL rewrite mode; not activated",
+            );
+            return;
         }
     };
-    cfg.rewrites
-        .push(lanpath_mitm::RewriteRule { pattern, kind });
+    cfg.rewrites.push(RewriteRule { pattern, kind });
 }
 
-/// Surge / Loon `[Header Rewrite]` line parsing.
-///
-/// 可带 `http-request` / `http-response` 阶段前缀（Surge 4.x 语法），缺省按 Request 阶段
-/// （兼容旧解析行为）。`header-replace` / `header-add` → `HeaderRewrite`（set），
-/// `header-del` → `HeaderRewrite`（删除），`header-replace-regex Name <regex> <repl>` →
-/// `HeaderValueRewrite`。
 pub(super) fn parse_surge_header_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 3 {
-        cfg.warn("header rewrite", line, "unrecognized line");
-        return;
-    }
-    let (phase, tokens) = match tokens[0] {
-        "http-request" => (Phase::Request, &tokens[1..]),
-        "http-response" => (Phase::Response, &tokens[1..]),
-        _ => (Phase::Request, &tokens[..]),
+    let tokens: Vec<_> = line.split_whitespace().collect();
+    let (phase, tokens) = match tokens.first().copied() {
+        Some("http-request") => (Phase::Request, &tokens[1..]),
+        Some("http-response") => (Phase::Response, &tokens[1..]),
+        _ => (Phase::Request, tokens.as_slice()),
     };
     if tokens.len() < 3 {
-        cfg.warn("header rewrite", line, "unrecognized line");
+        cfg.warn(
+            "header rewrite",
+            line,
+            "incomplete header rewrite; not activated",
+        );
         return;
     }
     let Some(pattern) = compile_pattern(tokens[0], cfg, "header rewrite", line) else {
         return;
     };
-    match tokens[1] {
-        "header-replace" | "header-add" => {
-            let name = tokens[2].to_string();
-            let value = Some(tokens[3..].join(" "));
-            cfg.rewrites.push(lanpath_mitm::RewriteRule {
-                pattern,
-                kind: RewriteKind::HeaderRewrite { phase, name, value },
-            });
-        }
-        "header-del" => {
-            let name = tokens[2].to_string();
-            cfg.rewrites.push(lanpath_mitm::RewriteRule {
-                pattern,
-                kind: RewriteKind::HeaderRewrite {
-                    phase,
-                    name,
-                    value: None,
-                },
-            });
-        }
-        "header-replace-regex" => {
-            if tokens.len() < 5 {
-                cfg.warn(
-                    "header rewrite",
-                    line,
-                    "header-replace-regex missing name/regex/replacement",
-                );
-                return;
-            }
+    let name = tokens[2].to_string();
+    let kind = match tokens[1] {
+        "header-add" if tokens.len() >= 4 => RewriteKind::HeaderAppend {
+            phase,
+            name,
+            value: tokens[3..].join(" "),
+        },
+        "header-replace" if tokens.len() >= 4 => RewriteKind::HeaderReplace {
+            phase,
+            name,
+            value: tokens[3..].join(" "),
+        },
+        "header-del" if tokens.len() == 3 => RewriteKind::HeaderRemove { phase, name },
+        "header-replace-regex" if tokens.len() >= 5 => {
             let Some(value_pattern) = compile_pattern(tokens[3], cfg, "header rewrite", line)
             else {
                 return;
             };
-            cfg.rewrites.push(lanpath_mitm::RewriteRule {
-                pattern,
-                kind: RewriteKind::HeaderValueRewrite {
-                    phase,
-                    name: tokens[2].to_string(),
-                    value_pattern,
-                    replacement: tokens[4..].join(" "),
-                },
-            });
+            RewriteKind::HeaderValueRewrite {
+                phase,
+                name,
+                value_pattern,
+                replacement: tokens[4..].join(" "),
+            }
         }
-        other => cfg.warn(
-            "header rewrite",
-            line,
-            &format!("unrecognized header action '{other}'"),
-        ),
-    }
-}
-
-/// Surge `[Body Rewrite]` section line parsing:
-/// `http-request|http-response pattern <regex> <replacement>` → `BodyRewrite{body_pattern}`。
-///
-/// `jq` 形态（`http-response pattern jq <expr>`）无引擎可表达，记 warning 跳过。
-pub(super) fn parse_surge_body_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    if tokens.len() < 4 {
-        cfg.warn("body rewrite", line, "unrecognized line");
-        return;
-    }
-    let phase = match tokens[0] {
-        "http-request" => Phase::Request,
-        "http-response" => Phase::Response,
-        other => {
+        _ => {
             cfg.warn(
-                "body rewrite",
+                "header rewrite",
                 line,
-                &format!("unrecognized phase '{other}'"),
+                "unsupported or incomplete header action; not activated",
             );
             return;
         }
     };
-    let Some(pattern) = compile_pattern(tokens[1], cfg, "body rewrite", line) else {
-        return;
-    };
-    if tokens[2] == "jq" {
+    cfg.rewrites.push(RewriteRule { pattern, kind });
+}
+
+pub(super) fn parse_surge_body_rewrite(cfg: &mut super::ImportedConfig, line: &str) {
+    let tokens = split_tokens_keep_quoted(line);
+    if tokens.len() < 4 || !tokens.len().is_multiple_of(2) {
         cfg.warn(
             "body rewrite",
             line,
-            "jq body rewrite not supported, skipped",
+            "unsupported or incomplete body rewrite; not activated",
         );
         return;
     }
-    let Some(body_pattern) = compile_pattern(tokens[2], cfg, "body rewrite", line) else {
-        return;
-    };
-    cfg.rewrites.push(lanpath_mitm::RewriteRule {
-        pattern,
-        kind: RewriteKind::BodyRewrite {
-            phase,
-            body_pattern: Some(body_pattern),
-            replacement: tokens[3..].join(" "),
-        },
-    });
-}
-
-/// Surge / Loon `[Map Local]` line parsing:
-/// `pattern data="..." data-type=text status-code=200 header="Name:value"` → `Mock`.
-///
-/// `data-type` / `mime-type` mapped to Content-Type response header (`text` → `text/plain`,
-/// `json` → `application/json`, `html` → `text/html`, `css` → `text/css`,
-/// `js`/`javascript` → `application/javascript`, `xml` → `application/xml`;
-/// when the value itself contains `/`, treated as full Content-Type preserved as-is).
-/// `header="Name:value"` can repeat, split by first `:` into response header.
-/// Only when `header=` does not explicitly specify Content-Type is the mapped Content-Type from
-/// `data-type` appended (explicit takes priority).
-pub(super) fn parse_surge_map_local(cfg: &mut super::ImportedConfig, line: &str) {
-    let tokens = split_tokens_keep_quoted(line);
-    if tokens.len() < 2 {
-        cfg.warn("map local", line, "unrecognized line");
-        return;
-    }
-    let Some(pattern) = compile_pattern(&tokens[0], cfg, "map local", line) else {
-        return;
-    };
-    let mut data: Option<String> = None;
-    let mut status = 200u16;
-    let mut headers: Vec<(String, String)> = Vec::new();
-    let mut data_type: Option<String> = None;
-    for pair in &tokens[1..] {
-        let Some(eq) = pair.find('=') else {
-            cfg.warn("map local", line, &format!("unrecognized token '{pair}'"));
-            continue;
-        };
-        let (key, value) = (pair[..eq].trim(), pair[eq + 1..].trim());
-        match key {
-            "data" => data = Some(strip_quotes(value).to_string()),
-            "status-code" => {
-                if let Ok(code) = value.parse::<u16>() {
-                    status = code;
-                } else {
-                    cfg.warn("map local", line, &format!("invalid status-code '{value}'"));
-                }
-            }
-            "data-type" | "mime-type" => data_type = Some(strip_quotes(value).to_string()),
-            "header" => {
-                let header = strip_quotes(value);
-                match header.split_once(':') {
-                    Some((name, value)) => {
-                        let (name, value) = (name.trim(), value.trim());
-                        if name.is_empty() {
-                            cfg.warn("map local", line, &format!("invalid header '{header}'"));
-                        } else {
-                            headers.push((name.to_string(), value.to_string()));
-                        }
-                    }
-                    None => cfg.warn("map local", line, &format!("invalid header '{header}'")),
-                }
-            }
-            other => cfg.warn(
-                "map local",
+    let phase = match tokens[0].as_str() {
+        "http-request" => Phase::Request,
+        "http-response" => Phase::Response,
+        _ => {
+            cfg.warn(
+                "body rewrite",
                 line,
-                &format!("unrecognized parameter '{other}'"),
-            ),
+                "unsupported body rewrite phase or engine; not activated",
+            );
+            return;
         }
+    };
+    if tokens[2] == "jq" {
+        cfg.warn("body rewrite", line, "jq engine unsupported; not activated");
+        return;
     }
-    // `data-type` / `mime-type` → Content-Type; only appended when `header=` does not explicitly specify.
-    if let Some(dt) = data_type {
-        let has_explicit_content_type = headers
-            .iter()
-            .any(|(n, _)| n.eq_ignore_ascii_case("content-type"));
-        if !has_explicit_content_type {
-            match content_type_for_data_type(&dt) {
-                Some(ct) => headers.push(("Content-Type".to_string(), ct)),
-                None => cfg.warn("map local", line, &format!("unknown data-type '{dt}'")),
-            }
-        }
-    }
-    let Some(body) = data else {
-        cfg.warn("map local", line, "missing 'data' parameter");
+    let Some(pattern) = compile_pattern(&tokens[1], cfg, "body rewrite", line) else {
         return;
     };
-    cfg.rewrites.push(lanpath_mitm::RewriteRule {
-        pattern,
-        kind: RewriteKind::Mock {
-            status,
-            body: body.into_bytes(),
-            headers,
-        },
-    });
-}
-
-/// Map Surge/Loon `data-type` / `mime-type` value to HTTP Content-Type.
-///
-/// Known aliases return standard MIME; when the value itself contains `/`, treated as full
-/// Content-Type returned as-is; others return `None` (caller records warning).
-fn content_type_for_data_type(data_type: &str) -> Option<String> {
-    match data_type.trim().to_ascii_lowercase().as_str() {
-        "text" => Some("text/plain".to_string()),
-        "json" => Some("application/json".to_string()),
-        "html" => Some("text/html".to_string()),
-        "css" => Some("text/css".to_string()),
-        "js" | "javascript" => Some("application/javascript".to_string()),
-        "xml" => Some("application/xml".to_string()),
-        other if other.contains('/') => Some(other.to_string()),
-        _ => None,
+    let mut pairs = Vec::with_capacity((tokens.len() - 2) / 2);
+    for pair in tokens[2..].as_chunks::<2>().0 {
+        let source = format!("(?m){}", strip_quotes(&pair[0]));
+        let Some(regex) = compile_pattern(&source, cfg, "body rewrite", line) else {
+            return;
+        };
+        pairs.push((regex, strip_quotes(&pair[1]).to_string()));
     }
+    cfg.rewrites.push(RewriteRule {
+        pattern,
+        kind: RewriteKind::BodyRewritePairs { phase, pairs },
+    });
 }

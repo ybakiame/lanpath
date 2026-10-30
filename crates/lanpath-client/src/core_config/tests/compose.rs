@@ -77,14 +77,30 @@ fn compose_singbox_with_mitm_chain_injects_inbounds_outbound_and_route() {
     assert_eq!(outbounds[1]["server"], "127.0.0.1");
     assert_eq!(outbounds[1]["server_port"], 34567);
 
-    // Route rules prepended: inbound matches main entry, exact/suffix分流, final preserved;
-    // `-excluded.example.org` is exclusion, no core routing rule generated.
+    // Exclusions predicate the MITM route, without forcing a direct outbound.
     let rules = cfg["route"]["rules"].as_array().unwrap();
     assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0]["inbound"], json!(["main-in"]));
-    assert_eq!(rules[0]["domain"], json!(["example.com"]));
-    assert_eq!(rules[0]["domain_suffix"], json!(["cdn.example.net"]));
-    assert_eq!(rules[0]["ip_cidr"], json!(["127.0.0.1/32"]));
+    assert_eq!(rules[0]["type"], "logical");
+    assert_eq!(rules[0]["mode"], "and");
+    assert_eq!(rules[0]["rules"][0]["inbound"], json!(["main-in"]));
+    assert_eq!(
+        rules[0]["rules"][1],
+        json!({
+            "type": "logical", "mode": "or", "invert": true,
+            "rules": [{"domain": ["excluded.example.org"]}]
+        })
+    );
+    assert_eq!(
+        rules[0]["rules"][2],
+        json!({
+            "type": "logical", "mode": "or",
+            "rules": [
+                {"domain": ["example.com"]},
+                {"domain_suffix": ["cdn.example.net"]},
+                {"ip_cidr": ["127.0.0.1/32"]}
+            ]
+        })
+    );
     assert_eq!(rules[0]["outbound"], "lanpath-mitm");
     assert_eq!(cfg["route"]["final"], "n1");
 }
@@ -103,8 +119,11 @@ fn compose_singbox_with_mitm_chain_creates_route_when_missing() {
 
     let rules = cfg["route"]["rules"].as_array().unwrap();
     assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0]["inbound"], json!(["main-in"]));
-    assert_eq!(rules[0]["domain"], json!(["example.com"]));
+    assert_eq!(rules[0]["rules"][0]["inbound"], json!(["main-in"]));
+    assert_eq!(
+        rules[0]["rules"][1]["rules"][0]["domain"],
+        json!(["example.com"])
+    );
     assert_eq!(rules[0]["outbound"], "lanpath-mitm");
 }
 
@@ -188,4 +207,51 @@ fn compose_singbox_keeps_existing_resolver_and_skips_when_no_dns() {
     let bare = json!({ "outbounds": [{ "type": "direct", "tag": "direct" }] });
     let cfg = compose_singbox_config(&bare, 17890, None).unwrap();
     assert!(cfg["route"].get("default_domain_resolver").is_none());
+}
+
+#[test]
+fn mitm_host_port_pairs_and_exclusions_preserve_upstream_subscription_rules() {
+    let sub = json!({
+        "outbounds": [{"type": "socks", "tag": "upstream", "server": "router.invalid", "server_port": 1080}],
+        "route": {"final": "upstream", "rules": [{"domain": ["excluded.invalid"], "outbound": "upstream"}]}
+    });
+    let cfg = compose_singbox_config(
+        &sub,
+        17890,
+        Some(MitmChain {
+            proxy_addr: "127.0.0.1:34567".parse().unwrap(),
+            return_port: 17891,
+            hostnames: vec![
+                "ONE.invalid:443".into(),
+                "*.two.invalid:8443".into(),
+                "-excluded.invalid:443".into(),
+                "[::1]:443".into(),
+            ],
+        }),
+    )
+    .unwrap();
+    let rules = cfg["route"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[1], sub["route"]["rules"][0]);
+    assert_eq!(cfg["route"]["final"], "upstream");
+    assert_eq!(
+        rules[0]["rules"][1]["rules"],
+        json!([{"domain": ["excluded.invalid"], "port": [443]}])
+    );
+    assert_eq!(
+        rules[0]["rules"][2]["rules"],
+        json!([
+            {"domain": ["one.invalid"], "port": [443]},
+            {"domain_suffix": ["two.invalid"], "port": [8443]},
+            {"ip_cidr": ["::1/128"], "port": [443]}
+        ])
+    );
+    assert_eq!(cfg["outbounds"][0], sub["outbounds"][0]);
+    assert!(
+        !cfg["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|outbound| outbound["type"] == "direct")
+    );
 }

@@ -1,26 +1,36 @@
 mod backup;
+mod bootstrap;
 mod diagnostics;
 mod lifecycle;
+mod native;
+mod remote;
+mod status;
+mod system_control;
+mod tun;
 
 use std::{
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU16, Ordering},
+    },
 };
 
 use lanpath_client::{
     mitm::{MitmCaView, MitmService, MitmSession},
-    remote::{RemoteTaskView, ScriptTaskSession, TracingNotifier},
+    remote::{RemoteTaskView, ScriptTaskSession},
 };
-use lanpath_engine::{CoreManager, SingBoxProcessManager};
-use tokio::runtime::{Builder, Runtime};
+use lanpath_engine::SingBoxProcessManager;
+use tokio::runtime::Runtime;
 
 use crate::{
     business::BusinessService,
-    configuration::Bindings,
-    data_root::{DataRoot, default_data_dir},
+    data_root::{DataMode, DataRoot},
+    distribution::instance::InstanceServer,
     log_stream::LogService,
     observation::ObservationService,
+    privileged::Broker,
     startup::StartupProgress,
 };
 
@@ -39,6 +49,17 @@ pub(crate) struct DesktopRuntime {
     // Keep the executor alive for lifecycle/output-reader teardown, and retain
     // the directory lease until every service and the executor have dropped.
     manager: tokio::sync::Mutex<Option<Arc<SingBoxProcessManager>>>,
+    broker: tokio::sync::Mutex<Option<Arc<Mutex<Broker>>>>,
+    lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+    live_inputs: tokio::sync::Mutex<Option<remote::LiveInputs>>,
+    script_http: Option<Arc<lanpath_client::http_exec::ReqwestHttpExecutor>>,
+    mixed_port: AtomicU16,
+    data_mode: Option<DataMode>,
+    instance: Mutex<Option<InstanceServer>>,
+    #[cfg(windows)]
+    system_proxy: Option<lanpath_client::sysproxy::SystemProxySession>,
+    #[cfg(windows)]
+    proxy_guardian: Mutex<Option<crate::proxy_guardian::Guardian>>,
     binary_override: Option<PathBuf>,
     startup: tokio::sync::watch::Sender<StartupProgress>,
     missing_rule_sets: Mutex<RunResources>,
@@ -51,92 +72,12 @@ pub(crate) struct DesktopRuntime {
     script_tasks: tokio::sync::Mutex<Option<ScriptTaskSession>>,
     runtime: Option<Runtime>,
     configuration_error: Option<String>,
-    _data_root: Option<DataRoot>,
+    _data_root: Option<Arc<DataRoot>>,
 }
 
 impl DesktopRuntime {
     pub(crate) fn from_env() -> Self {
-        let mut errors = Vec::new();
-        let root = match std::env::var_os(DATA_DIR_ENV) {
-            Some(path) if !path.is_empty() => Ok(PathBuf::from(path)),
-            Some(_) => Err(lanpath_common::LanpathError::Config(format!(
-                "{DATA_DIR_ENV} 不能为空"
-            ))),
-            None => default_data_dir(),
-        }
-        .and_then(|path| DataRoot::open(&path))
-        .and_then(|root| {
-            // The exclusive lease precedes recovery; no stores or writers exist yet.
-            lanpath_client::backup::apply_pending_at_startup(root.path())?;
-            Ok(root)
-        });
-        let data_root = match root {
-            Ok(root) => Some(root),
-            Err(error) => {
-                errors.push(error.to_string());
-                None
-            }
-        };
-        let binary = match std::env::var_os(CORE_BINARY_ENV) {
-            Some(path) if !path.is_empty() => match std::fs::canonicalize(path) {
-                Ok(path) if path.is_file() => Some(path),
-                Ok(_) => {
-                    errors.push(format!("{CORE_BINARY_ENV} 必须指向核心文件"));
-                    None
-                }
-                Err(error) => {
-                    errors.push(format!("无法访问核心文件：{error}"));
-                    None
-                }
-            },
-            Some(_) => {
-                errors.push(format!("{CORE_BINARY_ENV} 不能为空"));
-                None
-            }
-            None => None,
-        };
-        let runtime = match Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-        {
-            Ok(runtime) => Some(runtime),
-            Err(error) => {
-                errors.push(format!("无法创建 Tokio runtime：{error}"));
-                None
-            }
-        };
-        // A rejected directory never reaches a store, including offline stats.
-        let observations = data_root
-            .as_ref()
-            .map(|root| ObservationService::new(root.path().to_path_buf()));
-        let bindings = Bindings::new(MIXED_PORT, CLASH_API_PORT);
-        let business = data_root
-            .as_ref()
-            .map(|root| BusinessService::new(root.path(), binary.clone(), bindings));
-        let mitm_service = data_root.as_ref().map(|root| MitmService::new(root.path()));
-        let backup = data_root.as_ref().map(|root| {
-            Arc::new(lanpath_client::backup::BackupService::new(
-                root.path().to_path_buf(),
-            ))
-        });
-        let logs = LogService::new(data_root.as_ref().map(|root| root.path()));
-        Self {
-            manager: tokio::sync::Mutex::new(None),
-            binary_override: binary,
-            startup: tokio::sync::watch::channel(StartupProgress::default()).0,
-            missing_rule_sets: Mutex::new(RunResources::default()),
-            observations,
-            business,
-            backup,
-            logs,
-            script_tasks: tokio::sync::Mutex::new(None),
-            mitm: tokio::sync::Mutex::new(None),
-            mitm_service,
-            runtime,
-            configuration_error: (!errors.is_empty()).then(|| errors.join("；")),
-            _data_root: data_root,
-        }
+        Self::initialize()
     }
 
     pub(crate) fn is_configured(&self) -> bool {
@@ -156,12 +97,7 @@ impl DesktopRuntime {
     }
 
     pub(crate) fn running(&self) -> Result<bool, String> {
-        self.block_on(async {
-            match self.manager.lock().await.as_ref() {
-                Some(manager) => manager.is_running().await,
-                None => false,
-            }
-        })
+        self.executor()?.block_on(self.running_async())
     }
 
     pub(crate) fn missing_rule_sets(&self) -> Result<Vec<String>, String> {
@@ -181,10 +117,7 @@ impl DesktopRuntime {
         Ok(missing)
     }
     pub(crate) fn port(&self) -> u16 {
-        MIXED_PORT
-    }
-    pub(crate) fn api_port(&self) -> u16 {
-        CLASH_API_PORT
+        self.mixed_port.load(Ordering::Acquire)
     }
 
     pub(crate) fn business(&self) -> Result<&BusinessService, String> {
@@ -225,7 +158,7 @@ impl DesktopRuntime {
         })
     }
 
-    pub(crate) fn run_script_task(&self, name: &str) -> Result<String, String> {
+    pub(crate) fn run_script_task(&self, id: &str) -> Result<String, String> {
         let runtime = self
             .runtime
             .as_ref()
@@ -235,10 +168,7 @@ impl DesktopRuntime {
             let session = session
                 .as_ref()
                 .ok_or_else(|| "任务调度器未就绪；请先更新资源并启动核心".to_string())?;
-            session
-                .run_now(name)
-                .await
-                .map_err(|error| error.to_string())
+            session.run_now(id).await.map_err(|error| error.to_string())
         })
     }
 
@@ -246,15 +176,29 @@ impl DesktopRuntime {
         self.mitm_service()?.ca().map_err(|error| error.to_string())
     }
 
-    pub(crate) fn mitm_trust_status(&self) -> Result<lanpath_client::mitm::CaTrustView, String> {
+    pub(crate) fn mitm_trust_status(
+        &self,
+    ) -> Result<lanpath_client::mitm::CaOwnedTrustView, String> {
         self.mitm_service()?
             .trust_status()
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn install_mitm_ca(&self) -> Result<lanpath_client::mitm::CaTrustView, String> {
+    pub(crate) fn install_mitm_ca(
+        &self,
+        expected_sha256: &str,
+    ) -> Result<lanpath_client::mitm::CaOwnedTrustView, String> {
         self.mitm_service()?
-            .install_ca()
+            .install_ca(expected_sha256)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn remove_mitm_ca(
+        &self,
+        expected_sha256: &str,
+    ) -> Result<lanpath_client::mitm::CaRemovalReceipt, String> {
+        self.mitm_service()?
+            .remove_ca(expected_sha256)
             .map_err(|error| error.to_string())
     }
 
@@ -283,7 +227,11 @@ impl DesktopRuntime {
         let business = self.business()?;
         let session = ScriptTaskSession::start(
             business.data_dir().to_path_buf(),
-            Arc::new(TracingNotifier::new()),
+            self.notifier()?,
+            self.script_http
+                .as_ref()
+                .ok_or_else(|| self.unavailable_data_error())?
+                .clone(),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -297,10 +245,13 @@ impl DesktopRuntime {
         }
     }
 
-    async fn stop_mitm(&self) {
-        if let Some(session) = self.mitm.lock().await.take() {
-            session.stop();
+    async fn stop_mitm(&self) -> Result<(), String> {
+        let mut session = self.mitm.lock().await;
+        if let Some(session) = session.as_mut() {
+            session.stop().await.map_err(|error| error.to_string())?;
         }
+        *session = None;
+        Ok(())
     }
 
     fn mitm_service(&self) -> Result<&MitmService, String> {

@@ -1,8 +1,12 @@
+pub(crate) mod body;
+pub(crate) mod execution;
 pub(crate) mod http_client;
+pub(crate) mod http_options;
 pub(crate) mod misc;
 pub(crate) mod notify;
 pub(crate) mod store;
 pub(crate) mod task;
+mod timers;
 
 use std::sync::Arc;
 
@@ -10,43 +14,57 @@ use rquickjs::{Ctx, Object, Value};
 use tokio::sync::oneshot;
 
 use crate::host::{ScriptHost, TimerRegistry};
-use crate::types::{ScriptDialect, ScriptKind, ScriptOutput};
+use crate::types::{ScriptDialect, ScriptExecutionMetadata, ScriptKind, ScriptOutput};
+
+/// Borrowed identity and trigger of one execution; no JS values or runtime ownership.
+pub(crate) struct ScriptContext<'a> {
+    pub dialect: ScriptDialect,
+    pub kind: ScriptKind,
+    pub metadata: &'a ScriptExecutionMetadata,
+}
 
 /// 注入全部全局 API。`$done` 的 oneshot sender 被移入 `$done` 函数。
 pub(crate) fn install_apis<'js>(
     ctx: &Ctx<'js>,
     host: &Arc<ScriptHost>,
-    dialect: ScriptDialect,
-    kind: ScriptKind,
+    script: ScriptContext<'_>,
     done_tx: oneshot::Sender<ScriptOutput>,
-    script_name: &str,
     timers: &TimerRegistry,
+    execution: &execution::Execution,
 ) -> rquickjs::Result<()> {
+    let ScriptContext {
+        dialect,
+        kind,
+        metadata,
+    } = script;
+    let script_name = metadata.name.as_str();
     // 公共 API（所有方言都有）。
-    misc::install(ctx, host, done_tx, script_name, kind, timers)?;
+    misc::install(ctx, done_tx, metadata, kind, timers, dialect, execution)?;
 
     match dialect {
         ScriptDialect::QuantumultX => {
-            task::install(ctx, host)?;
-            store::install_qx(ctx, host, script_name)?;
-            notify::install_qx(ctx, host)?;
+            task::install(ctx, host, execution)?;
+            store::install_qx(ctx, host, script_name, execution)?;
+            notify::install_qx(ctx, host, execution)?;
         }
         ScriptDialect::Surge => {
-            http_client::install(ctx, host)?;
-            store::install_surge(ctx, host, script_name)?;
-            notify::install_surge(ctx, host)?;
+            http_client::install(ctx, host, dialect, execution)?;
+            store::install_surge(ctx, host, &metadata.source_id, execution)?;
+            notify::install_surge(ctx, host, execution)?;
         }
         ScriptDialect::Loon => {
-            // Loon 是超集：同时注入 QX 与 Surge 两套 + $loon 标记。
-            task::install(ctx, host)?;
-            http_client::install(ctx, host)?;
-            store::install_qx(ctx, host, script_name)?;
-            store::install_surge(ctx, host, script_name)?;
-            notify::install_qx(ctx, host)?;
-            notify::install_surge(ctx, host)?;
-            let loon = Object::new(ctx.clone())?;
-            loon.set("isLoon", true)?;
-            ctx.globals().set("$loon", loon)?;
+            http_client::install(ctx, host, dialect, execution)?;
+            store::install_loon(ctx, host, script_name, execution)?;
+            notify::install_surge(ctx, host, execution)?;
+            ctx.globals().set(
+                "$loon",
+                concat!("Lanpath GPUI compatibility ", env!("CARGO_PKG_VERSION")),
+            )?;
+        }
+        ScriptDialect::Stash => {
+            http_client::install(ctx, host, dialect, execution)?;
+            store::install_stash(ctx, host, script_name, execution)?;
+            notify::install_surge(ctx, host, execution)?;
         }
     }
     Ok(())
@@ -61,14 +79,53 @@ pub(crate) fn inject_script_arg<'js>(
     let Some(arg) = arg else {
         return Ok(());
     };
-    let global_name = match kind {
-        ScriptKind::HttpRequest => "$request",
-        ScriptKind::HttpResponse => "$response",
-        _ => return Ok(()),
-    };
-    let js_val = json_to_js(ctx, arg)?;
-    ctx.globals().set(global_name, js_val)?;
+    if !matches!(kind, ScriptKind::HttpRequest | ScriptKind::HttpResponse) {
+        return Ok(());
+    }
+    // Hook envelopes carry the original request alongside the response.
+    if let Some(object) = arg
+        .as_object()
+        .filter(|object| object.contains_key("$request") || object.contains_key("$response"))
+    {
+        for name in ["$request", "$response"] {
+            if let Some(value) = object.get(name) {
+                ctx.globals().set(name, context_value(ctx, value)?)?;
+            }
+        }
+    } else {
+        let name = if kind == ScriptKind::HttpRequest {
+            "$request"
+        } else {
+            "$response"
+        };
+        ctx.globals().set(name, context_value(ctx, arg)?)?;
+    }
     Ok(())
+}
+
+fn context_value<'js>(ctx: &Ctx<'js>, value: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
+    let mut public = value.clone();
+    let bytes = public
+        .as_object_mut()
+        .and_then(|object| object.remove("__bodyBytes"));
+    let binary = public
+        .as_object_mut()
+        .and_then(|object| object.remove("__binary"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let result = json_to_js(ctx, &public)?;
+    if let Some(bytes) = bytes {
+        let bytes: Vec<u8> = serde_json::from_value(bytes).map_err(|error| {
+            rquickjs::Error::new_from_js_message("body", "bytes", error.to_string())
+        })?;
+        if let Some(object) = result.as_object() {
+            object.set("bodyBytes", body::binary(ctx, bytes.clone(), true)?)?;
+            if binary {
+                object.set("body", body::binary(ctx, bytes, false)?)?;
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// serde_json::Value → JS 值（递归）。
@@ -149,6 +206,14 @@ pub(crate) fn js_to_json<'js>(
     }
     if let Some(s) = v.as_string() {
         return Ok(serde_json::Value::String(s.to_string()?));
+    }
+    if let Some(bytes) = body::bytes(&v)? {
+        return Ok(serde_json::Value::Array(
+            bytes
+                .into_iter()
+                .map(|byte| serde_json::json!(byte))
+                .collect(),
+        ));
     }
     if let Some(arr) = v.as_array() {
         let mut out = Vec::new();

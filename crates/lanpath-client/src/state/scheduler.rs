@@ -14,6 +14,7 @@ impl ClientState {
         self.scheduler = ScriptTaskSession::start(
             self.config.data_dir.clone(),
             std::sync::Arc::clone(&self.notifier),
+            self.http.clone(),
         )
         .await?;
         Ok(())

@@ -59,7 +59,7 @@ fn request_modes_reopen_without_losing_credentials_or_mirror_semantics() {
 }
 
 #[test]
-fn request_save_merges_latest_unrelated_settings_and_enforces_experimental_bounds() {
+fn request_save_merges_latest_unrelated_settings_without_clobbering_system_configuration() {
     let root = tempfile::tempdir().unwrap();
     let business = service(root.path());
     let stale_draft = RequestSettingsDocument::new(
@@ -75,41 +75,18 @@ fn request_save_merges_latest_unrelated_settings_and_enforces_experimental_bound
     latest.mitm_enabled = true;
     latest.mitm.hostnames = vec!["api.example.com".into()];
     latest.mitm.script_dialect = ScriptDialect::Loon;
+    latest.system_proxy_enabled = true;
+    latest.tun_enabled = true;
+    latest.tun_auto_route = false;
+    latest.mixed_port = 23456;
+    latest.clash_api_enabled = false;
+    latest.clash_api_port = 23457;
+    latest.clash_api_secret = "fixture-api-secret".into();
     latest.save().unwrap();
     let expected_unrelated = unrelated(&latest);
     business.save_request_settings(&stale_draft).unwrap();
     let saved = business.client_config().unwrap();
     assert!(unrelated(&saved) == expected_unrelated);
-
-    let mut tampered = saved;
-    tampered.data_dir = root.path().join("outside-data");
-    tampered.core_binary = root.path().join("unexpected-core");
-    tampered.mitm.ca_dir = root.path().join("outside-ca");
-    tampered.system_proxy_enabled = true;
-    tampered.tun_enabled = true;
-    tampered.tun_auto_route = true;
-    tampered.mixed_port = 1;
-    tampered.clash_api_enabled = false;
-    tampered.clash_api_port = 2;
-    tampered.clash_api_secret = "unexpected-secret".into();
-    // Write to the real experiment file, not the tampered data_dir.
-    super::state::persist(&root.path().join("client.json"), &tampered).unwrap();
-    business.save_request_settings(&stale_draft).unwrap();
-    let bounded = ClientConfig::load_for_requests(root.path()).unwrap();
-    assert_eq!(bounded.data_dir, root.path());
-    assert!(bounded.core_binary.as_os_str().is_empty());
-    assert_eq!(bounded.mitm.ca_dir, root.path().join("certs"));
-    assert!(!bounded.system_proxy_enabled);
-    assert!(!bounded.tun_enabled);
-    assert!(!bounded.tun_auto_route);
-    assert_eq!(bounded.mixed_port, 17899);
-    assert!(bounded.clash_api_enabled);
-    assert_eq!(bounded.clash_api_port, 19090);
-    assert!(bounded.clash_api_secret.is_empty());
-    assert_eq!(bounded.request_proxy_mode, RequestProxyMode::Custom);
-    assert!(bounded.mitm_enabled);
-    assert_eq!(bounded.mitm.script_dialect, ScriptDialect::Loon);
-    assert_eq!(bounded.mitm.hostnames, ["api.example.com"]);
 }
 
 #[test]

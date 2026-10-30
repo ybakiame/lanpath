@@ -34,7 +34,9 @@ export default function ImportTab() {
       <Card>
         <Card.Header>
           <Card.Title>导入配置</Card.Title>
-          <Card.Description>粘贴 Surge / Loon 的 rewrite / script / mitm 片段，合并进本地缓存</Card.Description>
+          <Card.Description>
+            粘贴公开明文的 Surge / Loon / QX / Stash 配置片段，保存到本地集合；下载的纯 JS 不会自动绑定到 hook。
+          </Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-4">
           <Select

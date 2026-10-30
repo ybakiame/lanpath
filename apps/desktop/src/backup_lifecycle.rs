@@ -12,6 +12,9 @@ impl DesktopView {
             || self.scripts.read(cx).busy()
             || self.mitm.read(cx).busy()
             || self.requests.read(cx).busy()
+            || self.system.read(cx).busy()
+            || self.distribution.read(cx).busy()
+            || self.distribution.read(cx).is_pending()
             || self.cores.read(cx).busy()
             || self.diagnostics.read(cx).busy()
     }
@@ -24,6 +27,8 @@ impl DesktopView {
             || self.scripts.read(cx).dirty()
             || self.mitm.read(cx).dirty()
             || self.requests.read(cx).dirty()
+            || self.system.read(cx).dirty()
+            || self.distribution.read(cx).dirty()
     }
 
     pub(super) fn request_restore(
@@ -72,6 +77,8 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_closing(quiescing, cx));
         self.about
             .update(cx, |view, cx| view.set_closing(quiescing, cx));
+        self.system
+            .update(cx, |view, cx| view.set_closing(quiescing, cx));
         let running = !quiescing && self.core_running;
         self.connections
             .update(cx, |view, cx| view.set_running(running, cx));
@@ -82,6 +89,8 @@ impl DesktopView {
         self.scripts
             .update(cx, |view, cx| view.set_running(running, cx));
         self.mitm
+            .update(cx, |view, cx| view.set_running(running, cx));
+        self.system
             .update(cx, |view, cx| view.set_running(running, cx));
         self.sync_request_lock(cx);
     }
@@ -157,7 +166,7 @@ impl DesktopView {
             let result = cx
                 .background_spawn(async move {
                     // Restart also works after re-opening a prepared transaction.
-                    core.stop()?;
+                    let _ = core.stop()?;
                     restart::spawn_replacement()
                 })
                 .await;

@@ -17,22 +17,23 @@ pub(crate) struct ModeChange {
 
 #[derive(Clone)]
 pub(crate) struct ProxyService {
-    port: u16,
     business: Option<BusinessService>,
 }
 
 impl ProxyService {
-    pub(crate) fn new(port: u16, business: Option<BusinessService>) -> Self {
-        Self { port, business }
+    pub(crate) fn new(business: Option<BusinessService>) -> Self {
+        Self { business }
     }
     pub(crate) async fn list(&self) -> Result<ProxyList, String> {
-        clash_get_proxies(self.port, "")
+        let (port, secret) = self.endpoint()?;
+        clash_get_proxies(port, &secret)
             .await
             .map_err(|error| error.to_string())
     }
 
     pub(crate) async fn select(&self, group: &str, name: &str) -> Result<ProxyList, String> {
-        clash_select_proxy(self.port, "", group, name)
+        let (port, secret) = self.endpoint()?;
+        clash_select_proxy(port, &secret, group, name)
             .await
             .map_err(|error| error.to_string())?;
         let business = self.business()?;
@@ -42,13 +43,15 @@ impl ProxyService {
     }
 
     pub(crate) async fn test_delay(&self, name: &str) -> Result<Option<u16>, String> {
-        clash_test_delay(self.port, "", name, None, 5000)
+        let (port, secret) = self.endpoint()?;
+        clash_test_delay(port, &secret, name, None, 5000)
             .await
             .map_err(|error| error.to_string())
     }
 
     pub(crate) async fn test_group(&self, group: &str) -> Result<Vec<DelayResult>, String> {
-        clash_test_group(self.port, "", group)
+        let (port, secret) = self.endpoint()?;
+        clash_test_group(port, &secret, group)
             .await
             .map_err(|error| error.to_string())
     }
@@ -68,10 +71,13 @@ impl ProxyService {
             .set_rule_mode(mode)
             .map_err(|error| error.to_string())?;
         let runtime_warning = if core_running {
-            push_clash_mode(self.port, "", mode)
-                .await
-                .err()
-                .map(|error| error.to_string())
+            match self.endpoint() {
+                Ok((port, secret)) => push_clash_mode(port, &secret, mode)
+                    .await
+                    .err()
+                    .map(|error| error.to_string()),
+                Err(error) => Some(error),
+            }
         } else {
             None
         };
@@ -79,6 +85,12 @@ impl ProxyService {
             mode: mode.to_string(),
             runtime_warning,
         })
+    }
+
+    fn endpoint(&self) -> Result<(u16, String), String> {
+        self.business()?
+            .clash_api_endpoint()
+            .map_err(|error| error.to_string())
     }
 
     fn business(&self) -> Result<&BusinessService, String> {

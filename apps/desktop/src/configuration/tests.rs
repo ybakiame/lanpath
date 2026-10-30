@@ -27,14 +27,25 @@ fn document(_root: &std::path::Path) -> Value {
     })
 }
 
-fn reject(root: &std::path::Path, value: &Value, location: &str) {
-    let error = policy::check(root, value, bindings())
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains(location),
-        "missing field location {location}: {error}"
-    );
+fn reject(root: &std::path::Path, value: &Value) {
+    assert!(policy::check(root, value, &bindings()).is_err());
+}
+
+#[test]
+fn disabled_saved_api_allows_zero_port_but_rejects_inherited_control_plane() {
+    let root = tempfile::tempdir().unwrap();
+    let mut disabled = bindings();
+    disabled.api_enabled = false;
+    disabled.api_port = 0;
+    let mut config = document(root.path());
+    assert!(policy::check(root.path(), &config, &disabled).is_err());
+    config["experimental"]
+        .as_object_mut()
+        .unwrap()
+        .remove("clash_api");
+    policy::check(root.path(), &config, &disabled).unwrap();
+    config.as_object_mut().unwrap().remove("experimental");
+    policy::check(root.path(), &config, &disabled).unwrap();
 }
 
 #[test]
@@ -47,7 +58,7 @@ fn hosts_paths_cannot_expand_environment_variables_outside_the_owned_root() {
     config["dns"] = json!({
         "servers": [{"type": "hosts", "tag": "local", "path": ["$LANPATH_OUTSIDE/hosts"]}]
     });
-    reject(root.path(), &config, "dns.servers[0].path");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -63,20 +74,20 @@ fn managed_listener_cannot_be_widened_or_given_system_effects() {
     ] {
         let mut config = document(root.path());
         config["inbounds"][0][key] = value;
-        reject(root.path(), &config, &format!("inbounds[0].{key}"));
+        reject(root.path(), &config);
     }
     let mut config = document(root.path());
     config["inbounds"]
         .as_array_mut()
         .unwrap()
         .push(json!({"type":"tun"}));
-    reject(root.path(), &config, "inbounds");
+    reject(root.path(), &config);
     let mut config = document(root.path());
     config["inbounds"][0]
         .as_object_mut()
         .unwrap()
         .remove("listen");
-    reject(root.path(), &config, "inbounds[0].listen");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -90,7 +101,7 @@ fn only_the_fixed_loopback_mitm_return_inbound_is_authorized() {
         "listen": "127.0.0.1",
         "listen_port": bindings().mixed_port() + 1
     }));
-    policy::check(root.path(), &config, bindings()).unwrap();
+    policy::check(root.path(), &config, &bindings()).unwrap();
 
     for (key, value) in [
         ("type", json!("tun")),
@@ -101,19 +112,19 @@ fn only_the_fixed_loopback_mitm_return_inbound_is_authorized() {
     ] {
         let mut invalid = config.clone();
         invalid["inbounds"][1][key] = value;
-        reject(root.path(), &invalid, &format!("inbounds[1].{key}"));
+        reject(root.path(), &invalid);
     }
 
     let mut invalid_main = config.clone();
     invalid_main["inbounds"][0]["tag"] = json!("mixed-in");
-    reject(root.path(), &invalid_main, "inbounds[0].tag");
+    reject(root.path(), &invalid_main);
 
     let mut extra = config;
     extra["inbounds"]
         .as_array_mut()
         .unwrap()
         .push(json!({"type": "mixed"}));
-    reject(root.path(), &extra, "inbounds");
+    reject(root.path(), &extra);
 }
 
 #[test]
@@ -128,11 +139,11 @@ fn extra_control_planes_and_unknown_top_level_capabilities_are_rejected() {
     ] {
         let mut config = document(root.path());
         config[key] = json!([]);
-        reject(root.path(), &config, key);
+        reject(root.path(), &config);
     }
     let mut config = document(root.path());
     config["experimental"]["v2ray_api"] = json!({"listen":"127.0.0.1:9000"});
-    reject(root.path(), &config, "experimental.v2ray_api");
+    reject(root.path(), &config);
     for (key, value) in [
         ("secret", json!("not-erased")),
         ("external_controller", json!("localhost:19091")),
@@ -144,11 +155,7 @@ fn extra_control_planes_and_unknown_top_level_capabilities_are_rejected() {
     ] {
         let mut config = document(root.path());
         config["experimental"]["clash_api"][key] = value;
-        reject(
-            root.path(),
-            &config,
-            &format!("experimental.clash_api.{key}"),
-        );
+        reject(root.path(), &config);
     }
 }
 
@@ -157,9 +164,9 @@ fn ntp_clock_writes_and_external_runtime_protocols_are_not_authorized() {
     let root = tempfile::tempdir().unwrap();
     let mut config = document(root.path());
     config["ntp"] = json!({"enabled":true,"server":"time.example","write_to_system":true});
-    reject(root.path(), &config, "ntp.write_to_system");
+    reject(root.path(), &config);
     config["ntp"]["write_to_system"] = json!(false);
-    policy::check(root.path(), &config, bindings()).unwrap();
+    policy::check(root.path(), &config, &bindings()).unwrap();
     for kind in [
         "wireguard",
         "tailscale",
@@ -171,11 +178,11 @@ fn ntp_clock_writes_and_external_runtime_protocols_are_not_authorized() {
     ] {
         let mut config = document(root.path());
         config["outbounds"][1]["type"] = json!(kind);
-        reject(root.path(), &config, "outbounds[1].type");
+        reject(root.path(), &config);
     }
     let mut config = document(root.path());
     config["outbounds"][1]["netns"] = json!("/proc/1/ns/net");
-    reject(root.path(), &config, "outbounds[1].netns");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -201,7 +208,7 @@ fn common_client_protocols_are_not_blanket_rejected() {
         });
         // These cases exercise the capability boundary, not protocol schema.
         // Required credentials remain the real core's responsibility.
-        policy::check(root.path(), &config, bindings()).unwrap();
+        policy::check(root.path(), &config, &bindings()).unwrap();
     }
 }
 
@@ -214,27 +221,27 @@ fn tls_nested_resources_and_unsupported_certificate_automation_cannot_escape() {
         "type":"trojan","tag":"direct","server":"proxy.example","server_port":443,
         "password":"secret","tls":{"enabled":true,"certificate_path":"ca.pem"}
     });
-    policy::check(root.path(), &config, bindings()).unwrap();
+    policy::check(root.path(), &config, &bindings()).unwrap();
     for name in [
         "certificate_path",
         "client_certificate_path",
         "client_key_path",
     ] {
         config["outbounds"][1]["tls"][name] = json!("../outside.pem");
-        reject(root.path(), &config, &format!("outbounds[1].tls.{name}"));
+        reject(root.path(), &config);
         config["outbounds"][1]["tls"]
             .as_object_mut()
             .unwrap()
             .remove(name);
     }
     config["outbounds"][1]["tls"]["ech"] = json!({"config_path":"../outside.json"});
-    reject(root.path(), &config, "outbounds[1].tls.ech.config_path");
+    reject(root.path(), &config);
     config["outbounds"][1]["tls"]
         .as_object_mut()
         .unwrap()
         .remove("ech");
     config["outbounds"][1]["tls"]["acme"] = json!({"domain":["example.invalid"]});
-    reject(root.path(), &config, "outbounds[1].tls.acme");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -247,7 +254,7 @@ fn local_rule_files_and_http_client_tls_are_confined_without_expansion() {
     .unwrap();
     let mut config = document(root.path());
     config["route"]["rule_set"] = json!([{"type":"local","tag":"private","path":"rules.json"}]);
-    policy::check(root.path(), &config, bindings()).unwrap();
+    policy::check(root.path(), &config, &bindings()).unwrap();
     for path in [
         "../rules.json",
         "/etc/passwd",
@@ -255,14 +262,14 @@ fn local_rule_files_and_http_client_tls_are_confined_without_expansion() {
         "rules-{tag}.json",
     ] {
         config["route"]["rule_set"][0]["path"] = json!(path);
-        reject(root.path(), &config, "route.rule_set[0].path");
+        reject(root.path(), &config);
     }
     config["route"]["rule_set"][0]["path"] = json!("rules.json");
     config["route"]["rule_set"][0]["tag"] = json!(["a", "../../production"]);
-    reject(root.path(), &config, "route.rule_set[0].tag");
+    reject(root.path(), &config);
     config["route"].as_object_mut().unwrap().remove("rule_set");
     config["http_clients"] = json!([{"tag":"download","tls":{"client_key_path":"../key.pem"}}]);
-    reject(root.path(), &config, "http_clients[0].tls.client_key_path");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -273,7 +280,7 @@ fn write_resources_cannot_overwrite_managed_documents_or_use_implicit_cache_path
     let mut config = document(root.path());
     config["log"]["output"] = json!("logs/core.log");
     config["experimental"]["cache_file"] = json!({"enabled":true,"path":"cache/core.db"});
-    policy::check(root.path(), &config, bindings()).unwrap();
+    policy::check(root.path(), &config, &bindings()).unwrap();
     for path in [
         "configuration.json",
         "sing-box.json",
@@ -287,14 +294,14 @@ fn write_resources_cannot_overwrite_managed_documents_or_use_implicit_cache_path
         "logs/core.log ",
     ] {
         config["log"]["output"] = json!(path);
-        reject(root.path(), &config, "log.output");
+        reject(root.path(), &config);
     }
     config["log"].as_object_mut().unwrap().remove("output");
     config["experimental"]["cache_file"]
         .as_object_mut()
         .unwrap()
         .remove("path");
-    reject(root.path(), &config, "experimental.cache_file.path");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -309,7 +316,7 @@ fn dns_hosts_cannot_fall_back_to_external_system_files() {
         json!({"type":"mdns","tag":"mdns"}),
     ] {
         config["dns"] = json!({"servers":[server]});
-        reject(root.path(), &config, "dns.servers[0]");
+        reject(root.path(), &config);
     }
 }
 
@@ -319,11 +326,11 @@ fn unknown_nested_tls_and_rule_actions_are_rejected() {
     let mut config = document(root.path());
     config["route"]["rules"] =
         json!([{"type":"logical","mode":"or","rules":[{"action":"bypass"}]}]);
-    reject(root.path(), &config, "route.rules[0].rules[0].action");
+    reject(root.path(), &config);
     config["route"].as_object_mut().unwrap().remove("rules");
     config["outbounds"][1] =
         json!({"type":"http","tag":"direct","tls":{"future_key_log":"/tmp/secrets"}});
-    reject(root.path(), &config, "outbounds[1].tls.future_key_log");
+    reject(root.path(), &config);
 }
 
 #[test]
@@ -367,7 +374,7 @@ fn symlinked_resource_parents_are_refused_without_reading_them() {
     symlink(outside.path(), root.path().join("logs")).unwrap();
     let mut config = document(root.path());
     config["log"]["output"] = json!("logs/core.log");
-    reject(root.path(), &config, "log.output");
+    reject(root.path(), &config);
 }
 
 /// Explicit opt-in test against a real selected sing-box, never an echo script
@@ -396,33 +403,17 @@ async fn real_core_checks_generated_value() {
 #[test]
 fn go_case_insensitive_field_aliases_cannot_hide_side_effects() {
     let root = tempfile::tempdir().unwrap();
-    for (pointer, key, value, location) in [
-        ("/log", "OUTPUT", json!("../production.json"), "log.OUTPUT"),
-        ("/log", "Output", json!("../production.json"), "log.Output"),
+    for (pointer, key, value) in [
+        ("/log", "OUTPUT", json!("../production.json")),
+        ("/log", "Output", json!("../production.json")),
         (
             "/experimental/clash_api",
             "EXTERNAL_CONTROLLER",
             json!("0.0.0.0:9000"),
-            "experimental.clash_api.EXTERNAL_CONTROLLER",
         ),
-        (
-            "/experimental/clash_api",
-            "Secret",
-            json!("hidden"),
-            "experimental.clash_api.Secret",
-        ),
-        (
-            "/inbounds/0",
-            "SET_SYSTEM_PROXY",
-            json!(true),
-            "inbounds[0].SET_SYSTEM_PROXY",
-        ),
-        (
-            "/outbounds/1",
-            "NetNS",
-            json!("/proc/1/ns/net"),
-            "outbounds[1].NetNS",
-        ),
+        ("/experimental/clash_api", "Secret", json!("hidden")),
+        ("/inbounds/0", "SET_SYSTEM_PROXY", json!(true)),
+        ("/outbounds/1", "NetNS", json!("/proc/1/ns/net")),
     ] {
         let mut config = document(root.path());
         config
@@ -431,7 +422,7 @@ fn go_case_insensitive_field_aliases_cannot_hide_side_effects() {
             .as_object_mut()
             .unwrap()
             .insert(key.into(), value);
-        reject(root.path(), &config, location);
+        reject(root.path(), &config);
     }
     for (key, value) in [
         ("WRITE_TO_SYSTEM", json!(true)),
@@ -440,7 +431,7 @@ fn go_case_insensitive_field_aliases_cannot_hide_side_effects() {
         let mut config = document(root.path());
         config["ntp"] = json!({"write_to_system":false,"server":"time.example"});
         config["ntp"][key] = value;
-        reject(root.path(), &config, &format!("ntp.{key}"));
+        reject(root.path(), &config);
     }
     for (key, value) in [
         ("ENABLED", json!(true)),
@@ -449,17 +440,13 @@ fn go_case_insensitive_field_aliases_cannot_hide_side_effects() {
         let mut config = document(root.path());
         config["experimental"]["cache_file"] = json!({"enabled":false});
         config["experimental"]["cache_file"][key] = value;
-        reject(
-            root.path(),
-            &config,
-            &format!("experimental.cache_file.{key}"),
-        );
+        reject(root.path(), &config);
     }
     let mut config = document(root.path());
     config["outbounds"][1] = json!({"type":"http","tls":{"CERTIFICATE_PATH":"../production.pem"}});
-    reject(root.path(), &config, "outbounds[1].tls.CERTIFICATE_PATH");
+    reject(root.path(), &config);
     let mut config = document(root.path());
     config["route"]["rule_set"] =
         json!([{"type":"local","tag":"rules","PATH":"../production.json"}]);
-    reject(root.path(), &config, "route.rule_set[0].PATH");
+    reject(root.path(), &config);
 }

@@ -1,274 +1,275 @@
-//! MITM CA 证书管理。
-//!
-//! 通过 [`CaStore`] 抽象 CA 材料（证书 + 私钥）的加载与持久化，
-//! [`FileCaStore`] 为基于本地目录的默认实现：首次调用时用 rcgen 生成
-//! 自签 CA 并落盘（Unix 0600 权限），后续调用直接加载既有材料。
-
-use std::fs;
-use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-
+//! Validated, recoverable CA identity storage. Loading never rotates an identity or installs trust.
 use lanpath_common::error::{LanpathError, LanpathResult};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
-// 独立 FileCaStore 实例也必须共享保护；异步 UI 查询与核心启动可能同时首次生成 CA。
-static CA_FILE_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) mod protection;
+#[cfg(test)]
+mod tests;
+pub(crate) mod validation;
+pub use validation::validate_ca_material;
 
-/// MITM CA 材料（PEM 编码）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CaMaterial {
     pub cert_pem: String,
     pub key_pem: String,
 }
-
-/// CA 材料的存储抽象。
+impl std::fmt::Debug for CaMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaMaterial")
+            .field("cert_pem", &self.cert_pem)
+            .field("key_pem", &"[REDACTED]")
+            .finish()
+    }
+}
 pub trait CaStore: Send + Sync {
-    /// 从存储加载既有 CA，若不存在则生成并持久化新的自签 CA。
+    /// Generate only when no identity or interrupted transaction exists.
     fn load_or_generate(&self) -> LanpathResult<CaMaterial>;
 }
-
-/// 基于本地目录的 [`CaStore`]。
-///
-/// 目录内约定 `ca.crt` / `ca.key` 两个文件。任一文件缺失时生成新的
-/// 自签 CA 并以 Unix 0600 权限写入；后续加载直接返回持久化材料。
 #[derive(Debug, Clone)]
 pub struct FileCaStore {
     dir: PathBuf,
 }
-
 impl FileCaStore {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
     }
-
-    fn cert_path(&self) -> PathBuf {
+    pub fn cert_path(&self) -> PathBuf {
         self.dir.join("ca.crt")
     }
-
-    fn key_path(&self) -> PathBuf {
+    pub fn key_path(&self) -> PathBuf {
         self.dir.join("ca.key")
     }
-}
-
-impl CaStore for FileCaStore {
-    fn load_or_generate(&self) -> LanpathResult<CaMaterial> {
-        let _guard = CA_FILE_LOCK
-            .lock()
-            .map_err(|e| LanpathError::Mitm(format!("CA 文件锁失败: {e}")))?;
-        fs::create_dir_all(&self.dir)
-            .map_err(|e| LanpathError::Mitm(format!("create ca dir {:?}: {e}", self.dir)))?;
-        let cert_path = self.cert_path();
-        let key_path = self.key_path();
-        if cert_path.exists() && key_path.exists() {
-            return load_material(&cert_path, &key_path);
-        }
-        let material = generate_ca_material()?;
-        write_private(&cert_path, &material.cert_pem)?;
-        write_private(&key_path, &material.key_pem)?;
-        // 二次加载校验一致：重新从磁盘读取并返回，确保落盘内容与生成内容一致。
-        load_material(&cert_path, &key_path)
+    /// Read an existing complete identity without generating or recovering another one.
+    pub fn load_existing(&self) -> LanpathResult<CaMaterial> {
+        require_directory(&self.dir)?;
+        protection::protect(&self.dir, true)?;
+        load_material(&self.cert_path(), &self.key_path())
     }
 }
-
-fn load_material(cert_path: &Path, key_path: &Path) -> LanpathResult<CaMaterial> {
-    let cert_pem = fs::read_to_string(cert_path)
-        .map_err(|e| LanpathError::Mitm(format!("read ca cert {:?}: {e}", cert_path)))?;
-    let key_pem = fs::read_to_string(key_path)
-        .map_err(|e| LanpathError::Mitm(format!("read ca key {:?}: {e}", key_path)))?;
-    Ok(CaMaterial { cert_pem, key_pem })
+fn error(message: impl Into<String>) -> LanpathError {
+    LanpathError::Mitm(message.into())
 }
-
-/// 构造自签 CA 的证书参数。
-///
-/// - SAN 留空（名称字符串曾误当 SAN 传入，导致生成出空 DN 的证书）
-/// - CN 经 distinguished_name 显式设置
-/// - `IsCa::Ca(Unconstrained)` + key usage 含 keyCertSign / cRLSign / digitalSignature
-/// - 显式有效期 10 年（not_before 回拨 1 天缓冲时钟偏差）
+fn io_error(operation: &str, e: std::io::Error) -> LanpathError {
+    error(format!("CA {operation}: {e}"))
+}
+pub(crate) fn exists(path: &Path) -> LanpathResult<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err(error("CA paths must not be symbolic links"))
+        }
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(io_error("inspect path", e)),
+    }
+}
+pub(crate) fn require_directory(path: &Path) -> LanpathResult<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| io_error("inspect directory", e))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(error(
+            "CA storage and transaction paths must be real directories",
+        ));
+    }
+    Ok(())
+}
+pub(crate) fn require_file(path: &Path) -> LanpathResult<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| io_error("inspect material", e))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(error(
+            "CA certificate, private key and lock must be regular files",
+        ));
+    }
+    Ok(())
+}
+impl CaStore for FileCaStore {
+    fn load_or_generate(&self) -> LanpathResult<CaMaterial> {
+        if !exists(&self.dir)? {
+            fs::create_dir_all(&self.dir).map_err(|e| io_error("create directory", e))?;
+        }
+        require_directory(&self.dir)?;
+        // Restrict before creating any private material, including portable storage.
+        protection::protect(&self.dir, true)?;
+        let lock_path = self.dir.join(".ca.lock");
+        if exists(&lock_path)? {
+            require_file(&lock_path)?;
+        }
+        let lock = private_options()
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| io_error("open process lock", e))?;
+        protection::protect(&lock_path, false)?;
+        fs2::FileExt::lock_exclusive(&lock).map_err(|e| io_error("lock identity", e))?;
+        let transaction = self.dir.join(".ca-transaction");
+        let staging = self.dir.join(".ca-staging");
+        if exists(&staging)? {
+            require_directory(&staging)?;
+            if exists(&transaction)? {
+                return Err(error(
+                    "Multiple CA transactions preserved; explicit recovery required",
+                ));
+            }
+            // A crash after the second file flush but before rename can recover the exact pair.
+            load_material(&staging.join("ca.crt"), &staging.join("ca.key"))?;
+            fs::rename(&staging, &transaction)
+                .map_err(|e| io_error("recover staged identity", e))?;
+            sync_directory(&self.dir)?;
+        }
+        if exists(&transaction)? {
+            require_directory(&transaction)?;
+            publish_transaction(&self.dir, &transaction)?;
+        }
+        let cert_exists = exists(&self.cert_path())?;
+        let key_exists = exists(&self.key_path())?;
+        if cert_exists != key_exists {
+            if key_exists {
+                require_file(&self.key_path())?;
+                protection::protect(&self.key_path(), false)?;
+            }
+            return Err(error(
+                "CA identity is incomplete; restore the original matching certificate AND private key. No replacement was generated.",
+            ));
+        }
+        if cert_exists {
+            return load_material(&self.cert_path(), &self.key_path());
+        }
+        for entry in
+            fs::read_dir(&self.dir).map_err(|e| io_error("inspect recovery journals", e))?
+        {
+            let entry = entry.map_err(|e| io_error("inspect recovery journal", e))?;
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".ca-retired-")
+            {
+                return Err(error(
+                    "An earlier CA recovery journal remains; restore its original identity explicitly. No replacement was generated.",
+                ));
+            }
+        }
+        let material = generate_ca_material()?;
+        fs::create_dir(&staging).map_err(|e| io_error("create staging directory", e))?;
+        protection::protect(&staging, true)?;
+        write_private(&staging.join("ca.crt"), &material.cert_pem)?;
+        write_private(&staging.join("ca.key"), &material.key_pem)?;
+        sync_directory(&staging)?;
+        // This rename is the commit point: only a complete validated pair becomes recoverable.
+        fs::rename(&staging, &transaction)
+            .map_err(|e| io_error("commit identity transaction", e))?;
+        sync_directory(&self.dir)?;
+        publish_transaction(&self.dir, &transaction)?;
+        load_material(&self.cert_path(), &self.key_path())
+    }
+}
+fn publish_transaction(dir: &Path, transaction: &Path) -> LanpathResult<()> {
+    let material = load_material(&transaction.join("ca.crt"), &transaction.join("ca.key"))?;
+    // Check *both* existing destinations before publishing either. Never overwrite user bytes.
+    for (name, expected) in [
+        ("ca.crt", &material.cert_pem),
+        ("ca.key", &material.key_pem),
+    ] {
+        let destination = dir.join(name);
+        if exists(&destination)?
+            && fs::read(&destination).map_err(|e| io_error("read destination", e))?
+                != expected.as_bytes()
+        {
+            return Err(error(
+                "CA transaction conflicts with existing identity; all material preserved for explicit recovery",
+            ));
+        }
+    }
+    for name in ["ca.crt", "ca.key"] {
+        let destination = dir.join(name);
+        if !exists(&destination)? {
+            // Atomic no-clobber publication. Hard links keep the journal available through any crash.
+            fs::hard_link(transaction.join(name), destination).map_err(|e| {
+                io_error("publish identity (filesystem must support hard links)", e)
+            })?;
+        }
+    }
+    protection::protect(&dir.join("ca.key"), false)?;
+    sync_directory(dir)?;
+    // Atomic retirement prevents a crash during cleanup from leaving a half journal.
+    let retired = dir.join(format!(".ca-retired-{}", uuid::Uuid::new_v4()));
+    fs::rename(transaction, &retired).map_err(|e| io_error("retire transaction", e))?;
+    sync_directory(dir)?;
+    fs::remove_dir_all(retired).map_err(|e| io_error("remove retired transaction", e))?;
+    Ok(())
+}
+fn load_material(cert: &Path, key: &Path) -> LanpathResult<CaMaterial> {
+    require_file(key)?;
+    // Invalid/expired and incomplete material is preserved too, but its key is still protected.
+    protection::protect(key, false)?;
+    require_file(cert)?;
+    let material = CaMaterial {
+        cert_pem: fs::read_to_string(cert).map_err(|e| io_error("read certificate", e))?,
+        key_pem: fs::read_to_string(key).map_err(|e| io_error("read private key", e))?,
+    };
+    validate_ca_material(&material)?;
+    Ok(material)
+}
+pub(crate) fn private_options() -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+}
+pub(crate) fn write_private(path: &Path, contents: &str) -> LanpathResult<()> {
+    let mut file = private_options()
+        .create_new(true)
+        .open(path)
+        .map_err(|e| io_error("create private file", e))?;
+    protection::protect(path, false)?;
+    file.write_all(contents.as_bytes())
+        .map_err(|e| io_error("write private file", e))?;
+    file.sync_all()
+        .map_err(|e| io_error("sync private file", e))
+}
+pub(crate) fn sync_directory(path: &Path) -> LanpathResult<()> {
+    #[cfg(unix)]
+    {
+        fs::File::open(path)
+            .and_then(|file| file.sync_all())
+            .map_err(|e| io_error("sync directory", e))?;
+    }
+    // Windows MoveFile/NTFS journal recovery is completed on next load; individual files are flushed.
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
 fn ca_params() -> LanpathResult<rcgen::CertificateParams> {
-    // rcgen 0.14：`CertificateParams::new` 的参数是 SAN 列表。
     let mut params = rcgen::CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| LanpathError::Mitm(format!("init ca params: {e}")))?;
+        .map_err(|e| error(format!("CA parameters: {e}")))?;
     params
         .distinguished_name
-        .push(rcgen::DnType::CommonName, "ProxyPanel MITM CA");
+        .push(rcgen::DnType::CommonName, "Lanpath MITM CA");
     params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    // 显式声明 CA 用途：keyCertSign / cRLSign / digitalSignature。
-    // 缺 keyCertSign 时 iOS/macOS 及部分 Android 严格校验会拒绝该 CA
-    // （TLS 握手 `CertificateUnknown`）。
     params.key_usages = vec![
         rcgen::KeyUsagePurpose::KeyCertSign,
         rcgen::KeyUsagePurpose::CrlSign,
         rcgen::KeyUsagePurpose::DigitalSignature,
     ];
-    // 显式有效期：10 年，not_before 回拨 1 天缓冲客户端时钟偏差。
     let now = time::OffsetDateTime::now_utc();
     params.not_before = now - time::Duration::days(1);
     params.not_after = now + time::Duration::days(3650);
     Ok(params)
 }
-
 fn generate_ca_material() -> LanpathResult<CaMaterial> {
-    let key_pair = rcgen::KeyPair::generate()
-        .map_err(|e| LanpathError::Mitm(format!("generate ca key pair: {e}")))?;
+    let key = rcgen::KeyPair::generate().map_err(|e| error(format!("CA key generation: {e}")))?;
     let cert = ca_params()?
-        .self_signed(&key_pair)
-        .map_err(|e| LanpathError::Mitm(format!("self sign ca: {e}")))?;
-    Ok(CaMaterial {
+        .self_signed(&key)
+        .map_err(|e| error(format!("CA signing: {e}")))?;
+    let material = CaMaterial {
         cert_pem: cert.pem(),
-        key_pem: key_pair.serialize_pem(),
-    })
-}
-
-/// 写入私钥/证书文件（创建/覆盖）。
-///
-/// Unix 下以 0600 权限写入；Windows 无 POSIX 权限位，使用普通写入（ACL 由
-/// 用户目录继承，收紧留待后续）。
-fn write_private(path: &Path, contents: &str) -> LanpathResult<()> {
-    write_private_impl(path, contents)
-}
-
-#[cfg(unix)]
-fn write_private_impl(path: &Path, contents: &str) -> LanpathResult<()> {
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|e| LanpathError::Mitm(format!("create {:?}: {e}", path)))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| LanpathError::Mitm(format!("write {:?}: {e}", path)))?;
-    file.sync_all()
-        .map_err(|e| LanpathError::Mitm(format!("sync {:?}: {e}", path)))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_private_impl(path: &Path, contents: &str) -> LanpathResult<()> {
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|e| LanpathError::Mitm(format!("create {:?}: {e}", path)))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| LanpathError::Mitm(format!("write {:?}: {e}", path)))?;
-    file.sync_all()
-        .map_err(|e| LanpathError::Mitm(format!("sync {:?}: {e}", path)))?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use tempfile::tempdir;
-
-    #[test]
-    fn file_ca_store_generates_and_reloads_consistently() {
-        let dir = tempdir().unwrap();
-        let store = FileCaStore::new(dir.path());
-        let first = store.load_or_generate().unwrap();
-        let second = store.load_or_generate().unwrap();
-        assert_eq!(first.cert_pem, second.cert_pem);
-        assert_eq!(first.key_pem, second.key_pem);
-        assert!(first.cert_pem.contains("BEGIN CERTIFICATE"));
-        assert!(first.key_pem.contains("PRIVATE KEY"));
-        assert!(!first.key_pem.contains("PUBLIC KEY"));
-    }
-
-    #[test]
-    fn concurrent_stores_share_one_complete_ca_pair() {
-        let dir = tempdir().unwrap();
-        let barrier = std::sync::Barrier::new(8);
-        let materials = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..8)
-                .map(|_| {
-                    let barrier = &barrier;
-                    let path = dir.path();
-                    scope.spawn(move || {
-                        barrier.wait();
-                        FileCaStore::new(path).load_or_generate().unwrap()
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|handle| handle.join().unwrap())
-                .collect::<Vec<_>>()
-        });
-        let persisted = FileCaStore::new(dir.path()).load_or_generate().unwrap();
-        for material in materials {
-            assert_eq!(material, persisted);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn file_ca_store_writes_private_files_with_0600() {
-        let dir = tempdir().unwrap();
-        let store = FileCaStore::new(dir.path());
-        store.load_or_generate().unwrap();
-        for name in ["ca.crt", "ca.key"] {
-            let path = dir.path().join(name);
-            let mode = fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "unexpected mode for {name}: {mode:o}");
-        }
-    }
-
-    /// 生成的 CA 必须能通过 hudsucker 的 `Issuer::from_ca_cert_pem` 解析，并真实
-    /// 签发叶证书。这是 keyCertSign / is_ca 修正的回归测试：旧 CA（缺 key usage、
-    /// 空 DN）在严格客户端（iOS/macOS）TLS 握手中会被拒绝（CertificateUnknown）。
-    #[test]
-    fn generated_ca_parses_with_hudsucker_issuer_and_signs_leaf() {
-        let material = generate_ca_material().unwrap();
-        let key_pair = hudsucker::rcgen::KeyPair::from_pem(&material.key_pem).unwrap();
-        let issuer = hudsucker::rcgen::Issuer::from_ca_cert_pem(&material.cert_pem, key_pair)
-            .expect("CA 材料应能被 hudsucker Issuer 解析");
-
-        // 用该 CA 真实签发一个叶证书：解析 + 签发全链路通过即证明 CA 可用。
-        let leaf_key = hudsucker::rcgen::KeyPair::generate().unwrap();
-        let leaf =
-            hudsucker::rcgen::CertificateParams::new(vec!["example.com".to_string()]).unwrap();
-        leaf.signed_by(&leaf_key, &issuer)
-            .expect("CA 应能签发叶证书");
-    }
-
-    /// 生成的 CA 携带正确的 CN / key usage / CA 约束 / 有效期（本次修复的核心点）。
-    #[test]
-    fn ca_params_carry_cn_key_usage_and_validity() {
-        let params = ca_params().unwrap();
-        assert_eq!(
-            params.distinguished_name.get(&rcgen::DnType::CommonName),
-            Some(&rcgen::DnValue::Utf8String(
-                "ProxyPanel MITM CA".to_string()
-            ))
-        );
-        assert_eq!(
-            params.key_usages,
-            vec![
-                rcgen::KeyUsagePurpose::KeyCertSign,
-                rcgen::KeyUsagePurpose::CrlSign,
-                rcgen::KeyUsagePurpose::DigitalSignature,
-            ]
-        );
-        assert!(matches!(
-            params.is_ca,
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained)
-        ));
-        // not_before 回拨 1 天（早于当前时间），有效期约 10 年（±2 天容差）。
-        assert!(
-            params.not_before < time::OffsetDateTime::now_utc(),
-            "not_before 应回拨到当前时间之前"
-        );
-        let span = params.not_after - params.not_before;
-        assert!(
-            span >= time::Duration::days(3649),
-            "有效期不足 10 年: {span:?}"
-        );
-        assert!(span <= time::Duration::days(3653), "有效期过长: {span:?}");
-    }
+        key_pem: key.serialize_pem(),
+    };
+    validate_ca_material(&material)?;
+    Ok(material)
 }

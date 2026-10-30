@@ -41,7 +41,7 @@ impl DiskLogsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let files = cx.new(|cx| ListState::new(DiskFileList::default(), window, cx));
+        let files = cx.new(|cx| crate::keyboard::list_state(DiskFileList::default(), window, cx));
         let tail = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let root = core
             .business()

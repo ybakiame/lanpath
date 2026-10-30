@@ -61,7 +61,7 @@ fn qx_redirect_and_echo_response() {
 ^https://api\\.com/data url echo-response application/json echo-response {\"code\":0}
 ";
     let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-    assert_eq!(cfg.rewrites.len(), 2);
+    assert_eq!(cfg.rewrites.len(), 1);
     match &cfg.rewrites[0].kind {
         RewriteKind::Redirect { status, target } => {
             assert_eq!(*status, 302);
@@ -69,21 +69,11 @@ fn qx_redirect_and_echo_response() {
         }
         other => panic!("expected Redirect, got {other:?}"),
     }
-    match &cfg.rewrites[1].kind {
-        RewriteKind::Mock {
-            status,
-            body,
-            headers,
-        } => {
-            assert_eq!(*status, 200);
-            assert_eq!(body, b"{\"code\":0}");
-            assert_eq!(
-                headers,
-                &vec![("Content-Type".to_string(), "application/json".to_string())]
-            );
-        }
-        other => panic!("expected Mock, got {other:?}"),
-    }
+    assert!(
+        cfg.warnings
+            .iter()
+            .any(|warning| warning.contains("file source unsupported"))
+    );
 }
 
 #[test]
@@ -171,12 +161,12 @@ fn qx_jsonjq_skipped_with_warning() {
     assert!(cfg.rewrites.is_empty());
     assert!(cfg.scripts.is_empty());
     assert_eq!(cfg.warnings.len(), 1);
-    assert!(cfg.warnings[0].contains("jsonjq"));
+    assert!(cfg.warnings[0].contains("jq engine unsupported"));
 }
 
 #[test]
-fn qx_mixed_dialect_lines_dispatched_by_line_shape() {
-    // 网易云段形态：QX 文件内混入 Surge 风格脚本行与 Loon 风格脚本行。
+fn qx_mixed_dialect_lines_are_not_guessed_or_activated() {
+    // A resource dialect is not permission to relabel a foreign grammar.
     let content = "\
 [rewrite_local]
 网易云音质 = type=http-request, pattern=^https://music\\.163\\.com, script-path=https://x.com/ncm.js
@@ -184,12 +174,9 @@ http-response ^https://api\\.x\\.com/me script-path=https://x.com/me.js, require
 ^https://a\\.com/ads url reject
 ";
     let cfg = parse_import(content, ScriptDialect::QuantumultX).unwrap();
-    assert_eq!(cfg.scripts.len(), 2);
-    assert_eq!(cfg.scripts[0].name, "网易云音质");
-    assert_eq!(cfg.scripts[0].kind, ScriptKind::HttpRequest);
-    assert_eq!(cfg.scripts[1].name, "LoonHook");
-    assert_eq!(cfg.scripts[1].kind, ScriptKind::HttpResponse);
-    assert!(cfg.scripts[1].requires_body);
+    assert!(cfg.scripts.is_empty());
+    assert!(cfg.script_urls.is_empty());
+    assert_eq!(cfg.warnings.len(), 2);
     assert_eq!(cfg.rewrites.len(), 1);
     assert!(matches!(cfg.rewrites[0].kind, RewriteKind::Reject { .. }));
 }
@@ -250,9 +237,8 @@ fn loon_rewrite_section_full_actions() {
         other => panic!("expected Redirect, got {other:?}"),
     }
     match &cfg.rewrites[6].kind {
-        RewriteKind::HeaderRewrite { name, value, .. } => {
+        RewriteKind::HeaderRemove { name, .. } => {
             assert_eq!(name, "if-none-match");
-            assert_eq!(*value, None);
         }
         other => panic!("expected header-del, got {other:?}"),
     }
@@ -282,11 +268,16 @@ http-request ^https://api\\.y\\.com/pro script-path=https://x.com/pro.js, requir
     assert_eq!(cfg.scripts.len(), 2);
     assert_eq!(cfg.scripts[0].name, "Me");
     assert!(!cfg.scripts[0].requires_body);
-    assert_eq!(cfg.scripts[0].pattern.as_str(), "^https://api\\.x\\.com/me");
+    assert!(
+        cfg.scripts[0]
+            .pattern
+            .is_match("HTTPS://API.X.COM/me")
+            .unwrap()
+    );
     let pro = &cfg.scripts[1];
     assert!(pro.requires_body);
-    assert_eq!(pro.max_size, 10 * 1024 * 1024);
-    assert_eq!(pro.argument.as_deref(), Some("\"is_pro_user\":true"));
+    assert_eq!(pro.max_size, usize::MAX);
+    assert_eq!(pro.argument.as_deref(), Some("%22is_pro_user%22%3Atrue"));
 }
 
 #[test]
@@ -329,17 +320,17 @@ http-response ^https://a\\.com/ header-replace X-Cache hit
     let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
     assert_eq!(cfg.rewrites.len(), 3);
     match &cfg.rewrites[0].kind {
-        RewriteKind::HeaderRewrite { phase, name, .. } => {
+        RewriteKind::HeaderRemove { phase, name } => {
             assert_eq!(*phase, Phase::Request);
             assert_eq!(name, "if-none-match");
         }
         other => panic!("expected HeaderRewrite, got {other:?}"),
     }
     match &cfg.rewrites[1].kind {
-        RewriteKind::HeaderRewrite { phase, name, value } => {
+        RewriteKind::HeaderReplace { phase, name, value } => {
             assert_eq!(*phase, Phase::Response);
             assert_eq!(name, "X-Cache");
-            assert_eq!(value.as_deref(), Some("hit"));
+            assert_eq!(value, "hit");
         }
         other => panic!("expected HeaderRewrite, got {other:?}"),
     }
@@ -359,26 +350,18 @@ http-request ^https://api\\.com/up token=\\w+ token=redacted
     let cfg = parse_import(content, ScriptDialect::Surge).unwrap();
     assert_eq!(cfg.rewrites.len(), 2);
     match &cfg.rewrites[0].kind {
-        RewriteKind::BodyRewrite {
-            phase,
-            body_pattern,
-            replacement,
-        } => {
+        RewriteKind::BodyRewritePairs { phase, pairs } => {
             assert_eq!(*phase, Phase::Response);
-            assert_eq!(body_pattern.as_ref().unwrap().as_str(), r#""vip":false"#);
-            assert_eq!(replacement, r#""vip":true"#);
+            assert_eq!(pairs[0].0.as_str(), r#"(?m)"vip":false"#);
+            assert_eq!(pairs[0].1, r#""vip":true"#);
         }
         other => panic!("expected BodyRewrite, got {other:?}"),
     }
     match &cfg.rewrites[1].kind {
-        RewriteKind::BodyRewrite {
-            phase,
-            body_pattern,
-            replacement,
-        } => {
+        RewriteKind::BodyRewritePairs { phase, pairs } => {
             assert_eq!(*phase, Phase::Request);
-            assert_eq!(body_pattern.as_ref().unwrap().as_str(), r"token=\w+");
-            assert_eq!(replacement, "token=redacted");
+            assert_eq!(pairs[0].0.as_str(), r"(?m)token=\w+");
+            assert_eq!(pairs[0].1, "token=redacted");
         }
         other => panic!("expected BodyRewrite, got {other:?}"),
     }

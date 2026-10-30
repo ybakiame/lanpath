@@ -9,13 +9,16 @@ pub(crate) fn build_client(
     timeout: Duration,
     cfg: &ClientConfig,
 ) -> LanpathResult<reqwest::Client> {
-    build_builder(cfg)?
+    request_client_builder(cfg)?
         .timeout(timeout)
         .build()
         .map_err(|e| LanpathError::Client(format!("无法创建网络请求客户端: {}", e.without_url())))
 }
 
-pub(crate) fn build_builder(cfg: &ClientConfig) -> LanpathResult<reqwest::ClientBuilder> {
+/// Start an outbound client using the saved proxy policy, without direct fallback
+/// for an explicit core/custom proxy. Callers add their timeout and TLS/redirect
+/// constraints before building; certificate verification stays enabled by default.
+pub fn request_client_builder(cfg: &ClientConfig) -> LanpathResult<reqwest::ClientBuilder> {
     cfg.validate_request_proxy()?;
     let builder = reqwest::Client::builder().cookie_store(true);
     let builder = match cfg.request_proxy_mode {

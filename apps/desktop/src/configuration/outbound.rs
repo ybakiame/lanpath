@@ -7,7 +7,7 @@ use lanpath_common::LanpathResult;
 use serde_json::{Map, Value};
 
 use super::policy::{array, fields, object};
-use super::resources::{denied, read_paths};
+use super::resources::{TLS_INPUT_PATHS, denied, read_paths};
 
 pub(super) const DIAL: &str = "detour bind_interface inet4_bind_address inet6_bind_address bind_address_no_port connect_timeout tcp_fast_open tcp_multi_path disable_tcp_keep_alive tcp_keep_alive tcp_keep_alive_interval udp_fragment domain_resolver domain_strategy network_strategy network_type fallback_network_type fallback_delay";
 
@@ -142,11 +142,7 @@ fn tls(root: &Path, value: &Value, location: &str) -> LanpathResult<()> {
             "enabled engine disable_sni server_name insecure alpn min_version max_version cipher_suites curve_preferences certificate certificate_path certificate_sha256 certificate_public_key_sha256 client_certificate client_certificate_path client_key client_key_path fragment fragment_fallback_delay record_fragment kernel_tx kernel_rx handshake_timeout ech utls reality",
         ],
     )?;
-    for name in [
-        "certificate_path",
-        "client_certificate_path",
-        "client_key_path",
-    ] {
+    for &name in TLS_INPUT_PATHS {
         if let Some(value) = tls.get(name) {
             read_paths(root, value, &format!("{location}.{name}"))?;
         }

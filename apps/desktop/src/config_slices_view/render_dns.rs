@@ -1,6 +1,7 @@
 use gpui_kit::component::{
     Disableable as _, Selectable as _,
     button::{Button, ButtonVariants as _},
+    scroll::ScrollableElement as _,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::config_slices::{
@@ -40,6 +41,7 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         Button::new("dns-follow")
@@ -72,6 +74,7 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .children(dns_strategies().into_iter().map(|(strategy, label)| {
                         Button::new(format!("dns-strategy-{}", strategy.as_str()))
@@ -96,9 +99,17 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .min_w_0()
+                    .h_auto()
+                    .max_h_32()
+                    .overflow_y_scrollbar()
                     .gap_2()
                     .children(slices.dns.servers.iter().enumerate().map(|(index, item)| {
                         Button::new(("dns-server", index))
+                            .min_w_0()
+                            .max_w_full()
+                            .tooltip(item.tag.clone())
                             .label(format!(
                                 "{}{}",
                                 if item.enabled { "" } else { "停用 · " },
@@ -135,6 +146,7 @@ impl ConfigSlicesView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 Button::new("dns-server-enabled")
@@ -168,20 +180,17 @@ impl ConfigSlicesView {
                             .child(field("Tag", &self.inputs.dns_server_tag, disabled))
                             .child(field("显示名称", &self.inputs.dns_server_name, disabled)),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .children(dns_server_types().into_iter().map(|(kind, label)| {
-                                Button::new(format!("dns-server-type-{}", kind.as_str()))
-                                    .label(label)
-                                    .selected(server_kind == Some(kind))
-                                    .disabled(disabled)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.set_dns_server_type(kind, cx)
-                                    }))
-                            })),
-                    )
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        dns_server_types().into_iter().map(|(kind, label)| {
+                            Button::new(format!("dns-server-type-{}", kind.as_str()))
+                                .label(label)
+                                .selected(server_kind == Some(kind))
+                                .disabled(disabled)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_dns_server_type(kind, cx)
+                                }))
+                        }),
+                    ))
                     .child(
                         div()
                             .flex()
@@ -228,11 +237,10 @@ impl ConfigSlicesView {
                             )),
                     )
                     .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .children(optional_dns_strategies().into_iter().map(
-                                |(strategy, label)| {
+                        div().flex().flex_wrap().gap_2().children(
+                            optional_dns_strategies()
+                                .into_iter()
+                                .map(|(strategy, label)| {
                                     Button::new(format!("dns-server-strategy-{label}"))
                                         .label(label)
                                         .selected(server.strategy == strategy)
@@ -240,8 +248,8 @@ impl ConfigSlicesView {
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.set_dns_server_strategy(strategy, cx)
                                         }))
-                                },
-                            )),
+                                }),
+                        ),
                     )
             }))
             .child(section_title(
@@ -252,6 +260,11 @@ impl ConfigSlicesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .min_w_0()
+                    .h_auto()
+                    .max_h_32()
+                    .overflow_y_scrollbar()
                     .gap_2()
                     .children(slices.dns.rules.iter().enumerate().map(|(index, item)| {
                         Button::new(("dns-rule", index))
@@ -295,23 +308,20 @@ impl ConfigSlicesView {
                             .disabled(disabled)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_dns_rule(cx))),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .children(dns_match_types().into_iter().map(|(kind, label)| {
-                                Button::new(format!("dns-match-{}", kind.field()))
-                                    .label(label)
-                                    .selected(rule_match == Some(kind))
-                                    .disabled(disabled)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.set_dns_rule_match(kind, cx)
-                                    }))
-                            })),
-                    )
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        dns_match_types().into_iter().map(|(kind, label)| {
+                            Button::new(format!("dns-match-{}", kind.field()))
+                                .label(label)
+                                .selected(rule_match == Some(kind))
+                                .disabled(disabled)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_dns_rule_match(kind, cx)
+                                }))
+                        }),
+                    ))
                     .child(field("匹配目标", &self.inputs.dns_rule_target, disabled))
-                    .child(div().flex().gap_2().children(dns_actions().into_iter().map(
-                        |(action, label)| {
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        dns_actions().into_iter().map(|(action, label)| {
                             Button::new(format!("dns-action-{label}"))
                                 .label(label)
                                 .selected(rule_action == Some(action))
@@ -319,8 +329,8 @@ impl ConfigSlicesView {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.set_dns_rule_action(action, cx)
                                 }))
-                        },
-                    )))
+                        }),
+                    ))
                     .child(
                         div()
                             .flex()

@@ -7,11 +7,8 @@
 //! Design trade-offs:
 //! - Only covers commonly used subsets; unknown lines are skipped and recorded in
 //!   [`ImportedConfig::warnings`] (comments / blank lines are silently skipped);
-//! - Scripts are always treated as remote http(s) URLs: `source` is left empty, and the URL
-//!   is recorded in [`ImportedConfig::script_urls`] / [`ImportedConfig::task_scripts`],
-//!   to be fetched and backfilled by the caller;
-//! - When lanpath-mitm fields are structurally incompatible with ecosystem syntax, existing fields
-//!   are approximated and a warning is recorded (lanpath-mitm itself is not modified).
+//! - Remote scripts are fetched separately; unsupported local assets are never activated.
+//! - Unsupported actions produce diagnostics, never approximate network effects.
 
 #[cfg(feature = "mitm")]
 use lanpath_common::LanpathResult;
@@ -29,16 +26,26 @@ use lanpath_script::ScriptKind;
 
 #[cfg(feature = "mitm")]
 mod loon;
+#[cfg(feature = "mitm")]
+mod loon_current;
 mod meta;
+#[cfg(feature = "mitm")]
+mod mitm_templates;
 #[cfg(feature = "mitm")]
 mod qx;
 #[cfg(feature = "mitm")]
+mod stash;
+#[cfg(feature = "mitm")]
 mod surge;
+#[cfg(feature = "mitm")]
+mod surge_map_local;
 mod utils;
 
 #[cfg(feature = "mitm")]
 use loon::*;
 pub use meta::*;
+#[cfg(feature = "mitm")]
+pub(crate) use mitm_templates::resolve_mitm_templates;
 #[cfg(feature = "mitm")]
 use qx::*;
 #[cfg(feature = "mitm")]
@@ -59,8 +66,10 @@ pub struct ImportedConfig {
     pub script_urls: Vec<(String, String)>,
     /// Scheduled tasks (`TaskScript.source` is empty) and their script URLs.
     pub task_scripts: Vec<(TaskScript, String)>,
-    /// MITM hostname whitelist.
+    /// Static MITM hostname whitelist; parameterized declarations stay separate.
     pub hostnames: Vec<String>,
+    /// Original parameterized MITM hostname declarations, resolved at activation.
+    pub mitm_templates: Vec<String>,
     /// Unrecognized lines / mapping deviations that cannot be expressed.
     pub warnings: Vec<String>,
     /// File header `#!key=value` metadata (see [`ConfigMeta`]).
@@ -70,8 +79,22 @@ pub struct ImportedConfig {
 #[cfg(feature = "mitm")]
 impl ImportedConfig {
     /// Record a warning: `tracing::warn` while also writing to the `warnings` list.
-    fn warn(&mut self, section: &str, line: &str, msg: &str) {
-        let text = format!("[{section}] {msg}: {line}");
+    fn warn(&mut self, section: &str, _line: &str, msg: &str) {
+        // A diagnostic must not echo configuration text, URLs, arguments or regexes.
+        // Dynamic parser details are quoted; redact them before crossing the UI/log boundary.
+        let mut detail = String::new();
+        let mut quoted = false;
+        for ch in msg.chars() {
+            if ch == '\'' {
+                quoted = !quoted;
+                if quoted {
+                    detail.push_str("[detail]");
+                }
+            } else if !quoted {
+                detail.push(ch);
+            }
+        }
+        let text = format!("[{section}] {detail}");
         tracing::warn!(section, "{text}");
         self.warnings.push(text);
     }
@@ -84,6 +107,9 @@ impl ImportedConfig {
 /// (e.g., Surge / Loon `[Script]`) share the same parsing path.
 #[cfg(feature = "mitm")]
 pub fn parse_import(content: &str, dialect: ScriptDialect) -> LanpathResult<ImportedConfig> {
+    if dialect == ScriptDialect::Stash {
+        return Ok(stash::parse_stash(content));
+    }
     let mut cfg = ImportedConfig {
         meta: parse_config_meta(content),
         ..ImportedConfig::default()
@@ -110,32 +136,67 @@ pub fn parse_import(content: &str, dialect: ScriptDialect) -> LanpathResult<Impo
             continue;
         }
         match section.as_str() {
-            "rewrite_local" | "rewrite_remote" => {
+            "rewrite_local" | "rewrite_remote" if dialect == ScriptDialect::QuantumultX => {
                 parse_qx_rewrite(&mut cfg, &mut hook_index, dialect, line);
             }
-            "task_local" => parse_qx_task(&mut cfg, dialect, line),
-            "mitm" => parse_mitm_hostnames(&mut cfg, line),
-            "script" => {
-                // Loon `[Script]` lines start with `http-request|http-response`
-                // (Surge uses `name = type=...`); determine type by first token to avoid
-                // dialect confusion.
-                let first = line.split_whitespace().next().unwrap_or_default();
-                if matches!(first, "http-request" | "http-response") {
-                    parse_loon_script(&mut cfg, line);
-                } else {
-                    parse_surge_script(&mut cfg, dialect, line);
-                }
+            "task_local" if dialect == ScriptDialect::QuantumultX => {
+                parse_qx_task(&mut cfg, dialect, line)
             }
-            "argument" => parse_loon_argument(&mut cfg, line),
-            "url rewrite" => parse_surge_url_rewrite(&mut cfg, line),
-            "header rewrite" => parse_surge_header_rewrite(&mut cfg, line),
-            "body rewrite" => parse_surge_body_rewrite(&mut cfg, line),
-            "map local" => parse_surge_map_local(&mut cfg, line),
-            // Loon `[Rewrite]`（注意与 Surge `[URL Rewrite]` 不同名）。
-            "rewrite" => parse_loon_rewrite(&mut cfg, line),
-            // Other sections (e.g., QX `[task_remote]` / Surge `[General]`) are skipped entirely.
-            _ => {}
+            "mitm" => parse_mitm_hostnames(&mut cfg, line),
+            "script" => match dialect {
+                ScriptDialect::Loon => parse_loon_script(&mut cfg, line),
+                ScriptDialect::Surge => parse_surge_script(&mut cfg, dialect, line),
+                _ => cfg.warn(
+                    "script",
+                    line,
+                    "unsupported script section for selected dialect",
+                ),
+            },
+            "argument" if dialect == ScriptDialect::Loon => parse_loon_argument(&mut cfg, line),
+            "url rewrite" if dialect == ScriptDialect::Surge => {
+                parse_surge_url_rewrite(&mut cfg, line)
+            }
+            "header rewrite" if dialect == ScriptDialect::Surge => {
+                parse_surge_header_rewrite(&mut cfg, line)
+            }
+            "body rewrite" if dialect == ScriptDialect::Surge => {
+                parse_surge_body_rewrite(&mut cfg, line)
+            }
+            "map local" if dialect == ScriptDialect::Surge => {
+                surge_map_local::parse_surge_map_local(&mut cfg, line)
+            }
+            "rewrite" if dialect == ScriptDialect::Loon => parse_loon_rewrite(&mut cfg, line),
+            "" if dialect == ScriptDialect::QuantumultX => {
+                parse_qx_rewrite(&mut cfg, &mut hook_index, dialect, line);
+            }
+            _ => cfg.warn(
+                "import",
+                line,
+                "unsupported directive or section; not activated",
+            ),
         }
+    }
+    let defaults = cfg
+        .meta
+        .arguments
+        .iter()
+        .map(|arg| (arg.key.clone(), arg.default_value.clone()))
+        .collect();
+    let (_, template_warnings) =
+        resolve_mitm_templates(&cfg.mitm_templates, &Default::default(), &defaults);
+    cfg.warnings.extend(template_warnings);
+    if cfg.rewrites.is_empty()
+        && cfg.scripts.is_empty()
+        && cfg.task_scripts.is_empty()
+        && cfg.hostnames.is_empty()
+        && cfg.mitm_templates.is_empty()
+        && cfg.warnings.is_empty()
+    {
+        cfg.warn(
+            "import",
+            "",
+            "no supported executable rules or hostnames found",
+        );
     }
 
     Ok(cfg)
@@ -149,6 +210,10 @@ pub fn parse_import(content: &str, dialect: ScriptDialect) -> LanpathResult<Impo
 /// `[mitm]` 行（如 `skip_validating_cert` / `p12` / `passphrase`）直接忽略。
 #[cfg(feature = "mitm")]
 fn parse_mitm_hostnames(cfg: &mut ImportedConfig, line: &str) {
+    if line.contains('{') || line.contains('}') {
+        cfg.mitm_templates.push(line.to_string());
+        return;
+    }
     let Some(eq) = line.find('=') else {
         cfg.warn(
             "mitm",
@@ -158,7 +223,7 @@ fn parse_mitm_hostnames(cfg: &mut ImportedConfig, line: &str) {
         return;
     };
     if !line[..eq].trim().eq_ignore_ascii_case("hostname") {
-        // `[mitm]` 内的其他配置键（证书、跳过校验等）不映射为白名单。
+        cfg.warn("mitm", line, "unsupported MITM option; not activated");
         return;
     }
     for entry in line[eq + 1..].split(',') {

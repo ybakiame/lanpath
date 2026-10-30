@@ -51,7 +51,15 @@ pub fn build_mitm_proxy(
 ) -> LanpathResult<MitmProxy> {
     let ca = FileCaStore::new(client_config.mitm.ca_dir.clone());
     let ca_material = ca.load_or_generate()?;
+    build_mitm_proxy_with_ca(client_config, options, recorder, ca_material)
+}
 
+fn build_mitm_proxy_with_ca(
+    client_config: &ClientConfig,
+    options: MitmBuildOptions,
+    recorder: Arc<dyn TrafficRecorder>,
+    ca_material: lanpath_mitm::CaMaterial,
+) -> LanpathResult<MitmProxy> {
     let upstream_port = options
         .upstream_port
         .unwrap_or(client_config.mixed_port + 1);

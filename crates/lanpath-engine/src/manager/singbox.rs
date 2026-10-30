@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use lanpath_common::{CoreType, LanpathError, LanpathResult, LifecycleGuard};
+use lanpath_common::{CoreType, LanpathError, LanpathResult, LifecycleGuard, ProcessStopKind};
 use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::RwLock;
@@ -47,6 +47,40 @@ impl SingBoxProcessManager {
 
     fn pid_path(&self) -> PathBuf {
         self.config_dir.join("sing-box.pid")
+    }
+
+    /// Stop the owned child or recover its exact recorded identity.
+    ///
+    /// The receipt describes the actual stop operation, not an exit code or a
+    /// prior liveness probe. Cleanup failures retain ownership and return errors.
+    pub async fn stop_process(&self) -> LanpathResult<ProcessStopKind> {
+        let mut proc = self.process.write().await;
+        let kind = if let Some(child) = proc.as_mut() {
+            #[cfg(windows)]
+            let kind = {
+                use std::os::windows::io::AsHandle;
+                lanpath_common::WindowsProcess::duplicate(child.as_handle())?
+                    .terminate_and_wait(10_000)?
+            };
+            #[cfg(not(windows))]
+            let kind = match child.try_wait()? {
+                Some(_) => ProcessStopKind::AlreadyStopped,
+                None => {
+                    child.kill()?;
+                    ProcessStopKind::Forced
+                }
+            };
+            child.wait()?;
+            lifecycle::remove_pid_file(&self.pid_path()).map_err(LanpathError::Core)?;
+            *proc = None;
+            tracing::info!(?kind, "sing-box stopped");
+            kind
+        } else {
+            lifecycle::reap_stale(&self.pid_path()).map_err(LanpathError::Core)?
+        };
+        *self.start_time.write().await = None;
+        *self.guard.write().await = None;
+        Ok(kind)
     }
 }
 
@@ -149,21 +183,7 @@ impl CoreManager for SingBoxProcessManager {
     }
 
     async fn stop(&self) -> LanpathResult<()> {
-        let mut proc = self.process.write().await;
-        if let Some(child) = proc.as_mut() {
-            if child.try_wait()?.is_none() {
-                child.kill()?;
-            }
-            child.wait()?;
-            lifecycle::remove_pid_file(&self.pid_path()).map_err(LanpathError::Core)?;
-            *proc = None;
-            *self.start_time.write().await = None;
-            tracing::info!("sing-box stopped");
-        } else {
-            lifecycle::reap_stale(&self.pid_path()).map_err(LanpathError::Core)?;
-        }
-        *self.guard.write().await = None;
-        Ok(())
+        self.stop_process().await.map(|_| ())
     }
 
     async fn restart(&self, config: &Value) -> LanpathResult<()> {
@@ -257,3 +277,7 @@ impl CoreManager for SingBoxProcessManager {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "singbox_tests.rs"]
+mod tests;

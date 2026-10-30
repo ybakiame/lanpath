@@ -1,6 +1,4 @@
-use lanpath_client::{
-    CachedSubscriptionContent, RequestProxyMode, ScriptDialect, SubFormat, SubscriptionSource,
-};
+use lanpath_client::{CachedSubscriptionContent, ScriptDialect, SubFormat, SubscriptionSource};
 use serde_json::json;
 
 use super::BusinessService;
@@ -11,38 +9,13 @@ fn service(root: &std::path::Path) -> BusinessService {
 }
 
 #[test]
-fn client_state_persists_selection_but_forces_experimental_network_boundaries() {
-    let root = tempfile::tempdir().unwrap();
-    let service = service(root.path());
-    let subscription = service
-        .subscription_store()
-        .add("fixture", "https://example.invalid/sub", true, None)
-        .unwrap();
-    service
-        .set_active_subscription(Some(subscription.id))
-        .unwrap();
-
-    let mut tampered = service.client_config().unwrap();
-    tampered.tun_enabled = true;
-    tampered.system_proxy_enabled = true;
-    tampered.request_proxy_mode = RequestProxyMode::System;
-    tampered.mixed_port = 1;
-    tampered.clash_api_port = 2;
-    tampered.save().unwrap();
-
-    let normalized = service.client_config().unwrap();
-    assert_eq!(normalized.active_subscription_id, Some(subscription.id));
-    assert_eq!(normalized.mixed_port, 17899);
-    assert_eq!(normalized.clash_api_port, 19090);
-    assert!(!normalized.tun_enabled);
-    assert!(!normalized.system_proxy_enabled);
-}
-
-#[test]
-fn mitm_settings_persist_without_relaxing_experimental_network_boundaries() {
+fn mitm_settings_preserve_network_modes_and_normalize_hostnames() {
     let root = tempfile::tempdir().unwrap();
     let business = service(root.path());
-    assert!(!business.mitm_settings().unwrap().enabled);
+    let mut before = business.client_config().unwrap();
+    before.tun_enabled = true;
+    before.system_proxy_enabled = true;
+    before.save().unwrap();
 
     let saved = business
         .save_mitm_settings(
@@ -67,9 +40,8 @@ fn mitm_settings_persist_without_relaxing_experimental_network_boundaries() {
         ["api.example.com", "-private.example.com"]
     );
     assert_eq!(config.mitm.script_dialect, ScriptDialect::Surge);
-    assert!(!config.tun_enabled);
-    assert!(!config.system_proxy_enabled);
-    assert_eq!(config.request_proxy_mode, RequestProxyMode::None);
+    assert!(config.tun_enabled);
+    assert!(config.system_proxy_enabled);
 }
 
 #[test]
@@ -581,8 +553,7 @@ async fn generated_subscription_pipeline_starts_real_core() {
             })
     );
     service
-        .validator()
-        .unwrap()
+        .validator(&service.client_config().unwrap())
         .validate_value(&generated)
         .await
         .unwrap();

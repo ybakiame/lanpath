@@ -4,16 +4,20 @@
 
 import type { ArgSpecView } from "@lanpath/client-core";
 
-/** Dialect options for remote resource add form (Surge / Loon only). */
+/** Public plaintext script dialects supported by the importer and runtime. */
 export const REMOTE_DIALECT_OPTIONS = [
   { id: "Surge", label: "Surge" },
   { id: "Loon", label: "Loon" },
+  { id: "QuantumultX", label: "Quantumult X" },
+  { id: "Stash", label: "Stash" },
 ] as const;
 
 /** Dialect options for config import (lowercase, matching command values). */
 export const IMPORT_DIALECT_OPTIONS = [
   { id: "surge", label: "Surge" },
   { id: "loon", label: "Loon" },
+  { id: "qx", label: "Quantumult X" },
+  { id: "stash", label: "Stash" },
 ] as const;
 
 /** Argument edit state for the add form. */
@@ -41,11 +45,20 @@ export function normalizeKind(kind: string | null): string | null {
   return kind.trim();
 }
 
-/** Normalize dialect string: QuantumultX legacy data -> Loon. */
+/** Canonicalize spelling without changing the script runtime dialect. */
 export function normalizeDialect(dialect: string | null | undefined): string | null {
   if (!dialect) return null;
   const trimmed = dialect.trim();
-  if (trimmed === "QuantumultX" || trimmed.toLowerCase() === "quantumultx") return "Loon";
+  switch (trimmed.toLowerCase()) {
+    case "quantumultx":
+      return "QuantumultX";
+    case "surge":
+      return "Surge";
+    case "loon":
+      return "Loon";
+    case "stash":
+      return "Stash";
+  }
   return trimmed;
 }
 

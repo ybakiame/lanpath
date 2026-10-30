@@ -2,6 +2,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _,
     button::{Button, ButtonVariants as _},
     input::Editor,
+    scroll::ScrollableElement as _,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::local_override::{CustomRuleSetSource, RuleMatchType, parse_rule_set_tags};
@@ -36,6 +37,7 @@ impl RulesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         Button::new("ruleset-add")
@@ -69,6 +71,7 @@ impl RulesView {
             .children((!self.category_selection.is_empty()).then(|| {
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_end()
                     .gap_2()
                     .child(field("批量分类", &self.inputs.batch_category, disabled))
@@ -79,52 +82,66 @@ impl RulesView {
                             .on_click(cx.listener(|this, _, _, cx| this.apply_batch_category(cx))),
                     )
             }))
-            .children(sets.iter().map(|set| {
-                let id = set.id.clone();
-                let category_id = set.id.clone();
-                let cached = self.cached_rule_sets.contains(&set.id);
-                let references = self.reference_count(&set.tag);
+            .child(
                 div()
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .gap_2()
-                    .child(
-                        Button::new(format!("ruleset-select-{}", set.id))
-                            .label(format!(
-                                "{}{} · {} · {} · 引用 {}",
-                                if set.builtin { "内置 · " } else { "" },
-                                if set.name.trim().is_empty() {
-                                    &set.tag
-                                } else {
-                                    &set.name
-                                },
-                                if set.category.trim().is_empty() {
-                                    "未分类"
-                                } else {
-                                    &set.category
-                                },
-                                if cached { "已缓存" } else { "缺少缓存" },
-                                references
-                            ))
-                            .selected(self.selected_set.as_deref() == Some(set.id.as_str()))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_set(id.clone(), window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new(format!("ruleset-category-select-{}", set.id))
-                            .label(if self.category_selection.contains(&set.id) {
-                                "已选"
-                            } else {
-                                "选择"
-                            })
-                            .selected(self.category_selection.contains(&set.id))
-                            .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_category_selection(&category_id, cx)
-                            })),
-                    )
-            }))
+                    .h_auto()
+                    .min_w_0()
+                    .max_h_48()
+                    .overflow_y_scrollbar()
+                    .children(sets.iter().map(|set| {
+                        let id = set.id.clone();
+                        let category_id = set.id.clone();
+                        let cached = self.cached_rule_sets.contains(&set.id);
+                        let references = self.reference_count(&set.tag);
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new(format!("ruleset-select-{}", set.id))
+                                    .min_w_0()
+                                    .max_w_full()
+                                    .tooltip(format!("{} · {}", set.name, set.tag))
+                                    .label(format!(
+                                        "{}{} · {} · {} · 引用 {}",
+                                        if set.builtin { "内置 · " } else { "" },
+                                        if set.name.trim().is_empty() {
+                                            &set.tag
+                                        } else {
+                                            &set.name
+                                        },
+                                        if set.category.trim().is_empty() {
+                                            "未分类"
+                                        } else {
+                                            &set.category
+                                        },
+                                        if cached { "已缓存" } else { "缺少缓存" },
+                                        references
+                                    ))
+                                    .selected(self.selected_set.as_deref() == Some(set.id.as_str()))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.select_set(id.clone(), window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("ruleset-category-select-{}", set.id))
+                                    .label(if self.category_selection.contains(&set.id) {
+                                        "已选"
+                                    } else {
+                                        "选择"
+                                    })
+                                    .selected(self.category_selection.contains(&set.id))
+                                    .disabled(disabled)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.toggle_category_selection(&category_id, cx)
+                                    })),
+                            )
+                    })),
+            )
             .children(sets.is_empty().then(|| {
                 div()
                     .text_sm()
@@ -161,6 +178,7 @@ impl RulesView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(
                                 Button::new("ruleset-source-remote")

@@ -106,7 +106,7 @@ impl ClientCoreInventory {
     /// Read the latest global policy per operation; downloads have no total timeout.
     fn http_client(&self) -> LanpathResult<reqwest::Client> {
         let cfg = ClientConfig::load_for_requests(&self.data_dir)?;
-        crate::request_network::build_builder(&cfg)?
+        crate::request_client_builder(&cfg)?
             .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
             .build()
             .map_err(|e| {

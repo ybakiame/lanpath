@@ -51,9 +51,10 @@ impl ProxyView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let service = ProxyService::new(core.api_port(), core.business().ok().cloned());
+        let service = ProxyService::new(core.business().ok().cloned());
         let mode = service.rule_mode().unwrap_or_else(|_| "rule".into());
-        let list = cx.new(|cx| ListState::new(ProxyListDelegate::default(), window, cx));
+        let list =
+            cx.new(|cx| crate::keyboard::list_state(ProxyListDelegate::default(), window, cx));
         let subscription =
             cx.subscribe_in(&list, window, |this, state, event: &ListEvent, _, cx| {
                 if let ListEvent::Confirm(ix) = event {

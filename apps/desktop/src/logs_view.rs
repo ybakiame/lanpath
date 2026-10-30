@@ -44,7 +44,7 @@ impl LogsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let list = cx.new(|cx| ListState::new(LogListDelegate::default(), window, cx));
+        let list = cx.new(|cx| crate::keyboard::list_state(LogListDelegate::default(), window, cx));
         let disk = cx.new(|cx| disk_logs::DiskLogsView::new(core.clone(), window, cx));
         let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let observer = cx.observe_in(&list, window, |this, list, window, cx| {
@@ -176,8 +176,8 @@ impl LogsView {
             self.state,
             CoreLogState::Disconnected(_) | CoreLogState::Unavailable(_)
         );
-        div().flex().flex_col().flex_1().min_h_0().gap_2()
-            .child(div().flex().items_center().gap_2().child("运行日志")
+        div().flex().flex_col().flex_1().min_h_0().min_w_0().gap_2()
+            .child(div().flex().items_center().flex_wrap().flex_shrink_0().gap_2().child("运行日志")
                 .child(Button::new("logs-refresh").label("刷新日志").on_click(cx.listener(|this, _, _, cx| this.refresh(cx))))
                 .child(Switch::new("logs-auto-refresh").label("自动刷新").checked(self.auto_refresh)
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
@@ -202,7 +202,7 @@ impl LogsView {
                                 })
                         });
                     }))))
-            .child(div().flex().items_center().gap_2().children(levels.into_iter().map(|(rank, label)| {
+            .child(div().flex().items_center().flex_wrap().flex_shrink_0().gap_2().children(levels.into_iter().map(|(rank, label)| {
                 Button::new(("logs-level", rank as usize)).label(label).selected(self.min_rank == rank)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.min_rank = rank;
@@ -210,7 +210,7 @@ impl LogsView {
                         this.refresh(cx);
                     }))
             })))
-            .child(div().flex().items_center().gap_2().child("最新条数")
+            .child(div().flex().items_center().flex_wrap().flex_shrink_0().gap_2().child("最新条数")
                 .children([200, 500, 1000].into_iter().map(|limit| {
                     Button::new(("logs-limit", limit)).label(limit.to_string()).selected(self.limit == limit)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -221,10 +221,11 @@ impl LogsView {
                 })))
             .child(div().id("logs-status").role(Role::Status).aria_label(status.clone()).text_sm()
                 .text_color(if error { cx.theme().danger } else { cx.theme().muted_foreground }).child(status))
-            .child(List::new(&self.list).flex_1().min_h_0())
+            .child(List::new(&self.list).flex_1().min_h_0().min_w_0())
             .children(self.detail_id.map(|_| {
                 div().id("log-detail").role(Role::Group).aria_label("日志详情")
                     .flex().flex_col().gap_1().h_40().flex_shrink_0()
+                    .max_h(gpui_kit::relative(0.35)).min_h_0().min_w_0()
                     .child(div().text_sm().child("已选日志详情（只读，可选择和复制）"))
                     .child(Editor::new(&self.details).readonly(true).size_full())
             }))
@@ -253,6 +254,8 @@ impl Render for LogsView {
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child(
                         Button::new("logs-memory-view")

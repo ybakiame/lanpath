@@ -11,6 +11,7 @@
     "verify:rust:fast": "LANPATH_RUST_GATE_FAST=1 bash scripts/check-rust-gates.sh"
   },
   "devDependencies": {
+    "fflate": "^0.8.3",
     "husky": "^9.1.7"
   }
 }

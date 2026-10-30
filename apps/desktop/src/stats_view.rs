@@ -49,8 +49,10 @@ impl StatsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let daily_list = cx.new(|cx| ListState::new(StatsListDelegate::default(), window, cx));
-        let records_list = cx.new(|cx| ListState::new(StatsListDelegate::default(), window, cx));
+        let daily_list =
+            cx.new(|cx| crate::keyboard::list_state(StatsListDelegate::default(), window, cx));
+        let records_list =
+            cx.new(|cx| crate::keyboard::list_state(StatsListDelegate::default(), window, cx));
         let details = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let list_subscriptions = [&daily_list, &records_list]
             .into_iter()

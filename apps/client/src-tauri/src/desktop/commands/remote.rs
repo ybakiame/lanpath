@@ -81,6 +81,7 @@ pub struct FetchReportView {
     pub scripts: usize,
     pub rewrites: usize,
     pub tasks: usize,
+    pub hostnames: usize,
     pub warnings: Vec<String>,
 }
 
@@ -302,6 +303,7 @@ pub async fn fetch_remotes(state: State<'_, AppState>) -> Result<FetchReportView
         scripts: report.scripts,
         rewrites: report.rewrites,
         tasks: report.tasks,
+        hostnames: report.hostnames,
         warnings: report.warnings,
     })
 }

@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, button::Button,
     scroll::ScrollableElement as _,
@@ -12,29 +13,38 @@ use super::{Operation, ScriptsView, Section};
 impl Render for ScriptsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let editing_disabled = self.locked || self.busy();
-        let status = self
-            .error
-            .clone()
-            .or_else(|| self.notice.clone())
-            .unwrap_or_else(|| {
-                if self.locked {
-                    "实验核心运行或生命周期切换期间，资源和导入锁定；定时任务仍可运行".into()
-                } else if self.dirty() {
-                    "有未提交内容；保存资源或完成导入后才能启动核心".into()
-                } else {
-                    "远程片段缓存用于脚本、重写和 cron 任务；MITM 运行效果属于后续迁移单位".into()
-                }
-            });
+        let status = if self.operation == Some(Operation::AutomaticFetch) {
+            "正在自动更新到期资源；仅刷新缓存，当前脚本、任务和路由保持不变…".into()
+        } else {
+            self.error
+                .clone()
+                .or_else(|| self.notice.clone())
+                .unwrap_or_else(|| {
+                    if self.dirty() {
+                        "有未提交内容；自动更新暂缓，保存资源或完成导入后才能启动核心".into()
+                    } else if !self.automatic_eligible {
+                        "生命周期、其他业务操作或草稿未完成，自动更新暂缓；缓存仅在下次启动核心时加载".into()
+                    } else if self.running {
+                        "核心运行中仅自动刷新安全缓存；当前脚本、定时任务与路由保持不变，下次启动时加载更新".into()
+                    } else {
+                        "已启用资源按保存的间隔自动更新；每 5 秒检查到期，缓存在下次启动核心时加载"
+                            .into()
+                    }
+                })
+        };
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .gap_2()
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child("脚本与片段")
                     .child(
@@ -47,6 +57,7 @@ impl Render for ScriptsView {
                         Button::new("scripts-fetch")
                             .label(match self.operation {
                                 Some(Operation::Fetch) => "更新中…",
+                                Some(Operation::AutomaticFetch) => "自动更新中…",
                                 _ => "立即更新全部",
                             })
                             .disabled(editing_disabled || self.dirty() || self.resources.is_empty())
@@ -61,6 +72,10 @@ impl Render for ScriptsView {
                     .role(Role::Status)
                     .aria_label(status.clone())
                     .text_sm()
+                    .flex_shrink_0()
+                    .min_w_0()
+                    .max_h_16()
+                    .overflow_y_scrollbar()
                     .text_color(if self.error.is_some() {
                         cx.theme().danger
                     } else {
@@ -71,6 +86,8 @@ impl Render for ScriptsView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child(
                         Button::new("scripts-section-remotes")
@@ -103,6 +120,7 @@ impl Render for ScriptsView {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
                     .overflow_y_scrollbar()
                     .child(match self.section {
                         Section::Remotes => {
@@ -126,7 +144,7 @@ pub(super) fn section_title(
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().child(title.into()))
+        .child(div().font_semibold().child(title.into()))
         .child(
             div()
                 .text_sm()

@@ -1,5 +1,5 @@
 use lanpath_client::{
-    CachedSubscriptionContent, Subscription, SubscriptionSource, SubscriptionStore,
+    CachedSubscriptionContent, ClientConfig, Subscription, SubscriptionSource, SubscriptionStore,
     fetch_subscription_for_config, normalize_resource_url, validate_subscription_url,
 };
 use lanpath_common::{LanpathError, LanpathResult};
@@ -31,18 +31,34 @@ impl BusinessService {
         let mut subscription = store.add(&name, &url, true, user_agent)?;
         store.set_profile_id(subscription.id, profile_id)?;
         subscription.profile_id = profile_id;
-        self.refresh_value(&store, &mut subscription).await;
+        self.refresh_value(&store, &mut subscription, None).await;
         write_refresh_result(&store, &subscription)
     }
 
     pub(crate) async fn refresh_subscription(&self, id: uuid::Uuid) -> LanpathResult<Subscription> {
+        self.refresh_subscription_inner(id, None).await
+    }
+
+    pub(super) async fn refresh_subscription_for_config(
+        &self,
+        id: uuid::Uuid,
+        config: &ClientConfig,
+    ) -> LanpathResult<Subscription> {
+        self.refresh_subscription_inner(id, Some(config)).await
+    }
+
+    async fn refresh_subscription_inner(
+        &self,
+        id: uuid::Uuid,
+        config: Option<&ClientConfig>,
+    ) -> LanpathResult<Subscription> {
         let store = self.subscription_store();
         let mut subscription = store
             .load()?
             .into_iter()
             .find(|subscription| subscription.id == id)
             .ok_or_else(|| LanpathError::Client("订阅不存在".into()))?;
-        self.refresh_value(&store, &mut subscription).await;
+        self.refresh_value(&store, &mut subscription, config).await;
         write_refresh_result(&store, &subscription)
     }
 
@@ -111,16 +127,27 @@ impl BusinessService {
         Ok(path)
     }
 
-    async fn refresh_value(&self, store: &SubscriptionStore, subscription: &mut Subscription) {
-        let config = match self.client_config() {
-            Ok(config) => config,
-            Err(error) => {
-                subscription.error = Some(format!("读取网络请求设置失败: {error}"));
-                return;
-            }
+    async fn refresh_value(
+        &self,
+        store: &SubscriptionStore,
+        subscription: &mut Subscription,
+        snapshot: Option<&ClientConfig>,
+    ) {
+        let loaded;
+        let config = if let Some(config) = snapshot {
+            config
+        } else {
+            loaded = match self.client_config() {
+                Ok(config) => config,
+                Err(error) => {
+                    subscription.error = Some(format!("读取网络请求设置失败: {error}"));
+                    return;
+                }
+            };
+            &loaded
         };
         let result = fetch_subscription_for_config(
-            &config,
+            config,
             &subscription.url,
             subscription.user_agent.as_deref(),
         )

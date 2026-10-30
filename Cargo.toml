@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/lanpath-tauri","crates/lanpath-client","crates/lanpath-common","crates/lanpath-engine","crates/lanpath-mitm","crates/lanpath-script"]
+exclude = ["vendor/hudsucker"]
 
 [workspace.package]
 version = "0.1.4-beta.1"
@@ -33,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
 anyhow = "1.0"
 regex = "1"
+fancy-regex = "0.20.0"
 # 关闭 default-tls（native-tls/openssl）：统一 rustls-tls，避免 Android 等
 # 交叉编译 target 需要为 openssl-sys 准备 sysroot（客户端仅使用 rustls）。
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

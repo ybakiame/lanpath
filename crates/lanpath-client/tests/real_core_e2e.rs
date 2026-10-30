@@ -203,7 +203,7 @@ async fn real_singbox_full_chain_mitm_records_whitelisted_traffic() {
     );
 
     // 断言 3：stop 正常，核心与 MITM 关闭。
-    state.stop().await;
+    state.stop().await.unwrap();
     let status = state.status().await;
     assert!(!status.core_running);
     assert!(status.mitm_addr.is_none());

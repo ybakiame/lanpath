@@ -2,7 +2,10 @@ use std::{path::Path, sync::Arc};
 
 use lanpath_client::{
     ScriptDialect,
-    remote::{RemoteKind, RemoteResource, ScriptTaskSession, TracingNotifier},
+    remote::{
+        RemoteKind, RemoteManager, RemoteResource, RemoteResourceService, ScriptTaskSession,
+        TracingNotifier,
+    },
 };
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -58,13 +61,12 @@ async fn remote_resource_workflow_fetches_imports_and_runs_cached_task() {
         name: " fixture ".into(),
         url,
         kind: RemoteKind::Script,
-        dialect: ScriptDialect::Loon,
+        dialect: ScriptDialect::QuantumultX,
         update_interval_secs: 0,
         ..RemoteResource::default()
     };
     let mut resource = service.add_remote_resource(resource).await.unwrap();
     assert_eq!(resource.name, "fixture");
-    assert_eq!(resource.update_interval_secs, 86_400);
 
     let detected = service.detect_remote_resource(&resource.url).await.unwrap();
     assert_eq!(detected.kind, Some(RemoteKind::Snippet));
@@ -102,13 +104,16 @@ async fn remote_resource_workflow_fetches_imports_and_runs_cached_task() {
         .unwrap();
     assert_eq!(import.rewrites, 1);
 
-    let session =
-        ScriptTaskSession::start(root.path().to_path_buf(), Arc::new(TracingNotifier::new()))
-            .await
-            .unwrap()
-            .unwrap();
+    let session = ScriptTaskSession::start(
+        root.path().to_path_buf(),
+        Arc::new(TracingNotifier::new()),
+        Arc::new(lanpath_client::http_exec::ReqwestHttpExecutor::for_data_dir(root.path())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(session.list_tasks()[0].name, "fixture-task");
-    let output = session.run_now("fixture-task").await.unwrap();
+    let output = session.run_now(&session.list_tasks()[0].id).await.unwrap();
     assert!(output.contains("remote"), "{output}");
     assert!(session.list_tasks()[0].last_run.is_some());
     session.stop().await;
@@ -175,14 +180,17 @@ async fn fetched_remote_task_runs_while_real_core_is_live() {
         .set_active_subscription(Some(subscription.id))
         .unwrap();
 
-    let session = ScriptTaskSession::start(root_path.clone(), Arc::new(TracingNotifier::new()))
-        .await
-        .unwrap()
-        .unwrap();
+    let session = ScriptTaskSession::start(
+        root_path.clone(),
+        Arc::new(TracingNotifier::new()),
+        Arc::new(lanpath_client::http_exec::ReqwestHttpExecutor::for_data_dir(&root_path)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let generated = service.build_config(false).await.unwrap();
     service
-        .validator()
-        .unwrap()
+        .validator(&service.client_config().unwrap())
         .validate_value(&generated)
         .await
         .unwrap();
@@ -192,10 +200,160 @@ async fn fetched_remote_task_runs_while_real_core_is_live() {
         .await
         .unwrap();
     assert!(manager.is_running().await);
-    let output = session.run_now("fixture-task").await.unwrap();
+    let output = session.run_now(&session.list_tasks()[0].id).await.unwrap();
     assert!(output.contains("remote"), "{output}");
 
     manager.stop().await.unwrap();
     session.stop().await;
     assert!(!manager.is_running().await);
+}
+
+#[tokio::test]
+async fn unavailable_dialects_cannot_create_or_change_resources_or_import_cache() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path(), None);
+    let resource = service
+        .add_remote_resource(RemoteResource {
+            name: "supported".into(),
+            url: "https://example.invalid/supported.js".into(),
+            dialect: ScriptDialect::Surge,
+            ..RemoteResource::default()
+        })
+        .await
+        .unwrap();
+    service
+        .import_script_config(
+            "[URL Rewrite]\n^https://sentinel.example/ https://preserved.example/ 302\n[MITM]\nhostname=sentinel.example\n",
+            ScriptDialect::Surge,
+        )
+        .await
+        .unwrap();
+    let before = serde_json::to_value(service.remote_resources().unwrap()).unwrap();
+    for (dialect, content) in [
+        (ScriptDialect::Loon, "[MITM]\nhostname=blocked.example\n"),
+        (ScriptDialect::Stash, "{}"),
+    ] {
+        let mut unavailable = resource.clone();
+        unavailable.name = format!("new-{dialect:?}");
+        unavailable.dialect = dialect;
+        assert!(service.add_remote_resource(unavailable).await.is_err());
+        let mut changed = resource.clone();
+        changed.dialect = dialect;
+        changed.description = Some("must not persist".into());
+        assert!(
+            service
+                .update_remote_resource("supported", changed)
+                .await
+                .is_err()
+        );
+        assert!(
+            service
+                .import_script_config(content, dialect)
+                .await
+                .is_err()
+        );
+    }
+    let reopened = super::BusinessService::new(root.path(), None, Bindings::new(17899, 19090));
+    assert_eq!(
+        serde_json::to_value(reopened.remote_resources().unwrap()).unwrap(),
+        before
+    );
+    let cached = RemoteManager::new(root.path().to_path_buf())
+        .load_cached()
+        .unwrap();
+    assert_eq!(cached.hostnames, ["sentinel.example"]);
+    assert_eq!(cached.rewrites.len(), 1);
+    assert_eq!(
+        cached.rewrites[0].pattern.as_str(),
+        "^https://sentinel.example/"
+    );
+}
+
+#[tokio::test]
+async fn existing_unavailable_dialect_is_preserved_until_explicit_supported_selection() {
+    for dialect in [ScriptDialect::Loon, ScriptDialect::Stash] {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = RemoteResourceService::new(root.path().to_path_buf())
+            .add(RemoteResource {
+                name: "legacy".into(),
+                url: "https://example.invalid/legacy.plugin".into(),
+                dialect,
+                description: Some("legacy metadata".into()),
+                ..RemoteResource::default()
+            })
+            .await
+            .unwrap();
+        let service = service(root.path(), None);
+        let mut edited = legacy.clone();
+        edited.description = Some("edited without conversion".into());
+        edited.enabled = false;
+        service
+            .update_remote_resource("legacy", edited.clone())
+            .await
+            .unwrap();
+        let stored = service.remote_resources().unwrap().remove(0);
+        assert_eq!(stored.dialect, dialect);
+        assert_eq!(stored.description, edited.description);
+        assert!(!stored.enabled);
+        let mut unavailable_switch = edited.clone();
+        unavailable_switch.dialect = if dialect == ScriptDialect::Loon {
+            ScriptDialect::Stash
+        } else {
+            ScriptDialect::Loon
+        };
+        assert!(
+            service
+                .update_remote_resource("legacy", unavailable_switch)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(service.remote_resources().unwrap()).unwrap(),
+            serde_json::json!([stored])
+        );
+        edited.dialect = ScriptDialect::QuantumultX;
+        service
+            .update_remote_resource("legacy", edited)
+            .await
+            .unwrap();
+        let reopened = super::BusinessService::new(root.path(), None, Bindings::new(17899, 19090));
+        let selected = reopened.remote_resources().unwrap().remove(0);
+        assert_eq!(selected.dialect, ScriptDialect::QuantumultX);
+        assert_eq!(selected.url, legacy.url);
+        assert_eq!(
+            selected.description.as_deref(),
+            Some("edited without conversion")
+        );
+        assert!(!selected.enabled);
+    }
+}
+
+#[tokio::test]
+async fn qx_import_remains_available_and_activates_its_rewrite() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path(), None);
+    service
+        .import_script_config(
+            "hostname=qx.example\n^https://qx\\.example/.*$ url 302 https://destination.example/\n",
+            ScriptDialect::QuantumultX,
+        )
+        .await
+        .unwrap();
+    let cached = RemoteManager::new(root.path().to_path_buf())
+        .load_cached()
+        .unwrap();
+    let mut uri = "https://qx.example/path".to_string();
+    let mut headers = Vec::new();
+    let mut body = None;
+    let action = lanpath_mitm::RewriteEngine {
+        rules: cached.rewrites,
+    }
+    .apply_request(&mut uri, &mut headers, &mut body)
+    .unwrap();
+    assert!(matches!(
+        action,
+        lanpath_mitm::RewriteAction::Redirect { status: 302, location }
+            if location == "https://destination.example/"
+    ));
+    assert_eq!(cached.hostnames, ["qx.example"]);
 }

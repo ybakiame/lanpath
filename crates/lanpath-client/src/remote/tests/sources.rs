@@ -1,88 +1,55 @@
-//! `collect_hostname_sources` 派生白名单来源聚合测试。
+use super::*;
+use crate::import::parse_import;
 
-use crate::remote::*;
-use std::path::Path;
-
-struct TestDir(std::path::PathBuf);
-
-impl TestDir {
-    fn new() -> Self {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "lanpath-client-hostname-sources-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn write_cache(dir: &Path, file: &str, hostnames: &[&str]) {
-    let cache_dir = dir.join("remote_cache");
-    std::fs::create_dir_all(&cache_dir).unwrap();
-    let cached = CachedRemoteConfig {
-        hostnames: hostnames.iter().map(|s| s.to_string()).collect(),
-        ..CachedRemoteConfig::default()
+#[tokio::test]
+async fn provenance_uses_only_valid_active_remote_and_registered_local_collections() {
+    let base =
+        spawn_remote_server(|_| "[mitm]\nhostname=remote.invalid, shared.invalid".into()).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = RemoteManager::new(root.path().to_path_buf());
+    assert!(collect_hostname_sources(root.path()).is_empty());
+    let remote = RemoteResource {
+        name: "remote".into(),
+        url: format!("{base}/snippet"),
+        kind: RemoteKind::Snippet,
+        dialect: ScriptDialect::QuantumultX,
+        ..Default::default()
     };
-    std::fs::write(
-        cache_dir.join(file),
-        serde_json::to_string_pretty(&cached).unwrap(),
+    manager.save(std::slice::from_ref(&remote)).unwrap();
+    assert_eq!(manager.fetch_all(&[remote]).await.fetched, 1);
+    let imported = parse_import(
+        "[MITM]\nhostname=local.invalid,shared.invalid",
+        ScriptDialect::Surge,
     )
     .unwrap();
-}
-
-#[test]
-fn empty_cache_dir_yields_empty_view() {
-    let dir = TestDir::new();
-    assert!(collect_hostname_sources(dir.path()).is_empty());
-}
-
-#[test]
-fn aggregates_sources_per_hostname() {
-    let dir = TestDir::new();
-    let manager = RemoteManager::new(dir.path().to_path_buf());
-    manager
-        .save(&[RemoteResource {
-            name: "去广告".to_string(),
-            url: "https://example.com/a.sgmodule".to_string(),
-            kind: RemoteKind::Snippet,
-            ..RemoteResource::default()
-        }])
-        .unwrap();
-    write_cache(dir.path(), "imported.json", &["a.com", "shared.com"]);
-    write_cache(dir.path(), "去广告.json", &["b.com", "shared.com"]);
-
-    let view = collect_hostname_sources(dir.path());
+    manager.merge_imported(&imported).unwrap();
+    let view = collect_hostname_sources(root.path());
     assert_eq!(view.len(), 3);
-    // 按 hostname 排序。
-    assert_eq!(view[0].hostname, "a.com");
-    assert_eq!(view[0].sources, vec!["本地导入".to_string()]);
-    assert_eq!(view[1].hostname, "b.com");
-    assert_eq!(view[1].sources, vec!["去广告".to_string()]);
-    // 同一 hostname 多来源合并、排序稳定（文件名序：imported < 去广告）。
-    assert_eq!(view[2].hostname, "shared.com");
-    assert_eq!(
-        view[2].sources,
-        vec!["本地导入".to_string(), "去广告".to_string()]
+    assert_eq!(view[0].hostname, "local.invalid");
+    assert_eq!(view[0].sources, ["本地导入"]);
+    assert_eq!(view[1].hostname, "remote.invalid");
+    assert_eq!(view[1].sources, ["remote"]);
+    assert_eq!(view[2].hostname, "shared.invalid");
+    assert_eq!(view[2].sources, ["remote", "本地导入"]);
+    // An orphan is not a new source; disk enumeration cannot grant activation.
+    std::fs::write(
+        root.path().join("remote_cache/orphan.json"),
+        r#"{"version":2,"module_id":"orphan","hostnames":["orphan.invalid"]}"#,
+    )
+    .unwrap();
+    assert_eq!(collect_hostname_sources(root.path()), view);
+    std::fs::write(
+        root.path().join("remote_cache/local_imports.json"),
+        "broken registry",
+    )
+    .unwrap();
+    let merged = manager.load_cached().unwrap();
+    assert_eq!(merged.hostnames, ["remote.invalid", "shared.invalid"]);
+    assert!(
+        merged
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("registry is unreadable"))
     );
-}
-
-#[test]
-fn unknown_cache_file_falls_back_to_stem() {
-    let dir = TestDir::new();
-    write_cache(dir.path(), "orphan.json", &["x.com"]);
-    let view = collect_hostname_sources(dir.path());
-    assert_eq!(view.len(), 1);
-    assert_eq!(view[0].sources, vec!["orphan".to_string()]);
+    assert_eq!(collect_hostname_sources(root.path()).len(), 2);
 }

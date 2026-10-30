@@ -7,6 +7,14 @@ impl ClientState {
         &mut self,
         progress: &(dyn Fn(&str) + Send + Sync),
     ) -> LanpathResult<()> {
+        if self.core.is_some() {
+            return Err(LanpathError::Client(
+                "客户端仍持有核心或系统代理恢复状态；请先成功停止并恢复代理".into(),
+            ));
+        }
+        // Recovery must precede stale-core reaping, even if the desired proxy toggle is off.
+        self.sysproxy.recover_abandoned().await?;
+        self.stop_mitm().await?;
         // Always reload latest config from disk: settings page saves immediately (8eab048) only writes
         // client.json to disk, this instance may hold an old snapshot; starting with cached config would make
         // saved settings (e.g. TUN toggle) not take effect. data_dir is determined by app state, use
@@ -159,13 +167,6 @@ impl ClientState {
         // MITM starts before core: need listen address to inject core routing rules.
         let chain = self.start_mitm_chain().await?;
 
-        // Scheduled task scheduler: after phase ③ decoupling, independent of MITM startup.
-        // Read task scripts from remote cache (regardless of MITM enabled), start scheduler as long as there are enabled tasks.
-        // Failure is only logged as warning, does not block core startup (isolated from MITM failure).
-        if let Err(e) = self.start_scheduler_from_cache().await {
-            tracing::warn!(error = %e, "定时任务调度器启动失败（不影响核心启动）");
-        }
-
         // TUN / Clash dashboard config (settings page highest priority): forcibly injected after compose (build_core_config +
         // override), same-name fields in template/override are replaced as a whole by settings.
         //
@@ -204,8 +205,7 @@ impl ClientState {
         ) {
             Ok(cfg) => cfg,
             Err(e) => {
-                self.rollback_mitm_started().await;
-                return Err(e);
+                return Err(self.rollback_mitm_started(e).await);
             }
         };
         // 启动时补齐「被引用但尚未下载」的社区规则集（best-effort）：用户在市场/规则集
@@ -259,6 +259,13 @@ impl ClientState {
 
         progress("同步代理策略");
         self.post_core_clash_setup().await;
+
+        // Scheduled tasks start only after the core return port and system proxy ownership are ready.
+        // Read task scripts from remote cache (regardless of MITM enabled), start scheduler as long as there are enabled tasks.
+        // Failure is only logged as warning, does not block core startup (isolated from MITM failure).
+        if let Err(e) = self.start_scheduler_from_cache().await {
+            tracing::warn!(error = %e, "定时任务调度器启动失败（不影响核心启动）");
+        }
 
         Ok(())
     }

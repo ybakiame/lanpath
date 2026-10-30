@@ -17,11 +17,14 @@ impl Render for ProxyView {
             .w_full()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .gap_2()
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child("代理策略")
                     .children(
@@ -42,6 +45,8 @@ impl Render for ProxyView {
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
                     .child(
                         Button::new("proxy-refresh")
@@ -66,6 +71,7 @@ impl Render for ProxyView {
                 div()
                     .flex()
                     .items_center()
+                    .flex_wrap()
                     .gap_2()
                     .children(groups.into_iter().map(|group| {
                         let name = group.name;
@@ -96,6 +102,6 @@ impl Render for ProxyView {
                     .as_ref()
                     .map(|notice| div().text_sm().child(notice.clone())),
             )
-            .child(List::new(&self.list).size_full())
+            .child(List::new(&self.list).flex_1().min_h_0().min_w_0())
     }
 }

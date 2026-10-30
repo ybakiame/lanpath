@@ -33,6 +33,7 @@ impl RulesView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .children([
                         (MarketGroup::All, "全部"),

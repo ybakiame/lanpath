@@ -89,6 +89,26 @@ pub async fn download_missing_rule_sets_warn_only(
     config: &Value,
     progress: &(dyn Fn(&str) + Send + Sync),
 ) {
+    prepare_missing_rule_sets(data_dir, config, None, progress).await;
+}
+
+/// Prepare referenced resources with a fixed caller policy. Cache-only mode
+/// restores manual files, retains existing downloads, and warns instead of fetching.
+pub async fn prepare_missing_rule_sets_warn_only(
+    data_dir: &std::path::Path,
+    config: &Value,
+    context: &crate::RemoteFetchContext,
+    progress: &(dyn Fn(&str) + Send + Sync),
+) {
+    prepare_missing_rule_sets(data_dir, config, Some(context), progress).await;
+}
+
+async fn prepare_missing_rule_sets(
+    data_dir: &std::path::Path,
+    config: &Value,
+    context: Option<&crate::RemoteFetchContext>,
+    progress: &(dyn Fn(&str) + Send + Sync),
+) {
     let store = LocalOverrideStore::new(data_dir.to_path_buf());
     let Ok(ovr) = store.load() else {
         return;
@@ -108,6 +128,15 @@ pub async fn download_missing_rule_sets_warn_only(
         if !referenced.contains(&rs.tag) {
             continue;
         }
+        if matches!(rs.source, CustomRuleSetSource::Manual { .. })
+            && !manager.has_custom_rule_set_file(rs)
+            && let Some(context) = context
+            && let Err(error) =
+                context.check_write(&manager.custom_rule_set_file_path(&rs.id, rs.file_format()))
+        {
+            tracing::warn!(tag = %rs.tag, %error, "本地规则集恢复被活动输入保护拒绝");
+            continue;
+        }
         if let Err(error) = manager.restore_missing_manual_rule_set(rs) {
             tracing::warn!(tag = %rs.tag, error = %error, "本地规则集恢复失败");
         }
@@ -116,8 +145,20 @@ pub async fn download_missing_rule_sets_warn_only(
         {
             continue;
         }
+        if context.is_some_and(|context| !context.allows_network()) {
+            tracing::warn!(tag = %rs.tag, "核心请求代理未就绪且规则集无缓存，本次按既有缺失规则降级");
+            continue;
+        }
         progress(&format!("下载缺失规则集：{}", rs.tag));
-        if let Err(e) = manager.download_custom_rule_set(rs).await {
+        let downloaded = match context {
+            Some(context) => {
+                manager
+                    .download_custom_rule_set_with_context(rs, context)
+                    .await
+            }
+            None => manager.download_custom_rule_set(rs).await,
+        };
+        if let Err(e) = downloaded {
             tracing::warn!(
                 tag = %rs.tag,
                 error = %e,

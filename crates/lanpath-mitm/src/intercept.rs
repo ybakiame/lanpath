@@ -87,54 +87,53 @@ mod tests {
         );
     }
 
-    // should_intercept_tls 与 should_intercept_connect 共用 should_intercept_host 判定
-    // （ClientHello 无法在测试中构造，SNI 经 `server_name().unwrap_or_default()` 提取后
-    // 走同一函数），以下用例按 SNI 语义复核白名单命中 / 未命中 / 排除命中。
+    // These test only the shared host matcher. CONNECT binding and ClientHello
+    // identity selection are exercised by the real TLS transport regressions.
 
     #[test]
-    fn should_intercept_tls_whitelist_hit_intercepts() {
+    fn host_matcher_whitelist_hit_matches() {
         let config = test_config(
             vec![HostnameMatcher::Suffix("iqiyi.com".to_string())],
             vec![HostnameMatcher::Exact("blocked.example.com".to_string())],
         );
         assert!(
             should_intercept_host(&config, "api.iqiyi.com"),
-            "SNI 未排除且白名单命中应拦截"
+            "an allowed, non-excluded hostname must match"
         );
         assert!(
             !should_intercept_host(&config, "other.example.com"),
-            "SNI 白名单未命中不应拦截（走盲隧道透传）"
+            "a hostname outside the whitelist must not match"
         );
     }
 
     #[test]
-    fn should_intercept_tls_excluded_sni_wins_over_whitelist() {
+    fn host_matcher_exclusion_wins_over_whitelist() {
         let config = test_config(
             vec![HostnameMatcher::Suffix("iqiyi.com".to_string())],
             vec![HostnameMatcher::Suffix("vip.iqiyi.com".to_string())],
         );
         assert!(
             !should_intercept_host(&config, "vip.iqiyi.com"),
-            "SNI 排除命中即使白名单命中也不应拦截"
+            "an excluded hostname must not match even when whitelisted"
         );
     }
 
     #[test]
-    fn should_intercept_tls_empty_sni_falls_back_to_library_semantics() {
-        // 白名单非空：无 SNI（空主机名）不匹配任何白名单条目，不拦截。
+    fn host_matcher_empty_input_obeys_whitelist() {
+        // Empty input is a matcher input, not the identity used for absent SNI.
         let whitelisted = test_config(
             vec![HostnameMatcher::Suffix("iqiyi.com".to_string())],
             Vec::new(),
         );
         assert!(
             !should_intercept_host(&whitelisted, ""),
-            "白名单非空且无 SNI 时不应拦截"
+            "empty input must not match this nonempty whitelist"
         );
-        // 白名单为空：保持「空=全拦截」库语义，无 SNI 仍拦截。
+        // An empty whitelist accepts any input not matched by an exclusion.
         let open = test_config(Vec::new(), Vec::new());
         assert!(
             should_intercept_host(&open, ""),
-            "白名单为空时无 SNI 仍全量拦截（库语义不变）"
+            "empty input matches an empty whitelist with no exclusions"
         );
     }
 }

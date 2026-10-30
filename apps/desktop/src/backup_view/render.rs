@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _,
     button::Button,
@@ -45,9 +46,10 @@ impl Render for BackupView {
             .read(cx)
             .context_menu_capabilities()
             .is_masked();
-        let mut body = div().flex().flex_col().gap_6().p_4().min_w_0()
+        let mut body = div().flex().flex_col().flex_shrink_0().gap_6().p_1().min_w_0()
+            .w_full().max_w(gpui_kit::rems(64.0))
             .child(div().flex().flex_col().gap_2()
-                .child(div().text_lg().child("加密备份与恢复"))
+                .child(div().text_lg().font_semibold().child("加密备份与恢复"))
                 .child(value("backup-root-scope", scope))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("仅备份可移植配置与资源；不含核心、证书、日志或本机 appearance.json。外观仅携带主题、强调色和纯黑模式，本机缩放保持不变。")))
@@ -101,7 +103,7 @@ impl Render for BackupView {
             );
         }
         body = body.child(div().flex().flex_col().gap_3().min_w_0()
-            .child(div().text_base().child("导出加密备份"))
+            .child(div().text_base().font_semibold().child("导出加密备份"))
             .child(div().flex().flex_col().gap_2()
                 .child("导出密码")
                 .child(Input::new(&self.export_password).id("backup-export-password")
@@ -121,7 +123,7 @@ impl Render for BackupView {
             .child(div().text_sm().text_color(cx.theme().muted_foreground)
                 .child("密码至少 12 个字符，默认隐藏且不会出现在状态或报告中。密码丢失无法找回；请将备份保存在实验数据目录之外。已有文件不会被覆盖。")))
             .child(div().flex().flex_col().gap_3().min_w_0()
-                .child(div().text_base().child("导入与回滚"))
+                .child(div().text_base().font_semibold().child("导入与回滚"))
                 .child(div().flex().flex_wrap().items_center().gap_2()
                     .child(Button::new("backup-choose-file").accessibility_id("backup-choose-file").label("选择备份…")
                         .disabled(disabled).on_click(cx.listener(|this, _, _, cx| this.choose_source(cx))))
@@ -190,6 +192,9 @@ fn value(
         .role(Role::Status)
         .aria_label(text.clone())
         .text_sm()
+        .min_w_0()
+        .w_full()
+        .whitespace_normal()
         .child(text)
 }
 

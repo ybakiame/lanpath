@@ -1,3 +1,4 @@
+use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _,
     button::Button,
@@ -198,11 +199,16 @@ impl Render for AppearanceView {
                     .id("appearance-scroll")
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
                     .overflow_y_scrollbar()
                     .child(
                         div()
                             .flex()
                             .flex_col()
+                            .flex_shrink_0()
+                            .min_w_0()
+                            .w_full()
+                            .max_w(gpui_kit::rems(64.0))
                             .gap_6()
                             .p_1()
                             .child(
@@ -211,7 +217,7 @@ impl Render for AppearanceView {
                                     .items_center()
                                     .flex_wrap()
                                     .gap_3()
-                                    .child(div().text_lg().child("外观"))
+                                    .child(div().text_lg().font_semibold().child("外观"))
                                     .child(
                                         Button::new("appearance-reload")
                                             .label("重新载入外观")
@@ -235,50 +241,64 @@ impl Render for AppearanceView {
                                     .child(status),
                             )
                             .child(
-                                div().flex().flex_col().gap_3().child("主题").child(
-                                    RadioGroup::horizontal("appearance-theme")
-                                        .selected_index(THEMES.iter().position(|(value, _, _)| {
-                                            *value == self.preferences.theme()
-                                        }))
-                                        .disabled(disabled)
-                                        .children(THEMES.iter().map(|(_, id, label)| {
-                                            Radio::new(*id)
-                                                .label(*label)
-                                                .accessibility_label(*label)
-                                        }))
-                                        .on_change(cx.listener(|this, ix: &usize, window, cx| {
-                                            if let Some((theme, _, _)) = THEMES.get(*ix) {
-                                                this.change(
-                                                    this.preferences.with_theme(*theme),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }
-                                        })),
-                                ),
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_3()
+                                    .child(div().font_semibold().child("主题"))
+                                    .child(
+                                        RadioGroup::horizontal("appearance-theme")
+                                            .selected_index(THEMES.iter().position(
+                                                |(value, _, _)| *value == self.preferences.theme(),
+                                            ))
+                                            .disabled(disabled)
+                                            .children(THEMES.iter().map(|(_, id, label)| {
+                                                Radio::new(*id)
+                                                    .label(*label)
+                                                    .accessibility_label(*label)
+                                            }))
+                                            .on_change(cx.listener(
+                                                |this, ix: &usize, window, cx| {
+                                                    if let Some((theme, _, _)) = THEMES.get(*ix) {
+                                                        this.change(
+                                                            this.preferences.with_theme(*theme),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    }
+                                                },
+                                            )),
+                                    ),
                             )
                             .child(
-                                div().flex().flex_col().gap_3().child("强调色").child(
-                                    RadioGroup::horizontal("appearance-accent")
-                                        .selected_index(ACCENTS.iter().position(|(value, _, _)| {
-                                            *value == self.preferences.accent()
-                                        }))
-                                        .disabled(disabled)
-                                        .children(ACCENTS.iter().map(|(_, id, label)| {
-                                            Radio::new(*id)
-                                                .label(*label)
-                                                .accessibility_label(*label)
-                                        }))
-                                        .on_change(cx.listener(|this, ix: &usize, window, cx| {
-                                            if let Some((accent, _, _)) = ACCENTS.get(*ix) {
-                                                this.change(
-                                                    this.preferences.with_accent(*accent),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }
-                                        })),
-                                ),
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_3()
+                                    .child(div().font_semibold().child("强调色"))
+                                    .child(
+                                        RadioGroup::horizontal("appearance-accent")
+                                            .selected_index(ACCENTS.iter().position(
+                                                |(value, _, _)| *value == self.preferences.accent(),
+                                            ))
+                                            .disabled(disabled)
+                                            .children(ACCENTS.iter().map(|(_, id, label)| {
+                                                Radio::new(*id)
+                                                    .label(*label)
+                                                    .accessibility_label(*label)
+                                            }))
+                                            .on_change(cx.listener(
+                                                |this, ix: &usize, window, cx| {
+                                                    if let Some((accent, _, _)) = ACCENTS.get(*ix) {
+                                                        this.change(
+                                                            this.preferences.with_accent(*accent),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    }
+                                                },
+                                            )),
+                                    ),
                             )
                             .child(
                                 div()
@@ -316,7 +336,7 @@ impl Render for AppearanceView {
                                     .flex()
                                     .flex_col()
                                     .gap_2()
-                                    .child("界面缩放")
+                                    .child(div().font_semibold().child("界面缩放"))
                                     .child(
                                         Select::new(&self.scale)
                                             .id("appearance-scale")
