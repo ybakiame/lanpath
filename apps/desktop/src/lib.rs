@@ -23,6 +23,7 @@ mod log_capture;
 mod log_list;
 mod log_stream;
 mod logs_view;
+mod migration;
 mod mitm_view;
 mod observation;
 mod privileged;
@@ -65,10 +66,10 @@ use connections_view::ConnectionsView;
 use core_management_view::{CoreManagementView, CoreSelectionChanged};
 use diagnostics_view::DiagnosticsView;
 use distribution_view::{DistributionEvent, DistributionView};
-use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::{TitleBar, WindowExt as _};
 use gpui_kit::{
     AppContext as _, Context, Entity, FocusHandle, Subscription, Task, TitlebarOptions, Window,
-    WindowOptions,
+    WindowBackgroundAppearance, WindowOptions,
 };
 use logs_view::LogsView;
 use mitm_view::{MitmChanged, MitmView};
@@ -269,6 +270,7 @@ impl DesktopView {
             &cores,
             window,
             |this, _, _: &CoreSelectionChanged, window, cx| {
+                this.core.refresh_selected_core();
                 this.sync_request_lock(cx);
                 this.about.update(cx, |view, cx| view.refresh(cx));
                 this.configuration
@@ -423,9 +425,9 @@ pub fn run() {
     if startup_activation::activate_existing().expect("GPUI instance activation failed") {
         return;
     }
-    let core = Arc::new(DesktopRuntime::from_env());
+    let core = DesktopRuntime::from_env();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             appearance::initialize(&core, cx);
@@ -441,12 +443,17 @@ pub fn run() {
                     show: !cfg!(windows),
                     titlebar: Some(TitlebarOptions {
                         title: Some(crate::product::DISPLAY_NAME.into()),
-                        ..Default::default()
+                        ..TitleBar::title_bar_options()
                     }),
-                    ..Default::default()
+                    window_background: if cfg!(windows) {
+                        WindowBackgroundAppearance::Blurred
+                    } else {
+                        WindowBackgroundAppearance::Opaque
+                    },
+                    ..TitleBar::window_options()
                 },
                 cx,
-                |window, cx| cx.new(|cx| DesktopView::new(core, window, cx)),
+                |window, cx| cx.new(|cx| migration::session::SessionView::new(core, window, cx)),
             )
             .expect("failed to open experimental desktop window");
             if cfg!(windows) {

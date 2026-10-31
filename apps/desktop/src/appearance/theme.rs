@@ -3,6 +3,8 @@ use gpui_kit::{App, Hsla, WindowAppearance, px, rgb};
 
 use super::{AccentPreference, AppearancePreferences};
 
+const WINDOW_SURFACE_OPACITY: f32 = 0.86;
+
 pub(super) fn apply(
     preferences: AppearancePreferences,
     appearance: WindowAppearance,
@@ -24,11 +26,22 @@ pub(super) fn apply(
         let scale = f32::from(preferences.scale_percent()) / 100.;
         theme.font_size = px(16. * scale);
         theme.mono_font_size = px(13. * scale);
-        if preferences.effective_pure_black(appearance) {
+        let pure_black = preferences.effective_pure_black(appearance);
+        if pure_black {
             apply_pure_black(theme);
         }
         apply_accent(theme, preferences.accent(), dark);
+        theme.overlay = theme.background.opacity(0.72);
+        if cfg!(windows) && !pure_black {
+            apply_window_material(theme);
+        }
     });
+}
+
+fn apply_window_material(theme: &mut Theme) {
+    theme.background = theme.background.opacity(WINDOW_SURFACE_OPACITY);
+    theme.title_bar = theme.title_bar.opacity(WINDOW_SURFACE_OPACITY);
+    theme.sidebar = theme.sidebar.opacity(WINDOW_SURFACE_OPACITY);
 }
 
 fn apply_accent(theme: &mut Theme, accent: AccentPreference, dark: bool) {

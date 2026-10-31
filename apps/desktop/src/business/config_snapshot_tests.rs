@@ -47,7 +47,7 @@ async fn admitted_settings_survive_external_changes_through_generation_and_polic
     external.mixed_port = 24567;
     external.clash_api_port = 24568;
     external.save().unwrap();
-    let saved_bytes = std::fs::read(root.path().join("client.json")).unwrap();
+    let saved_bytes = std::fs::read(root.path().join("app.toml")).unwrap();
 
     let (generated, _) = business
         .build_config_report(false, None, admitted)
@@ -80,7 +80,7 @@ async fn admitted_settings_survive_external_changes_through_generation_and_polic
         Err(lanpath_common::LanpathError::Config(_))
     ));
     assert_eq!(
-        std::fs::read(root.path().join("client.json")).unwrap(),
+        std::fs::read(root.path().join("app.toml")).unwrap(),
         saved_bytes
     );
 }

@@ -3,10 +3,7 @@ mod backup;
 mod tests;
 mod theme;
 
-use std::{
-    io::Write as _,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, Global, WindowAppearance};
 use lanpath_common::{LanpathError, LanpathResult};
@@ -125,6 +122,13 @@ impl AppearanceStore {
     }
 
     pub(crate) fn load(&self) -> LanpathResult<AppearancePreferences> {
+        let app = lanpath_client::settings::app_settings_path(&self.root);
+        if app.exists() {
+            let preferences: AppearancePreferences =
+                lanpath_client::settings::load_app_section(&self.root, "appearance")?
+                    .unwrap_or_default();
+            return preferences.validate();
+        }
         let path = resources::confined(&self.root, "appearance.json", "appearance.json")?;
         match std::fs::read(&path) {
             Ok(bytes) => {
@@ -143,13 +147,8 @@ impl AppearanceStore {
         let preferences = preferences.validate()?;
         // A damaged/replaced file must not be silently erased by an already-open view.
         self.load()?;
-        let path = resources::confined(&self.root, "appearance.json", "appearance.json")?;
-        let mut file = tempfile::NamedTempFile::new_in(&self.root)?;
-        serde_json::to_writer_pretty(&mut file, &preferences)?;
-        file.write_all(b"\n")?;
-        file.as_file().sync_all()?;
-        file.persist(path).map_err(|error| error.error)?;
-        Ok(())
+        lanpath_client::settings::ensure_app_settings(&self.root)?;
+        lanpath_client::settings::persist_app_section(&self.root, "appearance", &preferences)
     }
 }
 
@@ -220,10 +219,20 @@ pub(crate) fn initialize(core: &DesktopRuntime, cx: &mut App) {
         restore_warning: None,
     };
     let _ = state.reload();
-    backup::restore_at_startup(core, &mut state);
     let preferences = state.preferences;
     cx.set_global(state);
     apply(preferences, cx.window_appearance(), cx);
+}
+
+pub(crate) fn restore_backup(core: &DesktopRuntime, cx: &mut App) {
+    let appearance = cx.window_appearance();
+    let preferences = {
+        let state = cx.global_mut::<AppearanceState>();
+        let _ = state.reload();
+        backup::restore_at_startup(core, state);
+        state.preferences
+    };
+    apply(preferences, appearance, cx);
 }
 
 pub(crate) fn apply(

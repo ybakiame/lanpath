@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::{business::BusinessService, runtime::DesktopRuntime};
 
+mod card;
 mod render;
 
 pub(crate) struct SubscriptionsChanged;
@@ -39,6 +40,8 @@ pub(crate) struct SubscriptionsView {
     user_agent: Entity<InputState>,
     source: Entity<EditorState>,
     dirty: bool,
+    editor_open: bool,
+    editor_confirm_discard: bool,
     locked: bool,
     busy: Option<Operation>,
     error: Option<String>,
@@ -94,6 +97,8 @@ impl SubscriptionsView {
             user_agent,
             source,
             dirty: false,
+            editor_open: false,
+            editor_confirm_discard: false,
             locked: false,
             busy: None,
             error: None,
@@ -152,6 +157,7 @@ impl SubscriptionsView {
         );
         self.load_source(window, cx);
         self.dirty = false;
+        self.editor_confirm_discard = false;
         self.error = None;
         self.notice = None;
         cx.notify();
@@ -173,12 +179,21 @@ impl SubscriptionsView {
             .update(cx, |state, cx| state.set_value(source, window, cx));
     }
 
-    fn request_select(&mut self, id: Option<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
+    fn request_select(
+        &mut self,
+        id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        open_editor: bool,
+    ) {
         if self.locked || self.busy() {
             return;
         }
         if !self.dirty {
             self.select(id, window, cx);
+            if open_editor {
+                self.open_editor(window, cx);
+            }
             return;
         }
         let view = cx.weak_entity();
@@ -194,6 +209,9 @@ impl SubscriptionsView {
                     let _ = view.update(cx, |view, cx| {
                         if !view.locked && !view.busy() {
                             view.select(id, window, cx);
+                            if open_editor {
+                                view.open_editor(window, cx);
+                            }
                         }
                     });
                     true
@@ -376,6 +394,9 @@ impl SubscriptionsView {
                                         .or_else(|| this.subscriptions.last().map(|item| item.id))
                                 };
                                 this.select(next, window, cx);
+                                if matches!(operation, Operation::Save) {
+                                    this.close_editor(window, cx);
+                                }
                             } else if matches!(operation, Operation::Refresh) {
                                 this.load_source(window, cx);
                             }
@@ -406,6 +427,17 @@ impl SubscriptionsView {
                 .ok()
             });
         }));
+        cx.notify();
+    }
+
+    fn set_user_agent(&mut self, value: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.locked || self.busy() {
+            return;
+        }
+        set_input(&self.user_agent, value, window, cx);
+        self.dirty = true;
+        self.error = None;
+        self.notice = None;
         cx.notify();
     }
 

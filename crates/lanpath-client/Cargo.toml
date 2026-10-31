@@ -33,6 +33,8 @@ reqwest = { features = ["gzip", "brotli", "deflate", "cookies", "system-proxy", 
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+toml = "1"
+toml_edit = { version = "0.25", features = ["serde"] }
 sqlx = { workspace = true }
 tar = "0.4"
 thiserror = { workspace = true }

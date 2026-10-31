@@ -1,18 +1,18 @@
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use lanpath_client::{ClientConfig, RequestProxyMode};
 use lanpath_common::{LanpathError, LanpathResult};
 
 use super::BusinessService;
-use crate::configuration::resources;
 
 impl BusinessService {
     pub(crate) fn client_config(&self) -> LanpathResult<ClientConfig> {
-        let path = resources::confined(&self.root, "client.json", "client.json")?;
-        let is_new = !path.is_file();
+        let is_new =
+            !crate::configuration::resources::confined(&self.root, "client.json", "client.json")?
+                .is_file()
+                && !lanpath_client::settings::app_settings_path(&self.root).is_file();
+        lanpath_client::settings::ensure_app_settings(&self.root)?;
+        let path = lanpath_client::settings::app_settings_path(&self.root);
         let mut config = if is_new {
             ClientConfig::new(
                 self.root.clone(),
@@ -114,20 +114,12 @@ fn persisted_paths_match(path: &Path, service: &BusinessService) -> LanpathResul
     struct CaPath {
         ca_dir: Option<PathBuf>,
     }
-    let stored: Paths = serde_json::from_reader(std::fs::File::open(path)?)?;
+    let stored: Paths = serde_json::from_value(lanpath_client::settings::load_client(path)?)?;
     Ok(stored.data_dir.as_deref() == Some(service.root.as_path())
         && stored.mitm.and_then(|mitm| mitm.ca_dir).as_deref()
             == Some(service.root.join("certs").as_path()))
 }
 
 pub(super) fn persist(path: &Path, config: &ClientConfig) -> LanpathResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| LanpathError::Config("client.json has no parent directory".into()))?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut file, config)?;
-    file.write_all(b"\n")?;
-    file.as_file().sync_all()?;
-    file.persist(path).map_err(|error| error.error)?;
-    Ok(())
+    lanpath_client::settings::persist_client(path, &serde_json::to_value(config)?)
 }

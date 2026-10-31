@@ -10,6 +10,7 @@ use std::{
 };
 
 pub(super) const CONFIG: &[&str] = &[
+    "app.toml",
     "client.json",
     "subscriptions.json",
     "profiles.json",
@@ -193,43 +194,59 @@ pub(super) fn relocate(
             atomic_json(&path, &value)?;
         }
     }
-    let path = stage.join("client.json");
-    if path.try_exists()? {
-        let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-        if raw.get("request_proxy_mode").is_none() {
-            raw["request_proxy_mode"] = if raw["fetch_via_local_proxy"] == true {
-                "core"
-            } else {
-                "none"
-            }
-            .into();
+    let app = lanpath_client::settings::app_settings_path(stage);
+    if app.try_exists()? {
+        let raw = lanpath_client::settings::load_client(&app)?;
+        let config = normalized_client(raw, target, import)?;
+        lanpath_client::settings::persist_app_section(stage, "client", &config)?;
+    } else {
+        let path = stage.join("client.json");
+        if path.try_exists()? {
+            let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let config = normalized_client(raw, target, import)?;
+            atomic_json(&path, &config)?;
         }
-        let mut config: lanpath_client::ClientConfig = serde_json::from_value(raw)?;
-        // Do not call ClientConfig::load: its legacy migrations write the input.
-        config.data_dir = target.into();
-        if import {
-            // Import never replaces the target user's selected core with a
-            // source binary; owned-root moves already rewrote managed paths.
-            config.core_binary = match std::fs::read(target.join("client.json")) {
-                Ok(bytes) => {
-                    serde_json::from_slice::<lanpath_client::ClientConfig>(&bytes)?.core_binary
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => PathBuf::new(),
-                Err(e) => return Err(e.into()),
-            };
-        }
-        config.mitm.ca_dir = target.join("certs");
-        if import {
-            config.system_proxy_enabled = false;
-            config.tun_enabled = false;
-            config.mitm_enabled = false;
-        }
-        config.validate_request_proxy()?;
-        atomic_json(&path, &config)?;
     }
     // Validate typed configuration and associations without writing to the source.
     lanpath_client::backup::capture(stage, None)?;
     Ok(())
+}
+
+fn normalized_client(
+    mut raw: serde_json::Value,
+    target: &Path,
+    import: bool,
+) -> LanpathResult<lanpath_client::ClientConfig> {
+    if raw.get("request_proxy_mode").is_none() {
+        raw["request_proxy_mode"] = if raw["fetch_via_local_proxy"] == true {
+            "core"
+        } else {
+            "none"
+        }
+        .into();
+    }
+    let mut config: lanpath_client::ClientConfig = serde_json::from_value(raw)?;
+    // Do not call ClientConfig::load: its legacy migrations write the input.
+    config.data_dir = target.into();
+    if import {
+        // Import never replaces the target user's selected core with a source
+        // binary; owned-root moves already rewrote managed paths.
+        config.core_binary = if target.join("client.json").is_file()
+            || lanpath_client::settings::app_settings_path(target).is_file()
+        {
+            lanpath_client::ClientConfig::load_for_requests(target)?.core_binary
+        } else {
+            PathBuf::new()
+        };
+    }
+    config.mitm.ca_dir = target.join("certs");
+    if import {
+        config.system_proxy_enabled = false;
+        config.tun_enabled = false;
+        config.mitm_enabled = false;
+    }
+    config.validate_request_proxy()?;
+    Ok(config)
 }
 
 pub(super) fn sync_directory(path: &Path) -> LanpathResult<()> {

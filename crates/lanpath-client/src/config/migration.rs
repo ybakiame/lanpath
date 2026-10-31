@@ -29,7 +29,11 @@ pub(super) fn migrate_request_proxy(
     object.remove("fetch_via_local_proxy");
     // Validate before touching the original. An existing backup is never overwritten.
     let _: super::ClientConfig = serde_json::from_value(raw.clone())?;
-    let backup = path.with_file_name("client.request-proxy-v1.backup.json");
+    let backup = if crate::settings::is_app_settings(path) {
+        path.with_file_name("app.request-proxy-v1.backup.toml")
+    } else {
+        path.with_file_name("client.request-proxy-v1.backup.json")
+    };
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut backup_file = tempfile::NamedTempFile::new_in(parent)?;
     backup_file.write_all(original.as_bytes())?;
@@ -38,13 +42,29 @@ pub(super) fn migrate_request_proxy(
         Ok(_) => {}
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
             // A directory or incomplete backup must not be treated as a rollback file.
-            let _: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&backup)?)?;
+            let backup_text = std::fs::read_to_string(&backup)?;
+            if crate::settings::is_app_settings(path) {
+                backup_text
+                    .parse::<toml_edit::DocumentMut>()
+                    .map_err(|error| {
+                        lanpath_common::LanpathError::Config(format!(
+                            "{}: {error}",
+                            backup.display()
+                        ))
+                    })?;
+            } else {
+                let _: serde_json::Value = serde_json::from_str(&backup_text)?;
+            }
         }
         Err(e) => return Err(e.error.into()),
     }
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    temporary.write_all(serde_json::to_string_pretty(raw)?.as_bytes())?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|e| e.error)?;
+    if crate::settings::is_app_settings(path) {
+        crate::settings::persist_client(path, raw)?;
+    } else {
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(serde_json::to_string_pretty(raw)?.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path).map_err(|e| e.error)?;
+    }
     Ok(())
 }

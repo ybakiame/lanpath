@@ -1,7 +1,6 @@
 //! Framework-free core inventory, verified selection, and atomic selection persistence.
 
 use std::{
-    io::Write as _,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -100,7 +99,7 @@ impl CoreManagementService {
     fn inventory(&self) -> LanpathResult<ClientCoreInventory> {
         if self.confined {
             safety::unlinked_path(&self.root.join("cores"))?;
-            safety::unlinked_path(&self.root.join("client.json"))?;
+            safety::unlinked_path(&crate::settings::client_settings_path(&self.root))?;
             safety::unlinked_path(&self.root.join("cores/sing-box"))?;
             return Ok(ClientCoreInventory::for_experiment(
                 self.root.clone(),
@@ -115,7 +114,7 @@ impl CoreManagementService {
 
     fn active(&self) -> LanpathResult<PathBuf> {
         if self.confined {
-            safety::unlinked_path(&self.root.join("client.json"))?;
+            safety::unlinked_path(&crate::settings::client_settings_path(&self.root))?;
         }
         Ok(ClientConfig::load_for_requests(&self.root)?.core_binary)
     }
@@ -224,16 +223,16 @@ impl CoreManagementService {
         } else {
             safety::executable(binary)?;
         }
-        let file = self.root.join("client.json");
+        let file = crate::settings::client_settings_path(&self.root);
         if self.confined {
             safety::unlinked_path(&file)?;
         }
         // Read after probing/network work: stale service snapshots never replace other settings.
-        let mut raw = match std::fs::read(&file) {
-            Ok(bytes) => {
-                let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let mut raw = match std::fs::read_to_string(&file) {
+            Ok(text) => {
+                let value = crate::settings::client_from_text(&file, &text)?;
                 if !value.is_object() {
-                    return Err(safety::invalid("client.json must be an object"));
+                    return Err(safety::invalid("client settings must contain an object"));
                 }
                 // Validate the latest persisted schema without rewriting its unrelated fields.
                 let _ = ClientConfig::deserialize(&value)?;
@@ -246,12 +245,7 @@ impl CoreManagementService {
         };
         raw["core_binary"] = serde_json::to_value(binary)?;
         std::fs::create_dir_all(&self.root)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(&self.root)?;
-        serde_json::to_writer_pretty(&mut temporary, &raw)?;
-        temporary.write_all(b"\n")?;
-        temporary.as_file().sync_all()?;
-        temporary.persist(&file).map_err(|error| error.error)?;
-        Ok(())
+        crate::settings::persist_client(&file, &raw)
     }
 
     pub fn delete(&self, path: &Path) -> LanpathResult<()> {

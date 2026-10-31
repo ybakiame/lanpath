@@ -47,6 +47,36 @@ fn service_export_restores_through_existing_archive_api() {
 }
 
 #[test]
+fn legacy_pending_restore_converts_to_app_toml_and_preserves_appearance() {
+    let source = configured("toml-restore-token");
+    let snapshot = capture(source.path(), None).unwrap();
+    let target = configured("current-target-token");
+    prepare_restore(target.path(), snapshot, PASSWORD, None).unwrap();
+
+    // The migration session validates first, then converts current settings,
+    // and only then applies the pending archive.
+    crate::settings::ensure_app_settings(target.path()).unwrap();
+    crate::settings::persist_app_section(
+        target.path(),
+        "appearance",
+        &serde_json::json!({"scale_percent": 117, "theme": "dark"}),
+    )
+    .unwrap();
+    validate_pending(target.path()).unwrap();
+    apply_validated_pending(target.path()).unwrap();
+
+    let restored = crate::ClientConfig::load(target.path()).unwrap();
+    assert_eq!(restored.sub_token, "toml-restore-token");
+    let appearance: serde_json::Value =
+        crate::settings::load_app_section(target.path(), "appearance")
+            .unwrap()
+            .unwrap();
+    assert_eq!(appearance["scale_percent"], 117);
+    assert_eq!(appearance["theme"], "dark");
+    assert!(!target.path().join(".backup-pending").exists());
+}
+
+#[test]
 fn legacy_import_is_one_use_and_encrypted_history_can_restore_previous_configuration() {
     let source = configured("legacy-import-token");
     let mut legacy = capture(source.path(), Some(appearance("amber"))).unwrap();

@@ -1,7 +1,7 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, ThemeStyled as _,
+    ActiveTheme as _, Disableable as _, Sizable as _, ThemeStyled as _, TitleBar,
     button::{Button, ButtonVariants as _},
     sidebar::{Sidebar, SidebarFooter, SidebarHeader},
 };
@@ -64,7 +64,8 @@ impl Render for DesktopView {
             || self.requests.read(cx).dirty()
             || self.system.read(cx).dirty()
             || self.distribution.read(cx).dirty();
-        let core_status: gpui_kit::SharedString = self.core_status().into();
+        let core_status: gpui_kit::SharedString =
+            format!("{} · {}", self.core.selected_core_name(), self.core.port()).into();
         let (page_title, _) = self.page.presentation();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
@@ -92,9 +93,9 @@ impl Render for DesktopView {
             .h_full()
             .min_h_0()
             .flex_shrink_0()
-            .w(gpui_kit::rems(13.0))
-            .min_w(gpui_kit::rems(13.0))
-            .max_w(gpui_kit::rems(13.0))
+            .w(gpui_kit::rems(14.0))
+            .min_w(gpui_kit::rems(14.0))
+            .max_w(gpui_kit::rems(14.0))
             .header(
                 SidebarHeader::new().child(
                     div()
@@ -118,10 +119,11 @@ impl Render for DesktopView {
                         .flex_col()
                         .gap_1()
                         .text_xs()
+                        .whitespace_normal()
                         .text_color(cx.theme().muted_foreground)
                         .child(concat!("版本 ", env!("CARGO_PKG_VERSION")))
                         .child("独立数据 · 与 Tauri 并行")
-                        .child("F6 / Shift+F6 切换导航与内容")
+                        .child("F6 / Shift+F6 切换区域")
                         .child("导航 ↑↓ · Enter 打开")
                         .child("Ctrl+S 保存当前表单"),
                 ),
@@ -143,139 +145,166 @@ impl Render for DesktopView {
                 }),
             )
             .flex()
-            .items_stretch()
+            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            // A hidden Windows HWND can initially report non-positive geometry.
-            // Sidebar caches its virtual-list overdraw from the first viewport;
-            // mount it only after the native size notification supplies real bounds.
-            .children((window.viewport_size().height > gpui_kit::px(0.0)).then_some(sidebar))
+            .child(
+                TitleBar::new().child(
+                    div()
+                        .flex_shrink_0()
+                        .text_sm()
+                        .font_semibold()
+                        .child(crate::product::DISPLAY_NAME),
+                ),
+            )
             .child(
                 div()
                     .flex()
-                    .flex_col()
+                    .items_stretch()
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .flex_wrap()
-                            .flex_shrink_0()
-                            .gap_2()
-                            .px_4()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap_1()
-                                    .child(div().text_lg().font_semibold().child(page_title))
-                                    .child(
-                                        div()
-                                            .id("core-status")
-                                            .accessibility_id("core-status")
-                                            .role(Role::Status)
-                                            .aria_label(core_status.clone())
-                                            .text_sm()
-                                            .min_w_0()
-                                            .whitespace_normal()
-                                            .text_color(if self.core_error.is_some() {
-                                                cx.theme().danger
-                                            } else {
-                                                cx.theme().muted_foreground
-                                            })
-                                            .child(core_status),
-                                    )
-                                    .children((dirty && !self.core_running).then(|| {
-                                        div()
-                                            .text_sm()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("有未保存修改；保存或放弃后才能启动核心")
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .flex_shrink_0()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("core-start")
-                                            .accessibility_id("core-start")
-                                            .small()
-                                            .icon(IconName::Play)
-                                            .label("启动核心")
-                                            .disabled(
-                                                operation_busy
-                                                    || self.core_running
-                                                    || self.core_recovery_needed
-                                                    || self.distribution.read(cx).is_pending()
-                                                    || !self.core.is_configured()
-                                                    || !self
-                                                        .configuration
-                                                        .read(cx)
-                                                        .ready_for_start()
-                                                    || dirty,
-                                            )
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.run_core_operation(
-                                                    CoreOperationKind::Start,
-                                                    window,
-                                                    cx,
-                                                )
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("core-stop")
-                                            .accessibility_id("core-stop")
-                                            .small()
-                                            .ghost()
-                                            .icon(IconName::Square)
-                                            .label(
-                                                if self.core_recovery_needed && !self.core_running {
-                                                    "恢复自有控制"
-                                                } else {
-                                                    "停止核心"
-                                                },
-                                            )
-                                            .disabled(
-                                                operation_busy
-                                                    || (!self.core_running
-                                                        && !self.core_recovery_needed),
-                                            )
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.run_core_operation(
-                                                    CoreOperationKind::Stop,
-                                                    window,
-                                                    cx,
-                                                )
-                                            })),
-                                    ),
-                            ),
+                    // A hidden Windows HWND can initially report non-positive geometry.
+                    // Sidebar caches its virtual-list overdraw from the first viewport;
+                    // mount it only after the native size notification supplies real bounds.
+                    .children(
+                        (window.viewport_size().height > gpui_kit::px(0.0)).then_some(sidebar),
                     )
                     .child(
                         div()
-                            .id("desktop-content")
-                            .track_focus(&self.content_focus)
-                            .aria_label(page_title)
-                            .when(self.content_focus.is_focused(window), |element| {
-                                element.focus_ring_style(window, cx)
-                            })
                             .flex()
                             .flex_col()
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
-                            .p_4()
-                            .child(content),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .flex_wrap()
+                                    .flex_shrink_0()
+                                    .gap_2()
+                                    .px_4()
+                                    .py_3()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .id("core-status")
+                                                    .accessibility_id("core-status")
+                                                    .role(Role::Status)
+                                                    .aria_label(core_status.clone())
+                                                    .text_sm()
+                                                    .min_w_0()
+                                                    .whitespace_normal()
+                                                    .text_color(if self.core_error.is_some() {
+                                                        cx.theme().danger
+                                                    } else {
+                                                        cx.theme().muted_foreground
+                                                    })
+                                                    .child(core_status),
+                                            )
+                                            .children((dirty && !self.core_running).then(|| {
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("有未保存修改；保存或放弃后才能启动核心")
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_wrap()
+                                            .flex_shrink_0()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                Button::new("core-start")
+                                                    .accessibility_id("core-start")
+                                                    .small()
+                                                    .icon(IconName::Play)
+                                                    .label("启动核心")
+                                                    .disabled(
+                                                        operation_busy
+                                                            || self.core_running
+                                                            || self.core_recovery_needed
+                                                            || self
+                                                                .distribution
+                                                                .read(cx)
+                                                                .is_pending()
+                                                            || !self.core.is_configured()
+                                                            || !self
+                                                                .configuration
+                                                                .read(cx)
+                                                                .ready_for_start()
+                                                            || dirty,
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.run_core_operation(
+                                                                CoreOperationKind::Start,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    )),
+                                            )
+                                            .child(
+                                                Button::new("core-stop")
+                                                    .accessibility_id("core-stop")
+                                                    .small()
+                                                    .ghost()
+                                                    .icon(IconName::Square)
+                                                    .label(
+                                                        if self.core_recovery_needed
+                                                            && !self.core_running
+                                                        {
+                                                            "恢复自有控制"
+                                                        } else {
+                                                            "停止核心"
+                                                        },
+                                                    )
+                                                    .disabled(
+                                                        operation_busy
+                                                            || (!self.core_running
+                                                                && !self.core_recovery_needed),
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.run_core_operation(
+                                                                CoreOperationKind::Stop,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        },
+                                                    )),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("desktop-content")
+                                    .track_focus(&self.content_focus)
+                                    .aria_label(page_title)
+                                    .when(self.content_focus.is_focused(window), |element| {
+                                        element.focus_ring_style(window, cx)
+                                    })
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .min_h_0()
+                                    .p_4()
+                                    .child(content),
+                            ),
                     ),
             )
     }

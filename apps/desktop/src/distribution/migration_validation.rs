@@ -18,7 +18,10 @@ pub(super) fn validate_stage(
     if options.history {
         normalize_history(stage)?;
     }
-    if options.appearance && stage.join("appearance.json").try_exists()? {
+    if options.appearance
+        && (stage.join("appearance.json").try_exists()?
+            || lanpath_client::settings::app_settings_path(stage).try_exists()?)
+    {
         // Desktop preferences are typed; do not copy an invalid appearance file.
         crate::appearance::AppearanceStore::new(stage).load()?;
     }

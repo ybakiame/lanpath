@@ -142,8 +142,10 @@ impl<'a> MigrationService<'a> {
                 return Err(invalid("source is not an owned experimental data root"));
             }
         }
-        if !source.join("client.json").is_file() {
-            return Err(invalid("selected source does not contain client.json"));
+        if !source.join("client.json").is_file()
+            && !lanpath_client::settings::app_settings_path(&source).is_file()
+        {
+            return Err(invalid("selected source does not contain client settings"));
         }
         let mut roots = Vec::new();
         if options.configuration {
@@ -153,7 +155,11 @@ impl<'a> MigrationService<'a> {
             roots.extend(HISTORY.iter().map(|s| (*s).into()));
         }
         if options.appearance {
-            roots.push("appearance.json".into());
+            if lanpath_client::settings::app_settings_path(&source).is_file() {
+                roots.push("app.toml".into());
+            } else {
+                roots.push("appearance.json".into());
+            }
         }
         if options.ca == CaScope::IdentityAndPrivateKey {
             roots.extend(["certs/ca.crt".into(), "certs/ca.key".into()]);
@@ -161,6 +167,8 @@ impl<'a> MigrationService<'a> {
         if roots.is_empty() {
             return Err(invalid("select at least one migration category"));
         }
+        roots.sort();
+        roots.dedup();
         let files = inventory(&source, &roots)?;
         let target_files = inventory(self.root.path(), &roots)?;
         // Validate a stable private copy, never open or migrate source stores.
@@ -287,12 +295,12 @@ impl<'a> MigrationService<'a> {
         };
         relocation.apply_pending()?;
         relocation.acknowledge()?;
-        let path = self.root.path().join("client.json");
-        let config: lanpath_client::ClientConfig = match std::fs::read(path) {
-            Ok(bytes) => serde_json::from_slice(&bytes)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(recovery),
-            Err(e) => return Err(e.into()),
-        };
+        if !self.root.path().join("client.json").is_file()
+            && !lanpath_client::settings::app_settings_path(self.root.path()).is_file()
+        {
+            return Ok(recovery);
+        }
+        let config = lanpath_client::ClientConfig::load(self.root.path())?;
         if config.data_dir == self.root.path() {
             return Ok(recovery);
         }

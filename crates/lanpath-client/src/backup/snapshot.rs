@@ -8,9 +8,24 @@ use std::{
 pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snapshot> {
     let mut files = BTreeMap::new();
     for root in ROOTS {
-        collect(dir, root, &mut files)?;
+        // The portable snapshot keeps its logical client.json representation;
+        // app.toml is reconstructed at restore time to preserve local appearance.
+        if *root != "app.toml" {
+            collect(dir, root, &mut files)?;
+        }
     }
-    let cfg = if let Some(bytes) = files.get("client.json") {
+    let cfg = if crate::settings::app_settings_path(dir).is_file() {
+        let mut raw = crate::settings::load_client(&crate::settings::app_settings_path(dir))?;
+        if raw.get("request_proxy_mode").is_none() {
+            raw["request_proxy_mode"] = if raw["fetch_via_local_proxy"] == true {
+                "core"
+            } else {
+                "none"
+            }
+            .into();
+        }
+        serde_json::from_value::<crate::ClientConfig>(raw)?
+    } else if let Some(bytes) = files.get("client.json") {
         let mut raw: serde_json::Value = serde_json::from_slice(bytes)?;
         if raw.get("request_proxy_mode").is_none() {
             raw["request_proxy_mode"] = if raw["fetch_via_local_proxy"] == true {
@@ -106,12 +121,17 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
             return Err(invalid("备份路径无效或在目标系统上存在重名"));
         }
     }
-    let cfg: crate::ClientConfig = serde_json::from_slice(
-        snapshot
-            .files
-            .get("client.json")
-            .ok_or_else(|| invalid("备份缺少客户端配置"))?,
-    )?;
+    let cfg: crate::ClientConfig = if let Some(bytes) = snapshot.files.get("client.json") {
+        serde_json::from_slice(bytes)?
+    } else if let Some(bytes) = snapshot.files.get("app.toml") {
+        let text = std::str::from_utf8(bytes).map_err(|error| invalid(&error.to_string()))?;
+        serde_json::from_value(crate::settings::client_from_text(
+            std::path::Path::new("app.toml"),
+            text,
+        )?)?
+    } else {
+        return Err(invalid("备份缺少客户端配置"));
+    };
     cfg.validate_request_proxy()?;
     let read = |name: &str| -> LanpathResult<serde_json::Value> {
         Ok(match snapshot.files.get(name) {
@@ -183,8 +203,17 @@ pub(super) fn relocate(snapshot: &mut Snapshot, dir: &Path) -> LanpathResult<()>
     if snapshot.summary.platform != std::env::consts::OS {
         cfg.tun_stack = crate::ClientConfig::default().tun_stack;
     }
-    snapshot
-        .files
-        .insert("client.json".into(), serde_json::to_vec_pretty(&cfg)?);
+    if crate::settings::app_settings_path(dir).is_file() {
+        let original = std::fs::read_to_string(crate::settings::app_settings_path(dir))?;
+        let merged = crate::settings::merge_app_section_text(&original, "client", &cfg)?;
+        snapshot
+            .files
+            .insert("app.toml".into(), merged.into_bytes());
+        snapshot.files.remove("client.json");
+    } else {
+        snapshot
+            .files
+            .insert("client.json".into(), serde_json::to_vec_pretty(&cfg)?);
+    }
     Ok(())
 }

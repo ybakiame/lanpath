@@ -223,9 +223,9 @@ impl ClientConfig {
         cfg
     }
 
-    /// 配置文件路径：`data_dir/client.json`。
+    /// 配置文件路径：GPUI 使用 `app.toml` 的 `[client]`，其他壳沿用 `client.json`。
     pub fn config_file(&self) -> PathBuf {
-        self.data_dir.join("client.json")
+        crate::settings::client_settings_path(&self.data_dir)
     }
 
     /// 归一化规则模式：合法值 `rule` / `global` / `direct` 原样返回，非法值
@@ -246,9 +246,9 @@ impl ClientConfig {
     /// - Android 端 `tun_stack: "gvisor"`（gVisor 选项清理前的存量值）迁移为 `go`
     ///   （见 [`migrated_tun_stack`]）。
     pub fn load(data_dir: &Path) -> LanpathResult<Self> {
-        let path = data_dir.join("client.json");
+        let path = crate::settings::client_settings_path(data_dir);
         let text = std::fs::read_to_string(&path)?;
-        let mut raw: serde_json::Value = serde_json::from_str(&text)?;
+        let mut raw: serde_json::Value = crate::settings::load_client(&path)?;
         migration::migrate_request_proxy(&path, &text, &mut raw)?;
         let legacy_mihomo = raw.get("core_type").and_then(|v| v.as_str()) == Some("mihomo");
         if legacy_mihomo {
@@ -263,16 +263,16 @@ impl ClientConfig {
             if let Some(obj) = raw.as_object_mut() {
                 obj.remove("core_type");
             }
-            std::fs::write(&path, serde_json::to_string_pretty(&raw)?)?;
-            tracing::info!("旧版 mihomo 配置已归一化为 sing-box 并写回 client.json");
+            crate::settings::persist_client(&path, &raw)?;
+            tracing::info!("旧版 mihomo 配置已归一化为 sing-box 并写回客户端设置");
         }
         if let Some(stack) = raw.get("tun_stack").and_then(|v| v.as_str())
             && let Some(next) = migrated_tun_stack(cfg!(target_os = "android"), stack)
         {
             raw["tun_stack"] = serde_json::Value::String(next.to_string());
             // 写回读取路径（不能用 `Self::save`：其目标取自配置内的 data_dir 字段）。
-            std::fs::write(&path, serde_json::to_string_pretty(&raw)?)?;
-            tracing::info!("存量 tun_stack=gvisor 已迁移为 go 并写回 client.json");
+            crate::settings::persist_client(&path, &raw)?;
+            tracing::info!("存量 tun_stack=gvisor 已迁移为 go 并写回客户端设置");
         }
         let mut config: Self = serde_json::from_value(raw)?;
         // 数据根由壳确定。便携目录移动后，仅在内存中重定位托管核心；
@@ -295,21 +295,21 @@ impl ClientConfig {
 
     /// 首装可使用默认请求策略；损坏配置或迁移失败必须返回错误。
     pub fn load_for_requests(data_dir: &Path) -> LanpathResult<Self> {
-        if data_dir.join("client.json").exists() {
+        if data_dir.join("client.json").exists()
+            || crate::settings::app_settings_path(data_dir).exists()
+        {
             Self::load(data_dir)
         } else {
             Ok(Self::new(data_dir.to_path_buf(), "", "", PathBuf::new()))
         }
     }
 
-    /// 将配置保存到 `data_dir/client.json`。
+    /// 将配置保存到当前客户端设置文件。
     pub fn save(&self) -> LanpathResult<()> {
         let path = self.config_file();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, text)?;
-        Ok(())
+        crate::settings::persist_client(&path, &serde_json::to_value(self)?)
     }
 }

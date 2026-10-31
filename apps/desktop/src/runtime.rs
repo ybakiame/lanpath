@@ -61,6 +61,7 @@ pub(crate) struct DesktopRuntime {
     #[cfg(windows)]
     proxy_guardian: Mutex<Option<crate::proxy_guardian::Guardian>>,
     binary_override: Option<PathBuf>,
+    selected_core: Mutex<Option<String>>,
     startup: tokio::sync::watch::Sender<StartupProgress>,
     missing_rule_sets: Mutex<RunResources>,
     observations: Option<ObservationService>,
@@ -80,12 +81,82 @@ impl DesktopRuntime {
         Self::initialize()
     }
 
-    pub(crate) fn is_configured(&self) -> bool {
-        self.configuration_error.is_none() && self.runtime.is_some() && self.business.is_some()
+    pub(crate) fn settings_migration_required(&self) -> Result<bool, String> {
+        crate::migration::is_required(self.data_root()?.path()).map_err(|error| error.to_string())
     }
 
-    pub(crate) fn configuration_error(&self) -> Option<&str> {
-        self.configuration_error.as_deref()
+    pub(crate) fn load_settings(&mut self) -> Result<(), String> {
+        let result = self
+            .business
+            .as_ref()
+            .map(BusinessService::client_config)
+            .transpose();
+        match result {
+            Ok(Some(config)) => {
+                self.saved_proxy_port_changed(config.mixed_port);
+                self.refresh_selected_core();
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(error) => {
+                let error = error.to_string();
+                self.configuration_error = Some(match self.configuration_error.take() {
+                    Some(previous) => format!("{previous}；{error}"),
+                    None => error.clone(),
+                });
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn migrate_settings(&self) -> Result<(), String> {
+        let root = self.data_root()?.path().to_owned();
+        crate::migration::run(&root)
+            .map(|_| ())
+            .map_err(|error| format!("设置迁移失败：{error}"))
+    }
+
+    pub(crate) fn refresh_selected_core(&self) {
+        let name = self.business.as_ref().and_then(|business| {
+            business.client_config().ok().and_then(|config| {
+                config
+                    .core_binary
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            })
+        });
+        if let Ok(mut selected) = self.selected_core.lock() {
+            *selected = name;
+        }
+    }
+
+    pub(crate) fn selected_core_name(&self) -> String {
+        self.selected_core
+            .lock()
+            .ok()
+            .and_then(|selected| selected.clone())
+            .unwrap_or_else(|| "未选择核心".into())
+    }
+
+    pub(crate) fn backup_restore_pending(&self) -> bool {
+        self.backup
+            .as_ref()
+            .is_some_and(|backup| backup.is_pending())
+    }
+
+    pub(crate) fn validate_backup_restore(&self) -> Result<(), String> {
+        lanpath_client::backup::validate_pending(self.data_root()?.path())
+            .map_err(|error| format!("备份校验失败：{error}"))
+    }
+
+    pub(crate) fn apply_backup_restore(&self) -> Result<(), String> {
+        lanpath_client::backup::apply_validated_pending(self.data_root()?.path())
+            .map_err(|error| format!("备份恢复失败：{error}"))
+    }
+
+    pub(crate) fn is_configured(&self) -> bool {
+        self.configuration_error.is_none() && self.runtime.is_some() && self.business.is_some()
     }
 
     pub(crate) fn core_override(&self) -> Option<&Path> {

@@ -94,7 +94,7 @@ fn enabling_invalid_or_conflicting_api_port_never_partially_saves() {
     saved.clash_api_secret = "persisted-secret".into();
     saved.clash_api_ui = "metacubexd".into();
     business.save_system_settings(&saved).unwrap();
-    let path = root.path().join("client.json");
+    let path = root.path().join("app.toml");
     let before = std::fs::read(&path).unwrap();
 
     for port in [0, saved.mixed_port, saved.mixed_port + 1] {

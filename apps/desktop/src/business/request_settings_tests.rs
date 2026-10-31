@@ -104,7 +104,7 @@ fn invalid_custom_proxy_redacts_credentials_and_keeps_prior_saved_document() {
     config.rule_mode = "direct".into();
     config.mitm_enabled = true;
     config.save().unwrap();
-    let file = root.path().join("client.json");
+    let file = root.path().join("app.toml");
     let prior = std::fs::read(&file).unwrap();
     for url in [
         "http://secret-user:secret-password@127.0.0.1:8080/private",
@@ -143,12 +143,8 @@ fn normalized_request_reads_leave_existing_file_bytes_untouched() {
             "https://mirror.example".into(),
         ))
         .unwrap();
-    let config = business.client_config().unwrap();
-    let file = root.path().join("client.json");
-    // A valid compact representation makes a needless pretty rewrite observable
-    // without relying on filesystem timestamp resolution or a timing race.
-    let original = serde_json::to_vec(&config).unwrap();
-    std::fs::write(&file, &original).unwrap();
+    let file = root.path().join("app.toml");
+    let original = std::fs::read(&file).unwrap();
     business.request_settings().unwrap();
     let (snapshot, policy) = business.saved_request_policy().unwrap();
     assert_eq!(snapshot.mode(), RequestProxyMode::Core);
@@ -170,13 +166,13 @@ fn request_read_persists_path_only_normalization_without_clearing_saved_policy()
     let mut config = business.client_config().unwrap();
     config.data_dir = root.path().join("outside-data");
     config.mitm.ca_dir = root.path().join("outside-ca");
-    let file = root.path().join("client.json");
+    let file = root.path().join("app.toml");
     super::state::persist(&file, &config).unwrap();
     assert_eq!(
         business.request_settings().unwrap().mode(),
         RequestProxyMode::System
     );
-    let repaired: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let repaired: Value = lanpath_client::settings::load_client(&file).unwrap();
     assert_eq!(
         repaired["data_dir"],
         serde_json::to_value(root.path()).unwrap()

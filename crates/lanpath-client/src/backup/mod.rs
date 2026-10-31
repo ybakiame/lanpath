@@ -18,12 +18,16 @@ pub use archive::{decode, encode, generate_password};
 pub use preview::{BackupPreview, PreviewCache, RestoreInput};
 pub use service::BackupService;
 pub use snapshot::capture;
-pub use transaction::{apply_pending, apply_pending_at_startup, prepare_restore};
+pub use transaction::{
+    apply_pending, apply_pending_at_startup, apply_validated_pending, prepare_restore,
+    recover_interrupted, validate_pending,
+};
 
 pub const MAX_ARCHIVE: usize = 16 * 1024 * 1024;
 const MAX_EXPANDED: usize = 64 * 1024 * 1024;
 const MAX_FILES: usize = 1024;
 pub(super) const ROOTS: &[&str] = &[
+    "app.toml",
     "client.json",
     "subscriptions.json",
     "profiles.json",
@@ -84,7 +88,7 @@ pub(super) fn allowed(name: &str) -> bool {
                 || reserved(p)
         })
         && ROOTS.contains(&parts[0])
-        && ((parts.len() == 1 && parts[0].ends_with(".json"))
+        && ((parts.len() == 1 && (parts[0].ends_with(".json") || parts[0] == "app.toml"))
             || (parts.len() > 1 && !parts[0].ends_with(".json")))
 }
 

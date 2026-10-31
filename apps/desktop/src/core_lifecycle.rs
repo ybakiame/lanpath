@@ -1,5 +1,4 @@
 use super::*;
-use crate::privileged::StopKind;
 
 impl DesktopView {
     pub(super) fn run_core_operation(
@@ -127,41 +126,6 @@ impl DesktopView {
         });
         self.core_task = Some(task);
         cx.notify();
-    }
-
-    pub(super) fn core_status(&self) -> String {
-        if self.closing {
-            return "正在等待已接受操作并回收实验核心…".to_string();
-        }
-        if let Some(kind) = self.core_busy {
-            return match kind {
-                CoreOperationKind::Start => self.startup_status.clone(),
-                CoreOperationKind::Stop => "正在停止核心…".to_string(),
-            };
-        }
-        if let Some(error) = &self.core_error {
-            return format!("核心错误：{error}");
-        }
-        if self.core_running {
-            return format!("核心运行中 · 127.0.0.1:{}", self.core.port());
-        }
-        if self.core.is_configured() {
-            if self.core_recovery_needed {
-                return "核心状态待恢复；启动、配置写入和安装更新已锁定".into();
-            }
-            let stopped = match self.core_stop_kind.as_ref() {
-                Some(StopKind::Graceful) => " · 正常退出，自有网络已恢复",
-                Some(StopKind::Forced) => " · 强制退出，自有网络已恢复",
-                Some(StopKind::AlreadyStopped) => " · 原已退出，自有网络已恢复",
-                Some(StopKind::RecoveryRequired) => " · 自有网络仍待恢复",
-                None => "",
-            };
-            return format!("核心已停止{stopped} · 隔离端口 {}", self.core.port());
-        }
-        format!(
-            "核心未配置 · {}",
-            self.core.configuration_error().unwrap_or("不可用")
-        )
     }
 
     fn publish_running(&mut self, cx: &mut Context<Self>) {

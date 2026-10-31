@@ -60,16 +60,23 @@ pub fn prepare_restore(
 }
 
 pub fn apply_pending(dir: &Path) -> LanpathResult<()> {
+    apply_pending_impl(dir, true)
+}
+
+pub fn recover_interrupted(dir: &Path) -> LanpathResult<()> {
     if dir.join(JOURNAL).exists() {
         recover(dir)?;
     }
+    Ok(())
+}
+
+pub fn validate_pending(dir: &Path) -> LanpathResult<()> {
     let pending = dir.join(PENDING);
     if !pending.exists() {
         return Ok(());
     }
     let summary: BackupSummary =
         serde_json::from_slice(&std::fs::read(pending.join("manifest.json"))?)?;
-    // Validate staged files again before touching the current installation.
     let mut files = BTreeMap::new();
     for root in ROOTS {
         collect_pending(&pending, root, &mut files)?;
@@ -77,7 +84,32 @@ pub fn apply_pending(dir: &Path) -> LanpathResult<()> {
     snapshot::validate(&mut Snapshot {
         summary: summary.clone(),
         files,
-    })?;
+    })
+}
+
+pub fn apply_validated_pending(dir: &Path) -> LanpathResult<()> {
+    apply_pending_impl(dir, false)
+}
+
+fn apply_pending_impl(dir: &Path, validate: bool) -> LanpathResult<()> {
+    recover_interrupted(dir)?;
+    let pending = dir.join(PENDING);
+    if !pending.exists() {
+        return Ok(());
+    }
+    if validate {
+        validate_pending(dir)?;
+    }
+    if crate::settings::app_settings_path(dir).is_file() && pending.join("client.json").is_file() {
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(pending.join("client.json"))?)?;
+        let original = std::fs::read_to_string(crate::settings::app_settings_path(dir))?;
+        let merged = crate::settings::merge_app_section_text(&original, "client", &raw)?;
+        atomic_write(&pending.join("app.toml"), merged.as_bytes())?;
+        std::fs::remove_file(pending.join("client.json"))?;
+    }
+    let summary: BackupSummary =
+        serde_json::from_slice(&std::fs::read(pending.join("manifest.json"))?)?;
     let work = dir.join(WORK);
     if work.exists() {
         std::fs::remove_dir_all(&work)?;

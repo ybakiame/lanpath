@@ -30,7 +30,7 @@ fn invalid_scale_save_leaves_valid_file_and_live_preferences_unchanged() {
     let store = AppearanceStore::new(root.path());
     let previous = AppearancePreferences::default().with_scale_percent(117);
     store.save(previous).unwrap();
-    let path = root.path().join("appearance.json");
+    let path = root.path().join("app.toml");
     let bytes = std::fs::read(&path).unwrap();
     let mut state = AppearanceState {
         preferences: previous,
@@ -90,7 +90,7 @@ fn reload_failure_retains_last_applied_preferences_until_explicit_repair() {
         load_error: None,
         restore_warning: None,
     };
-    let path = root.path().join("appearance.json");
+    let path = root.path().join("app.toml");
     std::fs::write(&path, "broken").unwrap();
     assert!(state.reload().is_err());
     assert_eq!(state.preferences(), preferences);
@@ -101,7 +101,9 @@ fn reload_failure_retains_last_applied_preferences_until_explicit_repair() {
             .is_err()
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "broken");
-    std::fs::write(&path, serde_json::to_vec(&preferences).unwrap()).unwrap();
+    let repaired =
+        lanpath_client::settings::merge_app_section_text("", "appearance", &preferences).unwrap();
+    std::fs::write(&path, repaired).unwrap();
     state.reload().unwrap();
     assert!(state.load_error().is_none());
     let updated = preferences.with_accent(AccentPreference::Teal);

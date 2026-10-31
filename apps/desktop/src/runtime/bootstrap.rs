@@ -40,7 +40,7 @@ impl DesktopRuntime {
                 let root = DataRoot::open(&location.path)?;
                 // Both recovery paths run under the exclusive lease, before any store exists.
                 MigrationService::new(&root).startup()?;
-                lanpath_client::backup::apply_pending_at_startup(root.path())?;
+                lanpath_client::backup::recover_interrupted(root.path())?;
                 Ok::<_, lanpath_common::LanpathError>(Arc::new(root))
             })
             .transpose();
@@ -98,17 +98,6 @@ impl DesktopRuntime {
                 Bindings::new(MIXED_PORT, CLASH_API_PORT),
             )
         });
-        let settings = business
-            .as_ref()
-            .map(BusinessService::client_config)
-            .transpose();
-        let settings = match settings {
-            Ok(settings) => settings,
-            Err(error) => {
-                errors.push(error.to_string());
-                None
-            }
-        };
         let script_http = data_root
             .as_ref()
             .map(|root| Arc::new(ReqwestHttpExecutor::for_data_dir(root.path())));
@@ -140,9 +129,10 @@ impl DesktopRuntime {
             lifecycle_gate: Arc::new(tokio::sync::Mutex::new(())),
             live_inputs: tokio::sync::Mutex::new(None),
             binary_override: binary,
+            selected_core: Mutex::new(None),
             startup: tokio::sync::watch::channel(StartupProgress::default()).0,
             missing_rule_sets: Mutex::new(RunResources::default()),
-            mixed_port: AtomicU16::new(settings.as_ref().map_or(0, |config| config.mixed_port)),
+            mixed_port: AtomicU16::new(0),
             observations,
             business,
             backup,

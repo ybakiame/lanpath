@@ -114,7 +114,7 @@ impl Render for RequestSettingsView {
                         .aria_label("自定义请求代理 URL（密码遮蔽）")
                         .disabled(editing_disabled || self.mode != RequestProxyMode::Custom))
                     .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                        .child("整个地址均遮蔽显示；认证信息以明文保存到实验 client.json。切换模式不会清空地址。")))
+                        .child("整个地址均遮蔽显示；认证信息以明文保存到实验 app.toml。切换模式不会清空地址。")))
                 .child(div().flex().flex_col().gap_2()
                     .child("GitHub 镜像前缀")
                     .child(Input::new(&self.github_prefix)

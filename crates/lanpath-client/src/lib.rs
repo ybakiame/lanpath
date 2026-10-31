@@ -34,6 +34,7 @@ mod request_probe;
 pub use request_probe::test_github_connectivity;
 pub mod ruleset_manager;
 pub mod runner;
+pub mod settings;
 pub mod share_link;
 pub mod state;
 pub mod stats;

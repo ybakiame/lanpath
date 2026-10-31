@@ -52,7 +52,7 @@ impl Render for BackupView {
                 .child(div().text_lg().font_semibold().child("加密备份与恢复"))
                 .child(value("backup-root-scope", scope))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                    .child("仅备份可移植配置与资源；不含核心、证书、日志或本机 appearance.json。外观仅携带主题、强调色和纯黑模式，本机缩放保持不变。")))
+                    .child("仅备份可移植配置与资源；不含核心、证书、日志或本机 app.toml 外观段。外观仅携带主题、强调色和纯黑模式，本机缩放保持不变。")))
             .child(div().flex().flex_col().gap_2()
                 .child(value("backup-status", status).text_color(if self.error.is_some() { cx.theme().danger } else { cx.theme().muted_foreground }))
                 .children(self.notice.as_ref().map(|notice| value("backup-notice", format!("操作结果：{notice}"))))

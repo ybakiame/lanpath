@@ -43,7 +43,7 @@ fn explicit_test_override_never_replaces_saved_core_selection() {
     let mut config = ordinary.client_config().unwrap();
     config.core_binary = selected.clone();
     config.save().unwrap();
-    let file = root.path().join("client.json");
+    let file = root.path().join("app.toml");
     let before = std::fs::read(&file).unwrap();
     let override_file = tempfile::NamedTempFile::new().unwrap();
     let overridden = BusinessService::new(
