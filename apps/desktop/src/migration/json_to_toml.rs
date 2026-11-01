@@ -17,15 +17,24 @@ impl SettingsMigration for JsonToToml {
     }
 
     fn is_required(&self, root: &Path) -> LanpathResult<bool> {
-        Ok(LEGACY_FILES.iter().any(|name| root.join(name).is_file()))
+        Ok(LEGACY_FILES.iter().any(|name| root.join(name).is_file())
+            || settings::has_flat_core_binary(root)?)
     }
 
     fn legacy_files(&self) -> &'static [&'static str] {
         LEGACY_FILES
     }
 
+    fn backup_files(&self) -> &'static [&'static str] {
+        &["client.json", "appearance.json", "app.toml"]
+    }
+
     fn migrate(&self, root: &Path) -> LanpathResult<()> {
-        settings::ensure_app_settings(root)
+        if settings::app_settings_path(root).is_file() {
+            settings::migrate_core_settings(root)
+        } else {
+            settings::ensure_app_settings(root)
+        }
     }
 
     fn validate(&self, root: &Path) -> LanpathResult<()> {

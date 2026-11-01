@@ -30,6 +30,27 @@ fn save(root: &Path, selected: PathBuf) {
         .unwrap();
 }
 
+#[test]
+fn retention_keeps_current_and_one_previous_version_per_channel() {
+    let root = tempfile::tempdir().unwrap();
+    let core = |version: &str| ManagedCore {
+        version: version.into(),
+        path: binary(root.path(), version),
+        active: false,
+    };
+    let pruned = prune_candidates(
+        vec![
+            core("1.14.0"),
+            core("1.13.15"),
+            core("1.13.14"),
+            core("1.14.0-beta.4"),
+        ],
+        "1.14.0",
+    );
+    let versions: Vec<_> = pruned.iter().map(|core| core.version()).collect();
+    assert_eq!(versions, ["1.13.14"]);
+}
+
 #[tokio::test]
 async fn invalid_versions_never_create_download_paths() {
     let root = tempfile::tempdir().unwrap();
@@ -97,13 +118,21 @@ fn selection_merges_latest_only_and_survives_service_reopen() {
         cores.iter().find(|core| core.is_active()).unwrap().path(),
         selected
     );
-    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    let after: serde_json::Value =
+        crate::settings::load_client(&crate::settings::app_settings_path(root.path())).unwrap();
     latest["core_binary"] = serde_json::to_value(&selected).unwrap();
+    if let Some(object) = latest.as_object_mut() {
+        object.remove("active_subscription_id");
+    }
     assert_eq!(after, latest, "selection changes no unrelated latest field");
     assert_eq!(
         ClientConfig::load(root.path()).unwrap().core_binary,
         selected
     );
+    let nested = crate::settings::load_core_settings(root.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(nested.current.unwrap().version, "1.2.3");
 }
 
 #[cfg(unix)]

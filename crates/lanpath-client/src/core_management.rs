@@ -10,7 +10,7 @@ use serde::{Deserialize as _, Serialize};
 
 use crate::{
     ClientConfig, ClientCoreInventory,
-    cores::{safety, version},
+    cores::{channel_of_version, safety, version},
 };
 
 #[cfg(test)]
@@ -188,6 +188,7 @@ impl CoreManagementService {
             .await?;
         progress(crate::cores::CoreDownloadStage::Selecting);
         self.persist_selection(&core.path)?;
+        self.prune_old_versions(&core.version)?;
         Ok(ManagedCore {
             version: core.version,
             path: core.path,
@@ -223,7 +224,12 @@ impl CoreManagementService {
         } else {
             safety::executable(binary)?;
         }
-        let file = crate::settings::client_settings_path(&self.root);
+        let file = if self.confined {
+            crate::settings::ensure_app_settings(&self.root)?;
+            crate::settings::app_settings_path(&self.root)
+        } else {
+            crate::settings::client_settings_path(&self.root)
+        };
         if self.confined {
             safety::unlinked_path(&file)?;
         }
@@ -248,6 +254,17 @@ impl CoreManagementService {
         crate::settings::persist_client(&file, &raw)
     }
 
+    fn prune_old_versions(&self, current_version: &str) -> LanpathResult<()> {
+        if !self.confined {
+            return Ok(());
+        }
+        let active = self.active()?;
+        for core in prune_candidates(self.list_local()?, current_version) {
+            self.inventory()?.delete(&core.path, &active)?;
+        }
+        Ok(())
+    }
+
     pub fn delete(&self, path: &Path) -> LanpathResult<()> {
         let _guard = SELECTION_WRITE
             .lock()
@@ -260,6 +277,16 @@ impl CoreManagementService {
         Self::validate_managed_binary(&self.root, path)?;
         self.inventory()?.delete(path, &active)
     }
+}
+
+fn prune_candidates(local: Vec<ManagedCore>, current_version: &str) -> Vec<ManagedCore> {
+    let channel = channel_of_version(current_version);
+    let mut installed: Vec<_> = local
+        .into_iter()
+        .filter(|core| channel_of_version(core.version()) == channel)
+        .collect();
+    installed.sort_by(|a, b| version::compare_core_versions(&b.version, &a.version));
+    installed.into_iter().skip(2).collect()
 }
 
 fn managed_version<'a>(root: &Path, path: &'a Path) -> LanpathResult<&'a str> {

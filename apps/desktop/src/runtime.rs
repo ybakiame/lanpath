@@ -136,7 +136,7 @@ impl DesktopRuntime {
             .lock()
             .ok()
             .and_then(|selected| selected.clone())
-            .unwrap_or_else(|| "未选择核心".into())
+            .unwrap_or_else(|| "sing-box".into())
     }
 
     pub(crate) fn backup_restore_pending(&self) -> bool {

@@ -61,7 +61,9 @@ impl CoreManagementView {
                 this.task = None;
                 this.stage = None;
                 match result {
-                    Ok(remote) => {
+                    Ok(mut remote) => {
+                        remote
+                            .retain(|channel| matches!(channel.channel(), "stable" | "prerelease"));
                         this.remote = remote;
                         this.remote_checked = true;
                         this.error = None;

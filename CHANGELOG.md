@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- GPUI 核心管理改为 stable/prerelease 双通道卡片，展示真实 release tag；每通道只保留当前和上一个版本，默认核心为 `sing-box/stable`。选择持久化使用 `app.toml` 的 `[core]`、`[core.current]` 与 `[core.previous]` 嵌套结构，实验数据根内的核心路径保存为相对路径并在加载时解析。
 - GPUI 覆写模板改为卡片与大型编辑/预览弹窗，卡片展示内容类型和远程来源；新增/编辑保留草稿确认，YAML/JS 编辑器占窗口高度 75%，并统一视图模块目录结构。
 - GPUI 移除标题栏和运行栏的重复页面标题，运行信息改为当前实际核心名称与代理端口。订阅新增/编辑改为居中弹窗并增强半透明遮罩与阴影，操作收进订阅卡片，原文通过大弹窗只读预览，UA 快捷项使用胶囊按钮。
 - GPUI 将应用自身 `client.json` 与 `appearance.json` 统一为 `app.toml` 的 `[client]`、`[appearance]` 分区，其他业务 JSON 与 Tauri 格式不变。新增版本化开屏迁移及 `backup/migrations` 旧文件/转换结果备份，备份与校验成功后移除原位置旧文件；旧备份恢复改为用户确认后依次校验、迁移和原子恢复，失败可返回应用并保留现场。

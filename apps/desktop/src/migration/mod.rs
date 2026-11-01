@@ -17,6 +17,9 @@ pub(crate) trait SettingsMigration: Send + Sync {
     fn id(&self) -> &'static str;
     fn is_required(&self, root: &Path) -> LanpathResult<bool>;
     fn legacy_files(&self) -> &'static [&'static str];
+    fn backup_files(&self) -> &'static [&'static str] {
+        self.legacy_files()
+    }
     fn migrate(&self, root: &Path) -> LanpathResult<()>;
     fn validate(&self, root: &Path) -> LanpathResult<()>;
     fn output_files(&self) -> &'static [&'static str];
@@ -59,7 +62,7 @@ fn run_one(root: &Path, migration: &'static dyn SettingsMigration) -> LanpathRes
     let legacy = backup.join("legacy");
     let converted = backup.join("converted");
     std::fs::create_dir_all(&legacy)?;
-    for name in migration.legacy_files() {
+    for name in migration.backup_files() {
         copy_regular(&root.join(name), &legacy.join(name))?;
     }
 
