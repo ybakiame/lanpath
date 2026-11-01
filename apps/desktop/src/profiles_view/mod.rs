@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::{business::BusinessService, runtime::DesktopRuntime};
 
+mod card;
 mod render;
 
 pub(crate) struct ProfilesChanged;
@@ -30,6 +31,8 @@ pub(crate) struct ProfilesView {
     yaml: Entity<EditorState>,
     js: Entity<EditorState>,
     dirty: bool,
+    editor_open: bool,
+    editor_confirm_discard: bool,
     locked: bool,
     busy: Option<Operation>,
     error: Option<String>,
@@ -91,6 +94,8 @@ impl ProfilesView {
             yaml,
             js,
             dirty: false,
+            editor_open: false,
+            editor_confirm_discard: false,
             locked: false,
             busy: None,
             error: None,
@@ -174,17 +179,27 @@ impl ProfilesView {
             )
         });
         self.dirty = false;
+        self.editor_confirm_discard = false;
         self.error = None;
         self.notice = None;
         cx.notify();
     }
 
-    fn request_select(&mut self, id: Option<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
+    fn request_select(
+        &mut self,
+        id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        open_editor: bool,
+    ) {
         if self.locked || self.busy() {
             return;
         }
         if !self.dirty {
             self.select(id, window, cx);
+            if open_editor {
+                self.open_editor(window, cx);
+            }
             return;
         }
         let view = cx.weak_entity();
@@ -200,6 +215,9 @@ impl ProfilesView {
                     let _ = view.update(cx, |view, cx| {
                         if !view.locked && !view.busy() {
                             view.select(id, window, cx);
+                            if open_editor {
+                                view.open_editor(window, cx);
+                            }
                         }
                     });
                     true
@@ -288,6 +306,9 @@ impl ProfilesView {
                             let next = selected
                                 .or_else(|| this.profiles.first().map(|profile| profile.id));
                             this.select(next, window, cx);
+                            if matches!(operation, Operation::Save) {
+                                this.close_editor(window, cx);
+                            }
                             this.notice = Some(
                                 match operation {
                                     Operation::Save => "覆写模板已校验并保存",
