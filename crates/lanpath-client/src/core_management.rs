@@ -1,11 +1,11 @@
-//! Framework-free core inventory, verified selection, and atomic selection persistence.
+//! Framework-free typed core inventory, verified selection, and atomic persistence.
 
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
-use lanpath_common::LanpathResult;
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde::{Deserialize as _, Serialize};
 
 use crate::{
@@ -22,20 +22,53 @@ static SELECTION_WRITE: Mutex<()> = Mutex::new(());
 /// Installed core presentation shared by desktop shells. Paths are serialized as strings.
 #[derive(Debug, Clone, Serialize)]
 pub struct ManagedCore {
+    core_type: CoreType,
     version: String,
+    environment: Option<String>,
+    tags: Vec<String>,
     path: PathBuf,
     active: bool,
 }
 
 impl ManagedCore {
+    pub fn core_type(&self) -> CoreType {
+        self.core_type
+    }
     pub fn version(&self) -> &str {
         &self.version
+    }
+    pub fn environment(&self) -> Option<&str> {
+        self.environment.as_deref()
+    }
+    pub fn tags(&self) -> &[String] {
+        &self.tags
     }
     pub fn path(&self) -> &Path {
         &self.path
     }
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    fn from_details(
+        core_type: CoreType,
+        path: PathBuf,
+        active: bool,
+        details: Option<version::CoreVersionDetails>,
+        fallback_version: &str,
+    ) -> Self {
+        let (version, environment, tags) = match details {
+            Some(details) => (details.version, details.environment, details.tags),
+            None => (fallback_version.to_string(), None, Vec::new()),
+        };
+        Self {
+            core_type,
+            version,
+            environment,
+            tags,
+            path,
+            active,
+        }
     }
 }
 
@@ -61,6 +94,7 @@ pub struct CoreManagementService {
     root: PathBuf,
     api_base: Option<String>,
     confined: bool,
+    core_type: CoreType,
 }
 
 impl CoreManagementService {
@@ -70,6 +104,7 @@ impl CoreManagementService {
             root,
             api_base: None,
             confined: false,
+            core_type: CoreType::SingBox,
         }
     }
 
@@ -79,7 +114,15 @@ impl CoreManagementService {
             root,
             api_base: None,
             confined: true,
+            core_type: CoreType::SingBox,
         }
+    }
+
+    /// Select which upstream inventory this handle manages.
+    pub fn for_core(&self, core_type: CoreType) -> Self {
+        let mut service = self.clone();
+        service.core_type = core_type;
+        service
     }
 
     /// Inject release metadata API for local fixtures; production defaults to GitHub.
@@ -89,9 +132,12 @@ impl CoreManagementService {
     }
 
     /// Validate an existing managed binary without executing it or changing configuration.
-    /// Useful when normalizing an experimental saved selection.
-    pub fn validate_managed_binary(root: &Path, path: &Path) -> LanpathResult<()> {
-        managed_version(root, path)?;
+    pub fn validate_managed_binary(
+        root: &Path,
+        core_type: CoreType,
+        path: &Path,
+    ) -> LanpathResult<()> {
+        managed_version(root, core_type, path)?;
         safety::unlinked_path(path)?;
         safety::executable(path)
     }
@@ -100,16 +146,18 @@ impl CoreManagementService {
         if self.confined {
             safety::unlinked_path(&self.root.join("cores"))?;
             safety::unlinked_path(&crate::settings::client_settings_path(&self.root))?;
-            safety::unlinked_path(&self.root.join("cores/sing-box"))?;
+            safety::unlinked_path(&self.root.join("cores").join(self.core_type.binary_name()))?;
             return Ok(ClientCoreInventory::for_experiment(
                 self.root.clone(),
                 self.api_base.as_deref(),
-            ));
+            )
+            .for_core(self.core_type));
         }
         Ok(match &self.api_base {
             Some(base) => ClientCoreInventory::with_api_base(self.root.clone(), base),
             None => ClientCoreInventory::new(self.root.clone()),
-        })
+        }
+        .for_core(self.core_type))
     }
 
     fn active(&self) -> LanpathResult<PathBuf> {
@@ -119,10 +167,42 @@ impl CoreManagementService {
         Ok(ClientConfig::load_for_requests(&self.root)?.core_binary)
     }
 
+    /// Actual selection, independent from the inventory type currently being managed.
+    pub fn active_core(&self) -> LanpathResult<ManagedCore> {
+        let active = self.active()?;
+        if active.as_os_str().is_empty() {
+            return Err(LanpathError::Core("No active core is selected".into()));
+        }
+        let core_type = version::infer_core_type(&active)
+            .ok_or_else(|| LanpathError::Core("Active core type cannot be inferred".into()))?;
+        if self.confined {
+            safety::unlinked_path(&active)?;
+            safety::executable(&active)?;
+        }
+        let fallback = managed_version(&self.root, core_type, &active)
+            .map(str::to_string)
+            .unwrap_or_else(|_| {
+                active
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            });
+        Ok(ManagedCore::from_details(
+            core_type,
+            active.clone(),
+            true,
+            version::probe_details(&active, core_type),
+            &fallback,
+        ))
+    }
+
     pub fn list_local(&self) -> LanpathResult<Vec<ManagedCore>> {
         let active = self.active()?;
         let inventory = self.inventory()?;
-        match std::fs::read_dir(self.root.join("cores/sing-box")) {
+        let type_dir = self.root.join("cores").join(self.core_type.binary_name());
+        match std::fs::read_dir(&type_dir) {
             Ok(entries) => {
                 for entry in entries {
                     entry?;
@@ -134,13 +214,19 @@ impl CoreManagementService {
         let mut result = Vec::new();
         for core in inventory.list_installed() {
             if self.confined {
-                Self::validate_managed_binary(&self.root, &core.path)?;
+                Self::validate_managed_binary(&self.root, self.core_type, &core.path)?;
             }
-            result.push(ManagedCore {
-                version: core.version,
-                active: paths_equal(&core.path, &active),
-                path: core.path,
-            });
+            let is_active = paths_equal(&core.path, &active);
+            let details = is_active
+                .then(|| version::probe_details(&core.path, self.core_type))
+                .flatten();
+            result.push(ManagedCore::from_details(
+                self.core_type,
+                core.path,
+                is_active,
+                details,
+                &core.version,
+            ));
         }
         Ok(result)
     }
@@ -161,7 +247,7 @@ impl CoreManagementService {
             .await?
             .into_iter()
             .map(|remote| {
-                let value = safety::normalized_version(&remote.version)?;
+                let value = safety::normalized_version_for(self.core_type, &remote.version)?;
                 Ok(RemoteChannel {
                     channel: remote.channel.as_str().into(),
                     version: value.into(),
@@ -181,7 +267,7 @@ impl CoreManagementService {
         requested: &str,
         progress: &(dyn Fn(crate::cores::CoreDownloadStage) + Send + Sync),
     ) -> LanpathResult<ManagedCore> {
-        safety::normalized_version(requested)?;
+        safety::normalized_version_for(self.core_type, requested)?;
         let core = self
             .inventory()?
             .download_with_tun(requested, !self.confined, progress)
@@ -189,25 +275,32 @@ impl CoreManagementService {
         progress(crate::cores::CoreDownloadStage::Selecting);
         self.persist_selection(&core.path)?;
         self.prune_old_versions(&core.version)?;
-        Ok(ManagedCore {
-            version: core.version,
-            path: core.path,
-            active: true,
-        })
+        Ok(ManagedCore::from_details(
+            self.core_type,
+            core.path.clone(),
+            true,
+            version::probe_details(&core.path, self.core_type),
+            &core.version,
+        ))
     }
 
     pub fn select(&self, path: &Path) -> LanpathResult<()> {
         if self.confined {
-            Self::validate_managed_binary(&self.root, path)?;
+            Self::validate_managed_binary(&self.root, self.core_type, path)?;
         }
         safety::executable(path)?;
-        match managed_version(&self.root, path) {
-            Ok(requested) => version::verify_version(path, requested)?,
+        match managed_version(&self.root, self.core_type, path) {
+            Ok(requested) => version::verify_version_for(path, self.core_type, requested)?,
             Err(error) if self.confined => return Err(error),
             Err(_) => {
-                let reported = version::parse_version_from_output(&version::binary_output(path))
-                    .ok_or_else(|| safety::invalid("Core does not report a sing-box version"))?;
-                safety::normalized_version(&reported)?;
+                let reported = version::parse_version_for(
+                    self.core_type,
+                    &version::binary_output_for(self.core_type, path),
+                )
+                .ok_or_else(|| {
+                    safety::invalid(format!("Core does not report a {} version", self.core_type))
+                })?;
+                safety::normalized_version_for(self.core_type, &reported)?;
             }
         }
         self.persist_selection(path)
@@ -217,10 +310,8 @@ impl CoreManagementService {
         let _guard = SELECTION_WRITE
             .lock()
             .map_err(|_| safety::invalid("Core selection lock poisoned"))?;
-        // Probing runs before the lock; a concurrent delete must not publish a
-        // now-missing selection. Downloads already performed their version probe.
         if self.confined {
-            Self::validate_managed_binary(&self.root, binary)?;
+            Self::validate_managed_binary(&self.root, self.core_type, binary)?;
         } else {
             safety::executable(binary)?;
         }
@@ -233,14 +324,12 @@ impl CoreManagementService {
         if self.confined {
             safety::unlinked_path(&file)?;
         }
-        // Read after probing/network work: stale service snapshots never replace other settings.
         let mut raw = match std::fs::read_to_string(&file) {
             Ok(text) => {
                 let value = crate::settings::client_from_text(&file, &text)?;
                 if !value.is_object() {
                     return Err(safety::invalid("client settings must contain an object"));
                 }
-                // Validate the latest persisted schema without rewriting its unrelated fields.
                 let _ = ClientConfig::deserialize(&value)?;
                 value
             }
@@ -250,6 +339,7 @@ impl CoreManagementService {
             Err(error) => return Err(error.into()),
         };
         raw["core_binary"] = serde_json::to_value(binary)?;
+        raw["core_type"] = serde_json::to_value(self.core_type)?;
         std::fs::create_dir_all(&self.root)?;
         crate::settings::persist_client(&file, &raw)
     }
@@ -273,8 +363,7 @@ impl CoreManagementService {
         if paths_equal(path, &active) {
             return Err(safety::invalid("正在使用的核心不可删除：请先切换其他核心"));
         }
-        // Deletion is always inventory-only, including for the stable external-path policy.
-        Self::validate_managed_binary(&self.root, path)?;
+        Self::validate_managed_binary(&self.root, self.core_type, path)?;
         self.inventory()?.delete(path, &active)
     }
 }
@@ -289,9 +378,9 @@ fn prune_candidates(local: Vec<ManagedCore>, current_version: &str) -> Vec<Manag
     installed.into_iter().skip(2).collect()
 }
 
-fn managed_version<'a>(root: &Path, path: &'a Path) -> LanpathResult<&'a str> {
+fn managed_version<'a>(root: &Path, core_type: CoreType, path: &'a Path) -> LanpathResult<&'a str> {
     let relative = path
-        .strip_prefix(root.join("cores/sing-box"))
+        .strip_prefix(root.join("cores").join(core_type.binary_name()))
         .map_err(|_| safety::invalid("Core is outside this inventory"))?;
     let mut parts = relative.components();
     let name = match parts.next() {
@@ -299,10 +388,10 @@ fn managed_version<'a>(root: &Path, path: &'a Path) -> LanpathResult<&'a str> {
         _ => None,
     }
     .ok_or_else(|| safety::invalid("Invalid core version directory"))?;
-    if safety::normalized_version(name)? != name
+    if safety::normalized_version_for(core_type, name)? != name
         || parts.next()
             != Some(std::path::Component::Normal(std::ffi::OsStr::new(
-                &version::binary_name_on_disk(),
+                &version::binary_name_on_disk_for(core_type),
             )))
         || parts.next().is_some()
     {

@@ -88,6 +88,7 @@ pub fn seed_bundled_core(data_dir: &Path, resource_dir: &Path) -> LanpathResult<
         "已从安装包释放种子核心"
     );
     Ok(Some(LocalCore {
+        core_type: lanpath_common::CoreType::SingBox,
         version: version_str,
         path: dest,
     }))

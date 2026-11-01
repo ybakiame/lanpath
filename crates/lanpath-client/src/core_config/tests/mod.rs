@@ -11,6 +11,14 @@ fn sing_box_binary() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+fn mihomo_binary() -> Option<PathBuf> {
+    let dir = test_core_dir();
+    ["mihomo", "mihomo.exe"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+}
+
 #[cfg(test)]
 mod builtin_dns;
 #[cfg(test)]

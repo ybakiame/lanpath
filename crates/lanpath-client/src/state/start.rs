@@ -1,5 +1,6 @@
 //! Startup composition and progress reporting.
 use super::*;
+use lanpath_common::CoreType;
 
 impl ClientState {
     /// Start with synchronous stage feedback; never include subscription URLs or secrets.
@@ -79,7 +80,7 @@ impl ClientState {
             ),
             None => None,
         };
-        let (linked_profile_id, sub_content) = if let Some(sub) = active_sub {
+        let (linked_profile_id, sub_content, mihomo_nodes) = if let Some(sub) = active_sub {
             if !sub.enabled {
                 return Err(LanpathError::Client(
                     "所选订阅已停用，请在订阅页启用或在首页重新选择".to_string(),
@@ -89,6 +90,7 @@ impl ClientState {
             // 的自动更新）时进行，两者都会把内容写入 `subscription_cache/<id>.json`；
             // 启动一律读缓存。缓存缺失/损坏（如手工删档、旧版本从未写过缓存）才拉取
             // 一次兜底并回写缓存——否则首次启动将无节点可用。
+            let mut source = sub_store.load_source(sub.id)?;
             let nodes = match sub_store.load_cached_content(sub.id) {
                 Some(cached) => cached.singbox_nodes,
                 None => {
@@ -99,11 +101,13 @@ impl ClientState {
                         sub.user_agent.as_deref(),
                     )
                     .await?;
-                    let source = subscription::SubscriptionSource {
+                    source = Some(subscription::SubscriptionSource {
                         format: fetch.format,
                         content: fetch.source.clone(),
-                    };
-                    if let Err(e) = sub_store.write_source(sub.id, &source) {
+                    });
+                    if let Some(source) = &source
+                        && let Err(e) = sub_store.write_source(sub.id, source)
+                    {
                         tracing::warn!(error = %e, "回写订阅原文失败（不阻断启动）");
                     }
                     let cache = subscription::CachedSubscriptionContent {
@@ -116,10 +120,12 @@ impl ClientState {
                     fetch.singbox_nodes
                 }
             };
+            let mihomo_nodes =
+                subscription::mihomo_nodes_from_subscription(source.as_ref(), &nodes)?;
             let content = serde_json::json!({
                 "outbounds": nodes,
             });
-            (sub.profile_id, content)
+            (sub.profile_id, content, mihomo_nodes)
         } else {
             return Err(LanpathError::Client(
                 "请先在首页选择要使用的订阅".to_string(),
@@ -162,7 +168,12 @@ impl ClientState {
                     crate::config_slices::ConfigSlices::default()
                 }
             };
-        let profile_cfg = profile::build_core_config_v2(&sub_content, &effective, &slices).await?;
+        let use_mihomo = self.config.core_type == CoreType::Mihomo;
+        let profile_cfg = if use_mihomo {
+            profile::build_mihomo_config_v2(&mihomo_nodes, &effective).await?
+        } else {
+            profile::build_core_config_v2(&sub_content, &effective, &slices).await?
+        };
 
         // MITM starts before core: need listen address to inject core routing rules.
         let chain = self.start_mitm_chain().await?;
@@ -198,58 +209,76 @@ impl ClientState {
             dns_mode: core_config::dns_mode_from_slices(&slices),
             github_proxy_prefix: self.config.github_proxy_prefix.clone(),
         };
-        let mut config_json = match core_config::compose_singbox_config(
-            &profile_cfg,
-            self.config.mixed_port,
-            chain,
-        ) {
-            Ok(cfg) => cfg,
-            Err(e) => {
-                return Err(self.rollback_mitm_started(e).await);
+        let config_json = if use_mihomo {
+            let mut config_json = profile_cfg;
+            if let Err(error) =
+                core_config::compose_mihomo_config(&mut config_json, self.config.mixed_port, chain)
+            {
+                return Err(self.rollback_mitm_started(error).await);
             }
-        };
-        // 启动时补齐「被引用但尚未下载」的社区规则集（best-effort）：用户在市场/规则集
-        // 页添加 remote 规则集后可能从未点过「立即更新」，backing 文件缺失会导致引用它的
-        // 规则在物化阶段被剥离（静默失效）；启动时补下载一次，失败仅告警（规则仍被剥
-        // 离，核心照常启动）。
-        crate::local_override::download_missing_rule_sets_warn_only(
-            &self.config.data_dir,
-            &config_json,
-            progress,
-        )
-        .await;
+            core_config::apply_mihomo_panel_features(&mut config_json, &features);
+            if slices != crate::config_slices::ConfigSlices::default() {
+                tracing::warn!(
+                    "Mihomo 启动未应用 sing-box 配置切片；切换回 sing-box 可继续使用结构化配置"
+                );
+            }
+            self.missing_rule_sets.clear();
+            config_json
+        } else {
+            let mut config_json = match core_config::compose_singbox_config(
+                &profile_cfg,
+                self.config.mixed_port,
+                chain,
+            ) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    return Err(self.rollback_mitm_started(e).await);
+                }
+            };
+            // 启动时补齐「被引用但尚未下载」的社区规则集（best-effort）：用户在市场/规则集
+            // 页添加 remote 规则集后可能从未点过「立即更新」，backing 文件缺失会导致引用它的
+            // 规则在物化阶段被剥离（静默失效）；启动时补下载一次，失败仅告警（规则仍被剥
+            // 离，核心照常启动）。
+            crate::local_override::download_missing_rule_sets_warn_only(
+                &self.config.data_dir,
+                &config_json,
+                progress,
+            )
+            .await;
 
-        // [ADR-0002] Inject local override after compose, before panel features.
-        crate::local_override::inject_local_override_warn_only(
-            &self.config.data_dir,
-            &mut config_json,
-        );
-        core_config::apply_panel_features(&mut config_json, &features);
-
-        // 内置 CN 规则集本地化物化（ruleset_manager）：App 侧按镜像回退下载（jsDelivr →
-        // GitHub raw → GitHub 代理前缀）并改写为 type:local；下载全部失败的 tag 连同引用
-        // 它的路由 / DNS 规则降级移除——优先保证核心可启动，缺失 tag 暴露到运行状态供
-        // 命令层后台重试与自动重载。
-        progress("准备内置分流规则集（缺失时联网下载）");
-        let available = crate::ruleset_manager::ensure_builtin_rule_sets(
-            &self.config.data_dir,
-            &self.config.github_proxy_prefix,
-        )
-        .await;
-        let report = crate::ruleset_manager::materialize_rule_sets(
-            &mut config_json,
-            &self.config.data_dir,
-            &available,
-        );
-        if !report.missing_tags.is_empty() {
-            tracing::warn!(
-                missing = ?report.missing_tags,
-                stripped_route_rules = report.stripped_route_rules,
-                stripped_dns_rules = report.stripped_dns_rules,
-                "内置规则集未全部就绪，降级启动（CN 分流由 route.final 兜底）"
+            // [ADR-0002] Inject local override after compose, before panel features.
+            crate::local_override::inject_local_override_warn_only(
+                &self.config.data_dir,
+                &mut config_json,
             );
-        }
-        self.missing_rule_sets = report.missing_tags;
+            core_config::apply_panel_features(&mut config_json, &features);
+
+            // 内置 CN 规则集本地化物化（ruleset_manager）：App 侧按镜像回退下载（jsDelivr →
+            // GitHub raw → GitHub 代理前缀）并改写为 type:local；下载全部失败的 tag 连同引用
+            // 它的路由 / DNS 规则降级移除——优先保证核心可启动，缺失 tag 暴露到运行状态供
+            // 命令层后台重试与自动重载。
+            progress("准备内置分流规则集（缺失时联网下载）");
+            let available = crate::ruleset_manager::ensure_builtin_rule_sets(
+                &self.config.data_dir,
+                &self.config.github_proxy_prefix,
+            )
+            .await;
+            let report = crate::ruleset_manager::materialize_rule_sets(
+                &mut config_json,
+                &self.config.data_dir,
+                &available,
+            );
+            if !report.missing_tags.is_empty() {
+                tracing::warn!(
+                    missing = ?report.missing_tags,
+                    stripped_route_rules = report.stripped_route_rules,
+                    stripped_dns_rules = report.stripped_dns_rules,
+                    "内置规则集未全部就绪，降级启动（CN 分流由 route.final 兜底）"
+                );
+            }
+            self.missing_rule_sets = report.missing_tags;
+            config_json
+        };
 
         progress("启动代理核心与网络服务");
         self.start_services(&config_json).await?;

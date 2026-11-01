@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use lanpath_common::{LanpathError, LanpathResult};
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
 
-use super::version::binary_name_on_disk;
+use super::version::{binary_file_name, binary_name_on_disk_for};
 
 /// Extract `.tar.gz` and retrieve target binary.
 pub(super) fn extract_tgz(
@@ -25,7 +25,7 @@ pub(super) fn extract_tgz(
                     "Core archive binary must be a regular file",
                 ));
             }
-            let dest = dest_dir.join(binary_name_on_disk());
+            let dest = dest_dir.join(binary_file_name(target_name));
             entry.unpack(&dest)?;
             return Ok(dest);
         }
@@ -40,6 +40,7 @@ pub(super) fn extract_zip(
     archive: &Path,
     dest_dir: &Path,
     target_name: &str,
+    core_type: CoreType,
 ) -> LanpathResult<PathBuf> {
     let file = std::fs::File::open(archive)?;
     let mut archive = zip::ZipArchive::new(file)
@@ -53,9 +54,22 @@ pub(super) fn extract_zip(
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("");
-        if file_name.eq_ignore_ascii_case(target_name)
-            || file_name.eq_ignore_ascii_case(&format!("{target_name}.exe"))
-        {
+        let matches_binary = match core_type {
+            CoreType::SingBox => {
+                file_name.eq_ignore_ascii_case(target_name)
+                    || file_name.eq_ignore_ascii_case(&format!("{target_name}.exe"))
+            }
+            CoreType::Mihomo => {
+                file_name.to_ascii_lowercase().starts_with("mihomo")
+                    && file_name.to_ascii_lowercase().ends_with(".exe")
+            }
+        };
+        if matches_binary {
+            if binary_dest.is_some() {
+                return Err(super::safety::invalid(
+                    "Core archive contains multiple executable candidates",
+                ));
+            }
             if entry.is_dir()
                 || entry
                     .unix_mode()
@@ -65,7 +79,7 @@ pub(super) fn extract_zip(
                     "Core archive binary must be a regular file",
                 ));
             }
-            let dest = dest_dir.join(binary_name_on_disk());
+            let dest = dest_dir.join(binary_file_name(target_name));
             let mut out = std::fs::File::create(&dest)?;
             std::io::copy(&mut entry, &mut out)?;
             binary_dest = Some(dest);
@@ -73,6 +87,20 @@ pub(super) fn extract_zip(
     }
     binary_dest
         .ok_or_else(|| LanpathError::Core(format!("Binary {target_name} not found in archive")))
+}
+
+/// Extract a standalone gzip-compressed executable, as published by Mihomo on Unix.
+pub(super) fn extract_gz(
+    archive: &Path,
+    dest_dir: &Path,
+    target_name: &str,
+) -> LanpathResult<PathBuf> {
+    let file = std::fs::File::open(archive)?;
+    let mut decoder = flate2::read::GzDecoder::new(file);
+    let dest = dest_dir.join(binary_file_name(target_name));
+    let mut output = std::fs::File::create(&dest)?;
+    std::io::copy(&mut decoder, &mut output)?;
+    Ok(dest)
 }
 
 /// chmod 755 (Unix).
@@ -179,8 +207,12 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Lanpat
 
 /// Publish a verified core without replacing an installed binary or removing
 /// other files left in an older, incomplete version directory.
-pub(super) fn publish_core(staging: &Path, destination: &Path) -> LanpathResult<PathBuf> {
-    let name = binary_name_on_disk();
+pub(super) fn publish_core(
+    staging: &Path,
+    destination: &Path,
+    core_type: CoreType,
+) -> LanpathResult<PathBuf> {
+    let name = binary_name_on_disk_for(core_type);
     let binary = destination.join(&name);
     if !destination.exists() {
         std::fs::rename(staging, destination)?;

@@ -1,3 +1,5 @@
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use lanpath_common::{LanpathError, LanpathResult, ProcessIdentity};
 use std::ffi::OsString;
 

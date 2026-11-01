@@ -153,6 +153,37 @@ pub struct NodeTagView {
     pub tag: String,
 }
 
+/// Prefer original Clash YAML so Mihomo receives upstream proxies without a
+/// lossy sing-box round trip. Other formats convert each supported leaf and
+/// fail explicitly for protocols Mihomo cannot represent.
+pub fn mihomo_nodes_from_subscription(
+    source: Option<&SubscriptionSource>,
+    singbox_nodes: &[Value],
+) -> LanpathResult<Vec<Value>> {
+    if let Some(source) = source
+        && source.format == SubFormat::ClashYaml
+    {
+        return crate::profile::extract_clash_proxies(&source.content);
+    }
+    let mut nodes = Vec::with_capacity(singbox_nodes.len());
+    for node in singbox_nodes {
+        let tag = node
+            .get("tag")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        let proxy = crate::node_convert::singbox_to_mihomo(node).ok_or_else(|| {
+            LanpathError::Client(format!(
+                "Mihomo 不支持节点 {tag} 的协议 {}；请切换 sing-box 或更换订阅节点",
+                node.get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<unknown>")
+            ))
+        })?;
+        nodes.push(proxy);
+    }
+    Ok(nodes)
+}
+
 /// Extract `(name, tag)` views from cached sing-box nodes.
 ///
 /// Rebuilds the `{ "outbounds": ... }` wrapper and runs [`extract_nodes_singbox`]

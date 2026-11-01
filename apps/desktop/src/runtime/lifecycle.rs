@@ -1,17 +1,15 @@
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 
+use super::{ActiveCoreManager, DesktopRuntime, RunResources, system_control::broker_request};
+use crate::{
+    privileged::{Broker, SessionState, StopKind},
+    startup::StartupReporter,
+};
 use lanpath_client::{
     ClientConfig,
     core_config::{push_clash_mode, wait_clash_api_ready},
     mitm::MitmSession,
     replay_group_selections,
-};
-use lanpath_engine::{CoreManager, SingBoxProcessManager};
-
-use super::{DesktopRuntime, RunResources, system_control::broker_request};
-use crate::{
-    privileged::{Broker, SessionState, StopKind},
-    startup::StartupReporter,
 };
 
 impl DesktopRuntime {
@@ -64,7 +62,7 @@ impl DesktopRuntime {
     async fn start_selected(&self, progress: &mut StartupReporter<'_>) -> Result<(), String> {
         progress.stage("selection", "读取已保存核心和系统设置");
         let business = self.business()?;
-        let client = business
+        let mut client = business
             .client_config()
             .map_err(|error| error.to_string())?;
         if client.tun_enabled && !crate::product::TUN_SUPPORTED {
@@ -72,9 +70,19 @@ impl DesktopRuntime {
                 "当前发行未开放 TUN；原设置已保留，请关闭 TUN 后启动。不会发起提权。".into(),
             );
         }
-        let binary = self.core_override().unwrap_or(&client.core_binary);
+        let binary = self
+            .core_override()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| client.core_binary.clone());
         if binary.as_os_str().is_empty() {
-            return Err("尚未选择核心；请在“核心”中下载并选择 sing-box".into());
+            return Err("尚未选择核心；请在“核心”中下载并选择 sing-box 或 Mihomo".into());
+        }
+        let core_type = lanpath_client::cores::infer_core_type(&binary).unwrap_or(client.core_type);
+        client.core_type = core_type;
+        if client.tun_enabled && core_type == lanpath_common::CoreType::Mihomo {
+            return Err(
+                "当前受限 TUN helper 只支持 sing-box；请关闭 TUN 或切换 sing-box 后启动。".into(),
+            );
         }
         if client.tun_enabled && self.core_override().is_some() {
             return Err("TUN 不接受环境变量指定的核心".into());
@@ -124,8 +132,13 @@ impl DesktopRuntime {
         let mut protected = crate::privileged::input_paths(business.data_dir(), &config)
             .map_err(|error| error.to_string())?;
         protected.push(binary.canonicalize().map_err(|error| error.to_string())?);
-        protected.push(business.data_dir().join("sing-box.json"));
-        protected.push(business.data_dir().join("sing-box.pid"));
+        let core_files = match core_type {
+            lanpath_common::CoreType::SingBox => ["sing-box.json", "sing-box.pid"],
+            lanpath_common::CoreType::Mihomo => ["mihomo.yaml", "mihomo.pid"],
+        };
+        for file in core_files {
+            protected.push(business.data_dir().join(file));
+        }
         progress.stage(
             "process",
             if client.tun_enabled {
@@ -135,10 +148,10 @@ impl DesktopRuntime {
             },
         );
         if client.tun_enabled {
-            self.start_tun(config, binary).await?;
+            self.start_tun(config, &binary).await?;
         } else {
             let manager = Arc::new(
-                SingBoxProcessManager::new(binary, business.data_dir())
+                ActiveCoreManager::new(core_type, &binary, business.data_dir())
                     .map_err(|error| error.to_string())?,
             );
             *self.manager.lock().await = Some(manager.clone());

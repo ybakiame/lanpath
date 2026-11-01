@@ -1,4 +1,7 @@
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use lanpath_common::{LanpathError, LanpathResult, ProcessIdentity};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{Read, Write};

@@ -11,8 +11,9 @@
 现行发行目标 apps/client 为 Tauri 单壳双目标应用；页面共用 @lanpath/ui，平台为编译期事实。
 packages/client-core 封装 API/hooks/atoms；UI 禁止直接 invoke。
 根 Cargo workspace 为 crates/lanpath-*；apps/client/src-tauri 仍是独立 Cargo 项目。
-Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；桌面为 sing-box 进程。
-保持单核心，不依赖 ProxyPanel 源码，不把协议框架写成产品实现。
+Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；现行 Tauri 前端保持 sing-box。
+GPUI 实验桌面按 ADR-0017 支持 sing-box 与 Mihomo：共享库存/配置合成按核心类型分派，Android 拒绝 Mihomo。
+不依赖 ProxyPanel 源码，不把协议框架写成产品实现。
 
 apps/desktop 为 ADR-0013 授权的 Windows GPUI 实验性并行目标，保持独立 Cargo 项目；
 现行 Tauri 与 Android 不被替换。GPUI 复用共享 Rust 业务，UI 状态由对应 feature/entity 持有。

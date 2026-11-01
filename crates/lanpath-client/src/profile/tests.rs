@@ -15,7 +15,7 @@ use crate::core_config::{MitmChain, compose_singbox_config};
 use crate::profile::{
     DenyHttpExecutor, EffectiveOverrides, Profile, ProfileOverrides, ProfileStore, ProfileStoreV2,
     apply_js_override, apply_yaml_override, build_core_config, build_core_config_v2,
-    extract_nodes_singbox, resolve_remote_overrides, singbox_template,
+    build_mihomo_config_v2, extract_nodes_singbox, resolve_remote_overrides, singbox_template,
 };
 
 fn sample_singbox_sub() -> Value {
@@ -483,32 +483,46 @@ fn profile_store_v2_migrates_corrupted_legacy_with_empty_overrides() {
     assert!(!dir.path().join("profile.json").exists());
 }
 
-/// 存量归一化：`profiles.json` 中旧版 `core_type: "mihomo"` 的模板在 load 时剔除并写回；
-/// `core_type: "singbox"` 的模板保留（core_type 字段被 serde 忽略）。
+#[tokio::test]
+async fn mihomo_template_builds_typed_proxies_and_groups_with_overrides() {
+    let nodes = vec![serde_json::json!({
+        "name": "node-a", "type": "ss", "server": "s.example.com",
+        "port": 8388, "cipher": "aes-256-gcm", "password": "pw"
+    })];
+    let overrides = EffectiveOverrides {
+        local_yaml: "mode: global\n".into(),
+        ..Default::default()
+    };
+    let config = build_mihomo_config_v2(&nodes, &overrides).await.unwrap();
+    assert_eq!(config["proxies"][0]["name"], "node-a");
+    assert_eq!(config["proxy-groups"][0]["name"], "proxy");
+    assert_eq!(config["proxy-groups"][1]["type"], "url-test");
+    assert_eq!(config["rules"][0], "MATCH,proxy");
+    assert_eq!(config["mode"], "global");
+}
+
+/// 旧版 `core_type` 不再参与模板身份；sing-box 与 Mihomo 模板都保留，字段由
+/// serde 忽略而不改写用户文件。
 #[test]
-fn profile_store_v2_load_drops_legacy_mihomo_profiles_and_writes_back() {
+fn profile_store_v2_preserves_legacy_core_type_profiles() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("profiles.json"),
-        r#"[
+    let original = r#"[
             {"id":"00000000-0000-0000-0000-000000000001","name":"sb","core_type":"singbox","yaml_override":"","js_override":""},
             {"id":"00000000-0000-0000-0000-000000000002","name":"mh","core_type":"mihomo","yaml_override":"mode: global","js_override":""}
-        ]"#,
-    )
-    .unwrap();
+        ]"#;
+    std::fs::write(dir.path().join("profiles.json"), original).unwrap();
 
     let store = ProfileStoreV2::new(dir.path().to_path_buf());
     let profiles = store.load().unwrap();
-    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles.len(), 2);
     assert_eq!(profiles[0].name, "sb");
-
-    // 已写回：再次读取磁盘文件只剩 sing-box 模板。
-    let text = std::fs::read_to_string(dir.path().join("profiles.json")).unwrap();
-    assert!(text.contains("\"sb\""));
-    assert!(!text.contains("\"mh\""));
-
-    // 再次加载幂等。
-    assert_eq!(store.load().unwrap().len(), 1);
+    assert_eq!(profiles[1].name, "mh");
+    assert_eq!(profiles[1].yaml_override, "mode: global");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("profiles.json")).unwrap(),
+        original,
+        "load must not rewrite user templates"
+    );
 }
 
 /// ② add: new template does not carry enabled state (pure association model); duplicate name

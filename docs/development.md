@@ -147,9 +147,10 @@ devenv shell -- bun apps/desktop/tools/managed_core.ts x86_64-pc-windows-msvc
 打包须使用已授权的 Windows SDK `mt.exe`，WSL 下通过 `GPUI_MT` 指定；只规范化待签名副本，
 不会修改原始构建文件。签名仍使用独立 GPUI 身份，不能以关闭验签作为调试替代。
 
-完整发行包可在“核心”页离线安装并选中内置核心；只写所属数据根的核心清单和选择，
-不隐式启动、开启系统代理或 TUN。Windows 已验收 Clash/Shadowsocks 订阅到真实配置校验、
-用户态启动与实际转发、正常停止及监听消失；高权限 TUN 的接管/恢复须单独验收。
+Windows 受信核心种子继续用于首次发布和受限 TUN helper，但“核心”页不再提供手动安装按钮；
+页面只管理真实上游库存。GPUI 支持 sing-box/Mihomo、稳定/预发布通道、本地版本切换和当前核心
+构建 Environment/Tags。Windows 已验收 Clash/Shadowsocks 订阅到真实配置校验、用户态启动、
+实际转发、正常停止及监听消失；高权限 TUN 的接管/恢复须单独验收，当前 helper 只接受 sing-box。
 
 helper 的代码暂存仅复制签名清单中的固定叶文件，并始终持有源文件与祖先目录租约。
 清单采用 `/` 分隔相对路径；传入 Shell 前在现有 UTF-16 缓冲区中转换为 Windows 分隔符，
@@ -542,16 +543,28 @@ GitHub 镜像沿用共享域名白名单和前缀拼接规则；内置规则集�
 启动首窗前应用保存偏好，跟随系统由保留的窗口外观订阅更新。选择先保存成功再应用；读写失败
 明确显示错误，损坏文件不自动覆盖，修复后可显式“重新载入外观”。
 
-“核心”管理使用共享 `CoreManagementService`，只展示 stable/prerelease 的实际远端结果和真实 release tag。下载复用已保存的请求策略与 GitHub 镜像；解压至隔离 staging，版本探测精确匹配后
-才发布并原子合并 `core_binary`。失败不改变原选择或覆盖既有核心；旧未完成版本目录可补齐，
-但不删除其中其他文件。staging 不作为已安装库存，实验分支不下载尚未启用的 TUN 专用 DLL。
-选择仅接受自身 `cores/sing-box/<version>/<平台文件名>` 下无链接且可执行的库存；删除需确认，
-且不能删除当前选中项。运行或启停、其他配置操作、诊断及退出期间锁定核心修改。
-下载只有连接和元数据请求超时，没有归档传输总超时；正常退出等待已接受的核心操作结束。
+“核心”管理使用共享 `CoreManagementService`，按核心类型管理 `cores/<type>/<version>/`。页面标题行内嵌
+紧凑分段式核心类型切换器，下方依次为当前核心卡片、紧凑稳定/预发布切换器和单个版本信息卡片；
+当前核心卡片展示真实 `Environment` 与编译 `Tags`，本地版本在版本卡片内使用/删除，远程 release tag
+只作为同一卡片更新信息。
+类型切换不隐式下载、选择或重启核心。下载复用已保存的请求策略与 GitHub 镜像；解压至隔离 staging，
+版本探测精确匹配后才发布并原子合并 `core_binary`。失败不改变原选择或覆盖既有核心；旧未完成版本
+目录可补齐，但不删除其中其他文件。staging 不作为已安装库存。选择仅接受当前类型库存下无链接且
+可执行的二进制；删除需确认，且不能删除当前选中项。运行或启停、其他配置操作、诊断及退出期间
+锁定核心修改。下载只有连接和元数据请求超时，没有归档传输总超时；正常退出等待已接受操作结束。
 
-核心管理采用 stable/prerelease 双通道卡片，展示真实 release tag；默认核心为 sing-box/stable，每通道只保留
-当前版本和一个上一版本备份。核心选择持久化到 `app.toml` 的 `[core]`、`[core.current]` 与
-`[core.previous]`，包含核心类型、通道、版本和路径；实验数据根内的核心路径保存为相对路径，加载时按当前数据根解析，避免绑定 `%LOCALAPPDATA%` 或某个用户名；旧的 `client.core_binary` 在迁移会话中转换。
+Mihomo 稳定版使用 `v<semver>` 发布，预发布使用 `Prerelease-Alpha` release 的 `version.txt` 得到
+`alpha-<hash>`；非 Windows 的 `.gz` 按单文件解压。Clash YAML 订阅直接复用原始 proxies，其他格式
+通过双向节点转换；不能表示的协议明确报错。Mihomo 使用 `-d/-f` 启动和 `-t` 校验，sing-box 保持
+`run -c -D` / `check -c -D`。Android 拒绝 Mihomo；Windows 受限 TUN helper 只接受 sing-box，
+Mihomo+TUN 在准入处拒绝。sing-box 配置切片、本地规则和 `.srs` 规则集不应用于 Mihomo，存在非默认
+配置时记录告警；Profile YAML/JS 覆写仍按各核心 schema 生效。
+
+核心管理按“核心类型 + 通道”保留当前版本和一个上一版本备份。核心选择持久化到 `app.toml` 的
+`[core]`、`[core.current]` 与 `[core.previous]`，包含核心类型、通道、版本和路径；实验数据根内的
+核心路径保存为相对路径，加载时按当前数据根解析，避免绑定 `%LOCALAPPDATA%` 或某个用户名；
+旧的 `client.core_binary` 在迁移会话中转换。受信种子仍供首启和受限 TUN helper 使用，但核心页
+不再提供手动“安装内置核心”入口。
 
 每次启动重新读取持久核心选择，不复用窗口创建时的管理器。界面通过 watch 通道显示实际经过的
 读取选择、运行数据、端口预检、MITM、合成与资源、核心校验、脚本任务、进程、API、选择恢复、

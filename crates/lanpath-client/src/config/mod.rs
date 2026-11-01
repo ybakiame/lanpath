@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use lanpath_common::LanpathResult;
+use lanpath_common::{CoreType, LanpathResult};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -58,10 +58,10 @@ pub struct ClientConfig {
     /// 反序列化。
     #[serde(default)]
     pub active_subscription_id: Option<Uuid>,
+    /// 核心类型。GPUI `app.toml` 从 `[core].type` 投影；旧 `client.json` 保留显式值。
+    #[serde(default)]
+    pub core_type: CoreType,
     /// 核心二进制路径。
-    ///
-    /// 客户端仅支持 sing-box 核心；旧版 `client.json` 的 `core_type` 字段在反序列化时被
-    /// 忽略，`core_type: "mihomo"` 的存量配置在 [`Self::load`] 中一次性归一化（见 load）。
     pub core_binary: PathBuf,
     /// 本地 mixed 入站端口。
     pub mixed_port: u16,
@@ -166,6 +166,7 @@ impl Default for ClientConfig {
             hub_url: String::new(),
             sub_token: String::new(),
             active_subscription_id: None,
+            core_type: CoreType::SingBox,
             core_binary: PathBuf::new(),
             mixed_port: 17890,
             mitm_enabled: true,
@@ -212,10 +213,12 @@ impl ClientConfig {
         sub_token: impl Into<String>,
         core_binary: PathBuf,
     ) -> Self {
+        let core_type = crate::cores::infer_core_type(&core_binary).unwrap_or_default();
         let mut cfg = Self {
             data_dir,
             hub_url: hub_url.into(),
             sub_token: sub_token.into(),
+            core_type,
             core_binary,
             ..Self::default()
         };
@@ -240,9 +243,6 @@ impl ClientConfig {
     /// 从 `data_dir/client.json` 加载配置。
     ///
     /// 一次性归一化（存量数据迁移，结果写回磁盘）：
-    /// - 旧版配置 `core_type: "mihomo"` 时，客户端已仅支持 sing-box——忽略该字段；
-    ///   若 `core_binary` 指向 mihomo 二进制则重置为空（交由核心管理自动选择），
-    ///   同时剔除 `core_type` 字段；
     /// - Android 端 `tun_stack: "gvisor"`（gVisor 选项清理前的存量值）迁移为 `go`
     ///   （见 [`migrated_tun_stack`]）。
     pub fn load(data_dir: &Path) -> LanpathResult<Self> {
@@ -250,22 +250,6 @@ impl ClientConfig {
         let text = std::fs::read_to_string(&path)?;
         let mut raw: serde_json::Value = crate::settings::load_client(&path)?;
         migration::migrate_request_proxy(&path, &text, &mut raw)?;
-        let legacy_mihomo = raw.get("core_type").and_then(|v| v.as_str()) == Some("mihomo");
-        if legacy_mihomo {
-            let mihomo_binary = raw
-                .get("core_binary")
-                .and_then(|v| v.as_str())
-                .is_some_and(|p| p.to_lowercase().contains("mihomo"));
-            if mihomo_binary {
-                raw["core_binary"] = serde_json::Value::String(String::new());
-            }
-            // 写回读取路径（不能用 `Self::save`：其目标取自配置内的 data_dir 字段）。
-            if let Some(obj) = raw.as_object_mut() {
-                obj.remove("core_type");
-            }
-            crate::settings::persist_client(&path, &raw)?;
-            tracing::info!("旧版 mihomo 配置已归一化为 sing-box 并写回客户端设置");
-        }
         if let Some(stack) = raw.get("tun_stack").and_then(|v| v.as_str())
             && let Some(next) = migrated_tun_stack(cfg!(target_os = "android"), stack)
         {
@@ -275,6 +259,9 @@ impl ClientConfig {
             tracing::info!("存量 tun_stack=gvisor 已迁移为 go 并写回客户端设置");
         }
         let mut config: Self = serde_json::from_value(raw)?;
+        if let Some(core_type) = crate::cores::infer_core_type(&config.core_binary) {
+            config.core_type = core_type;
+        }
         // 数据根由壳确定。便携目录移动后，仅在内存中重定位托管核心；
         // 外部手动指定的核心路径保持原值，不复制或改写旧配置文件。
         if !config.data_dir.as_os_str().is_empty()

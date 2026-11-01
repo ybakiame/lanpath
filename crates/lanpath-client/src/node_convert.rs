@@ -79,6 +79,177 @@ pub fn mihomo_to_singbox(p: &Value) -> Option<Value> {
     Some(Value::Object(o))
 }
 
+/// sing-box outbound → clash/mihomo proxy. Unsupported leaf types return `None`.
+pub fn singbox_to_mihomo(o: &Value) -> Option<Value> {
+    let tag = o.get("tag")?.as_str()?;
+    let ptype = o.get("type")?.as_str()?;
+    let mut p = Map::new();
+    p.insert(String::from("name"), Value::String(tag.to_string()));
+    p.insert(String::from("server"), o.get("server")?.clone());
+    p.insert(String::from("port"), o.get("server_port")?.clone());
+    match ptype {
+        "shadowsocks" => {
+            p.insert(String::from("type"), json!("ss"));
+            p.insert(String::from("cipher"), o.get("method")?.clone());
+            p.insert(String::from("password"), o.get("password")?.clone());
+        }
+        "vmess" => {
+            p.insert(String::from("type"), json!("vmess"));
+            p.insert(String::from("uuid"), o.get("uuid")?.clone());
+            p.insert(
+                String::from("alterId"),
+                o.get("alter_id").cloned().unwrap_or(json!(0)),
+            );
+            p.insert(
+                String::from("cipher"),
+                o.get("security").cloned().unwrap_or(json!("auto")),
+            );
+            tls_to_mihomo(o, &mut p);
+            transport_to_mihomo(o.get("transport"), &mut p);
+        }
+        "vless" => {
+            p.insert(String::from("type"), json!("vless"));
+            p.insert(String::from("uuid"), o.get("uuid")?.clone());
+            if let Some(flow) = o.get("flow").and_then(Value::as_str)
+                && !flow.is_empty()
+            {
+                p.insert(String::from("flow"), json!(flow));
+            }
+            tls_to_mihomo(o, &mut p);
+            transport_to_mihomo(o.get("transport"), &mut p);
+        }
+        "trojan" => {
+            p.insert(String::from("type"), json!("trojan"));
+            p.insert(String::from("password"), o.get("password")?.clone());
+            tls_to_mihomo(o, &mut p);
+        }
+        "hysteria2" => {
+            p.insert(String::from("type"), json!("hysteria2"));
+            p.insert(String::from("password"), o.get("password")?.clone());
+            tls_to_mihomo(o, &mut p);
+        }
+        "tuic" => {
+            p.insert(String::from("type"), json!("tuic"));
+            p.insert(String::from("uuid"), o.get("uuid")?.clone());
+            p.insert(String::from("password"), o.get("password")?.clone());
+            if let Some(cc) = o.get("congestion_control").and_then(Value::as_str)
+                && !cc.is_empty()
+            {
+                p.insert(String::from("congestion-controller"), json!(cc));
+            }
+            tls_to_mihomo(o, &mut p);
+        }
+        "anytls" => {
+            p.insert(String::from("type"), json!("anytls"));
+            p.insert(String::from("password"), o.get("password")?.clone());
+            tls_to_mihomo(o, &mut p);
+        }
+        _ => return None,
+    }
+    Some(Value::Object(p))
+}
+
+fn tls_to_mihomo(o: &Value, p: &mut Map<String, Value>) {
+    let tls = match o.get("tls") {
+        Some(t) if t.is_object() => t,
+        _ => return,
+    };
+    if tls.get("enabled").and_then(Value::as_bool).unwrap_or(false) {
+        p.insert(String::from("tls"), json!(true));
+    }
+    if let Some(sn) = tls.get("server_name").and_then(Value::as_str)
+        && !sn.is_empty()
+    {
+        p.insert(String::from("servername"), json!(sn));
+    }
+    if tls.get("insecure").and_then(Value::as_bool) == Some(true) {
+        p.insert(String::from("skip-cert-verify"), json!(true));
+    }
+    if let Some(fp) = tls
+        .get("utls")
+        .and_then(|u| u.get("fingerprint"))
+        .and_then(Value::as_str)
+        && !fp.is_empty()
+    {
+        p.insert(String::from("client-fingerprint"), json!(fp));
+    }
+    let reality = match tls.get("reality") {
+        Some(r) if r.is_object() => r,
+        _ => return,
+    };
+    if reality.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    let mut opts = Map::new();
+    if let Some(pk) = reality.get("public_key").and_then(Value::as_str)
+        && !pk.is_empty()
+    {
+        opts.insert(String::from("public-key"), json!(pk));
+    }
+    if let Some(sid) = reality.get("short_id").and_then(Value::as_str)
+        && !sid.is_empty()
+    {
+        opts.insert(String::from("short-id"), json!(sid));
+    }
+    if !opts.is_empty() {
+        p.insert(String::from("reality-opts"), Value::Object(opts));
+    }
+}
+
+fn transport_to_mihomo(t: Option<&Value>, p: &mut Map<String, Value>) {
+    let t = match t {
+        Some(t) if t.is_object() => t,
+        _ => return,
+    };
+    let ttype = t.get("type").and_then(Value::as_str).unwrap_or("tcp");
+    match ttype {
+        "ws" => {
+            p.insert(String::from("network"), json!("ws"));
+            let mut ws = Map::new();
+            if let Some(path) = t.get("path").and_then(Value::as_str)
+                && !path.is_empty()
+            {
+                ws.insert(String::from("path"), json!(path));
+            }
+            if let Some(hdrs) = t.get("headers").and_then(Value::as_object)
+                && let Some(host) = hdrs.get("Host").and_then(Value::as_str)
+                && !host.is_empty()
+            {
+                ws.insert(String::from("headers"), json!({ "Host": host }));
+            }
+            if !ws.is_empty() {
+                p.insert(String::from("ws-opts"), Value::Object(ws));
+            }
+        }
+        "grpc" => {
+            p.insert(String::from("network"), json!("grpc"));
+            if let Some(sn) = t.get("service_name").and_then(Value::as_str)
+                && !sn.is_empty()
+            {
+                p.insert(
+                    String::from("grpc-opts"),
+                    json!({ "grpc-service-name": sn }),
+                );
+            }
+        }
+        "http" => {
+            p.insert(String::from("network"), json!("http"));
+            let mut opts = Map::new();
+            if let Some(path) = t.get("path").and_then(Value::as_str)
+                && !path.is_empty()
+            {
+                opts.insert(String::from("path"), json!(path));
+            }
+            if !opts.is_empty() {
+                p.insert(String::from("http-opts"), Value::Object(opts));
+            }
+        }
+        _ => {
+            p.insert(String::from("network"), json!("tcp"));
+        }
+    }
+}
+
 /// mihomo 侧 tls 字段 → sing-box `tls` 块（server_name / insecure / utls / reality）。
 fn tls_from_mihomo(p: &Value, o: &mut Map<String, Value>) {
     let enabled = p.get("tls").and_then(Value::as_bool).unwrap_or(false);
@@ -202,89 +373,5 @@ fn transport_from_mihomo(p: &Value, o: &mut Map<String, Value>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn mihomo_to_singbox_converts_common_proxies() {
-        let proxies = vec![
-            json!({
-                "name": "ss1", "type": "ss", "server": "s.com", "port": 8388,
-                "cipher": "aes-256-gcm", "password": "pw"
-            }),
-            json!({
-                "name": "vm1", "type": "vmess", "server": "s.com", "port": 443,
-                "uuid": "12345678-1234-1234-1234-123456789012", "alterId": 0,
-                "cipher": "auto", "tls": true, "servername": "s.com", "network": "ws",
-                "ws-opts": { "path": "/ws", "headers": { "Host": "cdn.s.com" } }
-            }),
-            json!({
-                "name": "vl1", "type": "vless", "server": "s.com", "port": 443,
-                "uuid": "12345678-1234-1234-1234-123456789012",
-                "flow": "xtls-rprx-vision", "tls": true, "servername": "s.com",
-                "client-fingerprint": "chrome",
-                "reality-opts": { "public-key": "pk", "short-id": "ab" }
-            }),
-            json!({
-                "name": "tj1", "type": "trojan", "server": "s.com", "port": 443,
-                "password": "pw", "sni": "s.com", "skip-cert-verify": true
-            }),
-            json!({
-                "name": "hy1", "type": "hysteria2", "server": "s.com", "port": 443,
-                "password": "pw", "sni": "s.com"
-            }),
-            json!({
-                "name": "tc1", "type": "tuic", "server": "s.com", "port": 443,
-                "uuid": "12345678-1234-1234-1234-123456789012", "password": "pw",
-                "congestion-controller": "bbr", "sni": "s.com"
-            }),
-            json!({
-                "name": "at1", "type": "anytls", "server": "s.com", "port": 443,
-                "password": "pw", "sni": "s.com"
-            }),
-        ];
-        for p in proxies {
-            let o = mihomo_to_singbox(&p).unwrap();
-            assert_eq!(o["server"], p["server"]);
-            assert_eq!(o["server_port"], p["port"]);
-            assert_eq!(o["tag"], p["name"]);
-        }
-    }
-
-    #[test]
-    fn mihomo_to_singbox_unsupported_type_is_skipped() {
-        let p = json!({ "name": "x", "type": "direct", "server": "s.com", "port": 1 });
-        assert!(mihomo_to_singbox(&p).is_none());
-    }
-
-    /// clash→sing-box 路径同样补 TLS 默认值：mihomo 侧未标 `tls: true` 的
-    /// trojan/hy2/tuic/anytls 仍无条件产出 `tls: {enabled: true, server_name: host}`。
-    #[test]
-    fn mihomo_to_singbox_tls_protocols_get_tls_defaults_without_tls_flag() {
-        for proxy in [
-            json!({ "name": "tj1", "type": "trojan", "server": "s.com", "port": 443, "password": "pw" }),
-            json!({ "name": "hy1", "type": "hysteria2", "server": "s.com", "port": 443, "password": "pw", "sni": "hy.s.com" }),
-            json!({ "name": "tc1", "type": "tuic", "server": "s.com", "port": 443, "uuid": "12345678-1234-1234-1234-123456789012", "password": "pw" }),
-            json!({ "name": "at1", "type": "anytls", "server": "s.com", "port": 443, "password": "pw" }),
-        ] {
-            let o = mihomo_to_singbox(&proxy).unwrap();
-            assert_eq!(o["tls"]["enabled"], true, "proxy: {proxy}");
-            let expected_sn = proxy.get("sni").and_then(Value::as_str).unwrap_or("s.com");
-            assert_eq!(o["tls"]["server_name"], expected_sn, "proxy: {proxy}");
-        }
-    }
-
-    /// mihomo 侧 skip-cert-verify 映射的 insecure 在补全 TLS 默认值时保留。
-    #[test]
-    fn mihomo_to_singbox_keeps_insecure_while_adding_tls_defaults() {
-        let p = json!({
-            "name": "tj1", "type": "trojan", "server": "s.com", "port": 443,
-            "password": "pw", "skip-cert-verify": true
-        });
-        let o = mihomo_to_singbox(&p).unwrap();
-        assert_eq!(o["tls"]["enabled"], true);
-        assert_eq!(o["tls"]["server_name"], "s.com");
-        assert_eq!(o["tls"]["insecure"], true);
-    }
-}
+#[path = "node_convert/tests.rs"]
+mod tests;

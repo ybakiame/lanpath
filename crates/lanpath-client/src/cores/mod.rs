@@ -1,21 +1,20 @@
 //! Core version management: download local cores and list installed versions.
 //!
-//! The client only supports the sing-box core.
+//! Each inventory instance manages one core type under
+//! `data_dir/cores/<type>/<version>/`.
 //!
 //! # Reuse conclusion
 //!
 //! Does not directly reuse `lanpath-engine::installer`'s `ensure_core_binary`:
 //!
 //! - Its semantics are for agent's "single-directory disk + environment variable/latest version
-//!   resolution", which differs from this module's "`data_dir/cores/sing-box/<version>/` version
-//!   directory + explicit version";
+//!   resolution", which differs from this module's versioned directory + explicit version model;
 //! - Its GitHub domain is fixed, cannot inject mock services for local acceptance testing;
 //! - This module retains its asset naming and extraction ideas, implementing a simplified version
 //!   for the client scenario.
 //!
-//! Remote versions and assets are always based on GitHub Release API: real asset naming may deviate
-//! from convention, so during download the release's `assets` list is matched by platform /
-//! architecture first, rather than directly constructing the download URL.
+//! Remote versions and assets are always based on GitHub Release API. Assets are matched against
+//! the selected upstream's exact platform naming rule rather than constructing download URLs.
 
 use std::path::{Path, PathBuf};
 
@@ -43,21 +42,21 @@ const HTTP_TIMEOUT_SECS: u64 = 30;
 /// TCP connect timeout (seconds) for all requests (fast fail on dead networks).
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 
-/// A locally available sing-box core (downloaded to `data_dir/cores`, or seeded
-/// from the installer bundle on first run — seeding lands in the same versioned
-/// directory and is indistinguishable from a download).
+/// A locally available core under `data_dir/cores/<type>/<version>/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalCore {
+    pub core_type: CoreType,
     pub version: String,
     pub path: PathBuf,
 }
 
 /// Client core inventory: manages download directory scanning, remote version listing,
-/// download installation, and deletion.
+/// download installation, and deletion for one core type.
 #[derive(Debug, Clone)]
 pub struct ClientCoreInventory {
     data_dir: PathBuf,
     api_base: String,
+    core_type: CoreType,
 }
 
 /// Actual installation stages; observers must not perform blocking work.
@@ -76,7 +75,18 @@ impl ClientCoreInventory {
         Self {
             data_dir,
             api_base: api_base.unwrap_or("https://api.github.com").into(),
+            core_type: CoreType::SingBox,
         }
+    }
+
+    /// Select the upstream managed by this inventory.
+    pub fn for_core(mut self, core_type: CoreType) -> Self {
+        self.core_type = core_type;
+        self
+    }
+
+    pub fn core_type(&self) -> CoreType {
+        self.core_type
     }
 
     /// Create inventory based on data directory (GitHub API uses `https://api.github.com`).
@@ -86,20 +96,10 @@ impl ClientCoreInventory {
 
     /// Specify GitHub API base (for injecting mock service addresses in tests).
     pub fn with_api_base(data_dir: PathBuf, api_base: impl Into<String>) -> Self {
-        // 存量清理：mihomo 支持已移除，best-effort 删除遗留的 cores/mihomo 下载目录。
-        let legacy_mihomo = data_dir.join("cores").join("mihomo");
-        if legacy_mihomo.is_dir()
-            && let Err(e) = std::fs::remove_dir_all(&legacy_mihomo)
-        {
-            tracing::warn!(
-                path = %legacy_mihomo.display(),
-                error = %e,
-                "删除遗留 mihomo 核心目录失败"
-            );
-        }
         Self {
             data_dir,
             api_base: api_base.into(),
+            core_type: CoreType::SingBox,
         }
     }
 
@@ -134,15 +134,17 @@ impl ClientCoreInventory {
         self.data_dir.join("cores")
     }
 
-    /// Specific core version directory: `data_dir/cores/sing-box/<version>`.
+    /// Specific core version directory: `data_dir/cores/<type>/<version>`.
     pub(super) fn core_dir(&self, version: &str) -> PathBuf {
-        self.cores_dir().join(version::binary_name()).join(version)
+        self.cores_dir()
+            .join(self.core_type.binary_name())
+            .join(version)
     }
 
-    /// Scan `cores_dir/sing-box/<version>/` and list downloaded cores.
+    /// Scan `cores_dir/<type>/<version>/` and list downloaded cores.
     pub fn list_installed(&self) -> Vec<LocalCore> {
         let mut out = Vec::new();
-        let type_dir = self.cores_dir().join(version::binary_name());
+        let type_dir = self.cores_dir().join(self.core_type.binary_name());
         if let Ok(entries) = std::fs::read_dir(&type_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -154,9 +156,13 @@ impl ClientCoreInventory {
                 if version.starts_with(".core-download-") {
                     continue;
                 }
-                let bin = path.join(version::binary_name_on_disk());
+                let bin = path.join(version::binary_name_on_disk_for(self.core_type));
                 if bin.is_file() {
-                    out.push(LocalCore { version, path: bin });
+                    out.push(LocalCore {
+                        core_type: self.core_type,
+                        version,
+                        path: bin,
+                    });
                 }
             }
         }
@@ -164,8 +170,8 @@ impl ClientCoreInventory {
         out
     }
 
-    /// Scan `cores_dir/sing-box/<version>/` version directories, list downloaded version numbers,
-    /// sorted by semantic version descending (latest first, prerelease lower than same-base stable).
+    /// Scan version directories, list downloaded version numbers sorted by semantic version
+    /// descending (latest first, prerelease lower than same-base stable).
     pub fn list_downloaded_versions(&self) -> Vec<String> {
         let mut versions: Vec<String> = self
             .list_installed()
@@ -192,12 +198,11 @@ impl ClientCoreInventory {
         _include_tun: bool,
         progress: &(dyn Fn(CoreDownloadStage) + Send + Sync),
     ) -> LanpathResult<LocalCore> {
-        let version = safety::normalized_version(version)?.to_string();
-        let tag = version::github_tag(&version);
-        let (arch_hint, is_windows) = version::target_spec()?;
+        let version = safety::normalized_version_for(self.core_type, version)?.to_string();
+        let (arch_hint, is_windows) = version::target_spec_for(self.core_type)?;
 
         let dir = self.core_dir(&version);
-        let on_disk = dir.join(version::binary_name_on_disk());
+        let on_disk = dir.join(version::binary_name_on_disk_for(self.core_type));
 
         safety::unlinked_path(&dir)?;
         safety::unlinked_path(&on_disk)?;
@@ -207,6 +212,7 @@ impl ClientCoreInventory {
             safety::executable(&on_disk)?;
             version::verify_version(&on_disk, &version)?;
             return Ok(LocalCore {
+                core_type: self.core_type,
                 version,
                 path: on_disk,
             });
@@ -224,7 +230,9 @@ impl ClientCoreInventory {
         // Match current platform asset via GitHub Release API (real naming may deviate from
         // convention, do not construct URL directly).
         progress(CoreDownloadStage::ResolvingRelease);
-        let (asset_url, asset_name) = self.resolve_asset_url(&tag, arch_hint, is_windows).await?;
+        let (asset_url, asset_name) = self
+            .resolve_asset_url(&version, arch_hint, is_windows)
+            .await?;
         safety::asset_name(&asset_name)?;
         // Asset download initial URL is `github.com/<owner>/<repo>/releases/download/...`,
         // wrapped by configured proxy prefix; 302 redirect to `objects.githubusercontent.com`
@@ -241,13 +249,27 @@ impl ClientCoreInventory {
         self.download_to(&asset_url, &tmp_archive).await?;
 
         progress(CoreDownloadStage::Extracting);
-        let binary_inside = version::binary_name();
+        let binary_inside = self.core_type.binary_name();
+        let core_type = self.core_type;
         let (dir_clone, archive_clone) = (dir.clone(), tmp_archive.clone());
         let result = tokio::task::spawn_blocking(move || {
             if asset_name.ends_with(".tar.gz") {
                 download::extract_tgz(&archive_clone, &dir_clone, binary_inside)
             } else if asset_name.ends_with(".zip") {
-                download::extract_zip(&archive_clone, &dir_clone, binary_inside)
+                download::extract_zip(&archive_clone, &dir_clone, binary_inside, core_type)
+            } else if asset_name.ends_with(".gz") {
+                let path = download::extract_gz(&archive_clone, &dir_clone, binary_inside)?;
+                if path.file_name()
+                    != Some(std::ffi::OsStr::new(&version::binary_name_on_disk_for(
+                        core_type,
+                    )))
+                {
+                    std::fs::rename(
+                        &path,
+                        dir_clone.join(version::binary_name_on_disk_for(core_type)),
+                    )?;
+                }
+                Ok(dir_clone.join(version::binary_name_on_disk_for(core_type)))
             } else {
                 Err(LanpathError::Core(format!(
                     "Unknown asset format: {asset_name}"
@@ -266,21 +288,29 @@ impl ClientCoreInventory {
         // 核心下载成功后随附下载对应架构的 wintun.dll；失败不阻塞核心安装（TUN
         // 启动时会报「Unable to load library」，错误信息足够明确）。
         #[cfg(target_os = "windows")]
-        if _include_tun && let Err(e) = download::ensure_wintun(&self.http_client()?, &dir).await {
+        if self.core_type == CoreType::SingBox
+            && _include_tun
+            && let Err(e) = download::ensure_wintun(&self.http_client()?, &dir).await
+        {
             tracing::warn!(error = %e, "wintun.dll 下载失败，TUN 模式将不可用");
         }
 
         progress(CoreDownloadStage::Verifying);
         safety::executable(&path)?;
-        version::verify_version(&path, &version)?;
-        let path = download::publish_core(&dir, &destination)?;
+        version::verify_version_for(&path, self.core_type, &version)?;
+        let path = download::publish_core(&dir, &destination, self.core_type)?;
 
         tracing::info!(
+            core = %self.core_type,
             version = %version,
             path = %path.display(),
             "Core download complete"
         );
-        Ok(LocalCore { version, path })
+        Ok(LocalCore {
+            core_type: self.core_type,
+            version,
+            path,
+        })
     }
 
     /// Delete a downloaded core (only cores within `cores_dir`).
@@ -317,8 +347,12 @@ impl ClientCoreInventory {
         let type_dir = version_dir
             .parent()
             .ok_or_else(|| LanpathError::Core("Cannot locate core type directory".to_string()))?;
-        if type_dir.parent() != Some(cores_dir.as_path()) {
-            return Err(LanpathError::Core("Invalid core binary path".to_string()));
+        if type_dir.parent() != Some(cores_dir.as_path())
+            || type_dir.file_name() != Some(std::ffi::OsStr::new(self.core_type.binary_name()))
+        {
+            return Err(LanpathError::Core(
+                "Invalid core binary path for selected core type".to_string(),
+            ));
         }
         // Core in use cannot be deleted.
         if paths_equal(&bin, active_binary) {
@@ -374,11 +408,12 @@ impl ClientCoreInventory {
     /// (download URL, asset name).
     async fn resolve_asset_url(
         &self,
-        tag: &str,
+        version: &str,
         arch_hint: &str,
         is_windows: bool,
     ) -> LanpathResult<(String, String)> {
-        let (owner, repo) = CoreType::SingBox.github_repo();
+        let tag = version::github_tag_for(self.core_type, version);
+        let (owner, repo) = self.core_type.github_repo();
         let url = format!(
             "{}/repos/{}/{}/releases/tags/{}",
             self.api_base, owner, repo, tag
@@ -412,8 +447,7 @@ impl ClientCoreInventory {
 
         for asset in assets {
             let name = asset.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name.contains(arch_hint)
-                && version::ext_ok(is_windows, name)
+            if version::asset_matches(self.core_type, version, arch_hint, is_windows, name)
                 && let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str())
             {
                 safety::asset_name(name)?;
@@ -421,8 +455,8 @@ impl ClientCoreInventory {
             }
         }
         Err(LanpathError::Core(format!(
-            "No asset found for platform {} in release {tag}",
-            arch_hint
+            "No asset found for {core} on platform {arch_hint} in release {tag}",
+            core = self.core_type
         )))
     }
 }

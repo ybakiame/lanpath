@@ -25,8 +25,8 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait CoreEngineBridge: Send + Sync {
     /// 启动核心。
     ///
-    /// `core_type` 供 Android 桥向 Kotlin 插件分派核心类型（客户端仅支持 sing-box，
-    /// 当前恒为 `CoreType::SingBox`），桌面实现忽略；`config_json` 为 sing-box 配置 JSON。
+    /// `core_type` 供 Android 桥向 Kotlin 插件分派核心类型（Android 仅支持 sing-box，
+    /// 桌面支持 sing-box/Mihomo）；`config_json` 为所选核心的配置。
     fn start<'a>(
         &'a self,
         core_type: CoreType,

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use lanpath_common::{LanpathError, LanpathResult};
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
@@ -16,26 +16,36 @@ const DIAGNOSTIC_LIMIT: usize = 32 * 1024;
 pub(crate) struct ConfigValidator {
     root: PathBuf,
     binary: Option<PathBuf>,
+    core_type: CoreType,
     bindings: Bindings,
 }
 
 impl ConfigValidator {
     /// The caller retains DataRoot's directory lock and supplies the same
     /// canonical root and selected executable to the engine manager.
-    pub(crate) fn new(root: &Path, binary: Option<PathBuf>, bindings: Bindings) -> Self {
+    pub(crate) fn new(
+        root: &Path,
+        binary: Option<PathBuf>,
+        core_type: CoreType,
+        bindings: Bindings,
+    ) -> Self {
         Self {
             root: root.to_owned(),
             binary,
+            core_type,
             bindings,
         }
     }
 
     pub(crate) async fn validate_value(&self, value: &Value) -> LanpathResult<()> {
-        policy::check(&self.root, value, &self.bindings)?;
+        if self.core_type == CoreType::SingBox {
+            policy::check(&self.root, value, &self.bindings)?;
+        }
         let binary = self.binary.as_deref().ok_or_else(|| {
-            LanpathError::Core(
-                "no sing-box binary selected; install/select the real core before checking".into(),
-            )
+            LanpathError::Core(format!(
+                "no {} binary selected; install/select the real core before checking",
+                self.core_type
+            ))
         })?;
         if !binary.is_absolute() || !self.root.is_absolute() {
             return Err(resources::denied(
@@ -45,47 +55,70 @@ impl ConfigValidator {
         }
         let canonical_binary = std::fs::canonicalize(binary).map_err(|error| {
             LanpathError::Core(format!(
-                "cannot access selected sing-box binary {}: {error}",
+                "cannot access selected {} binary {}: {error}",
+                self.core_type,
                 binary.display()
             ))
         })?;
-        for (pointer, location) in [
-            ("/log/output", "log.output"),
-            (
-                "/experimental/cache_file/path",
-                "experimental.cache_file.path",
-            ),
-        ] {
-            if let Some(path) = value
-                .pointer(pointer)
-                .and_then(Value::as_str)
-                .filter(|path| !path.is_empty())
-                && resources::confined(&self.root, path, location)? == canonical_binary
-            {
-                return Err(resources::denied(
-                    location,
-                    "output must not overwrite the selected core executable",
-                ));
+        if self.core_type == CoreType::SingBox {
+            for (pointer, location) in [
+                ("/log/output", "log.output"),
+                (
+                    "/experimental/cache_file/path",
+                    "experimental.cache_file.path",
+                ),
+            ] {
+                if let Some(path) = value
+                    .pointer(pointer)
+                    .and_then(Value::as_str)
+                    .filter(|path| !path.is_empty())
+                    && resources::confined(&self.root, path, location)? == canonical_binary
+                {
+                    return Err(resources::denied(
+                        location,
+                        "output must not overwrite the selected core executable",
+                    ));
+                }
             }
         }
-        let text = serde_json::to_string_pretty(value)?;
+        let text = match self.core_type {
+            CoreType::SingBox => serde_json::to_string_pretty(value)?,
+            CoreType::Mihomo => serde_yaml::to_string(value)?,
+        };
         self.check_core(binary, &text).await
     }
 
     async fn check_core(&self, binary: &Path, text: &str) -> LanpathResult<()> {
+        let suffix = match self.core_type {
+            CoreType::SingBox => ".json",
+            CoreType::Mihomo => ".yaml",
+        };
         let mut candidate = tempfile::Builder::new()
             .prefix(".configuration-check-")
-            .suffix(".json")
+            .suffix(suffix)
             .tempfile_in(&self.root)?;
         candidate.write_all(text.as_bytes())?;
         candidate.as_file().sync_all()?;
         let mut command = Command::new(binary);
+        match self.core_type {
+            CoreType::SingBox => {
+                command
+                    .arg("check")
+                    .arg("-c")
+                    .arg(candidate.path())
+                    .arg("-D")
+                    .arg(&self.root);
+            }
+            CoreType::Mihomo => {
+                command
+                    .arg("-t")
+                    .arg("-d")
+                    .arg(&self.root)
+                    .arg("-f")
+                    .arg(candidate.path());
+            }
+        }
         command
-            .arg("check")
-            .arg("-c")
-            .arg(candidate.path())
-            .arg("-D")
-            .arg(&self.root)
             .current_dir(&self.root)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -94,7 +127,10 @@ impl ConfigValidator {
         let mut child = lanpath_common::no_window_tokio(&mut command)
             .spawn()
             .map_err(|error| {
-                LanpathError::Core(format!("cannot start selected sing-box checker: {error}"))
+                LanpathError::Core(format!(
+                    "cannot start selected {} checker: {error}",
+                    self.core_type
+                ))
             })?;
         let (Some(output), Some(errors)) = (child.stdout.take(), child.stderr.take()) else {
             let _ = child.kill().await;

@@ -41,9 +41,11 @@ impl BusinessService {
     ) -> crate::configuration::ConfigValidator {
         let bindings = Bindings::from_config(config);
         let binary = self.binary.as_ref().unwrap_or(&config.core_binary);
+        let core_type = lanpath_client::cores::infer_core_type(binary).unwrap_or(config.core_type);
         crate::configuration::ConfigValidator::new(
             &self.root,
             (!binary.as_os_str().is_empty()).then(|| binary.clone()),
+            core_type,
             bindings,
         )
     }

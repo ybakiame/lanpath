@@ -12,6 +12,7 @@ mod clash_api;
 mod compose;
 mod fakeip;
 mod ipv6;
+mod mihomo;
 mod singbox;
 mod view;
 
@@ -22,6 +23,7 @@ pub use android_dns::*;
 pub use baseline::*;
 pub use clash_api::*;
 pub use compose::*;
+pub use mihomo::*;
 pub use singbox::*;
 pub use view::*;
 

@@ -1,13 +1,15 @@
 //! Integration tests for `ClientState::start` (spawn fake cores, rollback paths).
 
 use super::helpers::*;
+use lanpath_common::CoreType;
 
 /// Fake core script must be able to be truly started/stopped by CoreManager, otherwise rollback tests are not representative.
 #[tokio::test]
 async fn fake_core_binary_starts_and_stops() {
     let dir = tempfile::tempdir().unwrap();
     let core_bin = native_core_fixture(&dir);
-    let runner = crate::runner::CoreRunner::create(&core_bin, dir.path()).unwrap();
+    let runner =
+        crate::runner::CoreRunner::create(CoreType::SingBox, &core_bin, dir.path()).unwrap();
     let config = serde_json::json!({"log": {"level": "info"}});
     runner.start(&config).await.unwrap();
     assert!(runner.is_running().await);

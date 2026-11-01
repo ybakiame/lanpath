@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::cores::{ClientCoreInventory, version};
+use crate::cores::{ClientCoreInventory, download, version};
 
 async fn spawn_server(app: axum::Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -44,6 +44,14 @@ fn build_tgz(entries: &[(&str, &[u8])]) -> Vec<u8> {
     out
 }
 
+#[cfg(unix)]
+fn build_gz(data: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
+}
+
 // ---------- ① list_installed: scan directory structure ----------
 
 #[test]
@@ -62,25 +70,24 @@ fn list_installed_scans_versioned_dirs() {
     assert_eq!(sb.path, dir.path().join("cores/sing-box/1.13.15/sing-box"));
 }
 
-/// 存量清理：构造 inventory 时 best-effort 删除遗留的 `cores/mihomo/` 目录（不影响 sing-box）。
+/// 两种核心库存独立共存，构造 inventory 不再删除 Mihomo 目录。
 #[test]
-fn inventory_new_removes_legacy_mihomo_cores_dir() {
+fn inventory_preserves_both_core_types() {
     let dir = tempfile::tempdir().unwrap();
     write_executable(&dir.path().join("cores/mihomo/1.19.29/mihomo"), b"fake");
     write_executable(&dir.path().join("cores/sing-box/1.13.15/sing-box"), b"fake");
 
-    let inv = ClientCoreInventory::new(dir.path().to_path_buf());
+    let singbox = ClientCoreInventory::new(dir.path().to_path_buf());
+    let mihomo = ClientCoreInventory::new(dir.path().to_path_buf())
+        .for_core(lanpath_common::CoreType::Mihomo);
 
+    assert_eq!(singbox.list_installed().len(), 1);
+    assert_eq!(mihomo.list_installed().len(), 1);
+    assert_eq!(mihomo.list_installed()[0].version, "1.19.29");
     assert!(
-        !dir.path().join("cores/mihomo").exists(),
-        "遗留 mihomo 目录应被清理"
+        dir.path().join("cores/mihomo/1.19.29/mihomo").exists(),
+        "Mihomo 库存必须保留"
     );
-    assert!(
-        dir.path().join("cores/sing-box/1.13.15/sing-box").exists(),
-        "sing-box 目录不受影响"
-    );
-    // 清理后扫描不到 mihomo。
-    assert_eq!(inv.list_installed().len(), 1);
 }
 
 #[test]
@@ -137,6 +144,56 @@ async fn list_remote_channels_picks_latest_per_channel() {
             ),
             (crate::cores::CoreChannel::Beta, "1.14.0-beta.4".to_string()),
             (crate::cores::CoreChannel::Stable, "1.13.15".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn mihomo_channels_resolve_stable_and_rolling_alpha_version() {
+    let app = axum::Router::new()
+        .route(
+            "/repos/MetaCubeX/mihomo/releases",
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                let host = headers
+                    .get("host")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("127.0.0.1");
+                serde_json::json!([
+                    {
+                        "tag_name": "Prerelease-Alpha",
+                        "prerelease": true,
+                        "assets": [{
+                            "name": "version.txt",
+                            "browser_download_url": format!("http://{host}/alpha/version.txt")
+                        }]
+                    },
+                    { "tag_name": "v1.19.30", "prerelease": false },
+                    { "tag_name": "v1.19.29", "prerelease": false }
+                ])
+                .to_string()
+            }),
+        )
+        .route(
+            "/alpha/version.txt",
+            axum::routing::get(|| async { "alpha-c0e43eb\n" }),
+        );
+    let base = spawn_server(app).await;
+    let inv = ClientCoreInventory::with_api_base(PathBuf::new(), &base)
+        .for_core(lanpath_common::CoreType::Mihomo);
+
+    let channels = inv.list_remote_channels().await.unwrap();
+    let pairs: Vec<_> = channels
+        .into_iter()
+        .map(|channel| (channel.channel, channel.version))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            (
+                crate::cores::CoreChannel::Prerelease,
+                "alpha-c0e43eb".to_string()
+            ),
+            (crate::cores::CoreChannel::Stable, "1.19.30".to_string()),
         ]
     );
 }
@@ -219,6 +276,77 @@ async fn download_singbox_targz_extracts_and_verifies() {
     assert_eq!(again.path, core.path);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn download_mihomo_gzip_extracts_and_verifies() {
+    let version = "1.19.29";
+    let (arch_hint, _) = version::target_spec_for(lanpath_common::CoreType::Mihomo).unwrap();
+    let asset =
+        version::release_asset_name(lanpath_common::CoreType::Mihomo, version, arch_hint, false);
+    let fake: &[u8] =
+        b"#!/bin/sh\n[ \"$1\" = \"-v\" ] || exit 1\necho 'Mihomo Meta v1.19.29 linux amd64'\n";
+    let body = build_gz(fake);
+    let asset_for_release = asset.clone();
+    let app = axum::Router::new()
+        .route(
+            "/repos/MetaCubeX/mihomo/releases/tags/v1.19.29",
+            axum::routing::get(move |headers: axum::http::HeaderMap| async move {
+                let host = headers
+                    .get("host")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("127.0.0.1");
+                serde_json::json!({
+                    "tag_name": "v1.19.29",
+                    "assets": [{
+                        "name": asset_for_release.clone(),
+                        "browser_download_url": format!("http://{host}/assets/{asset_for_release}")
+                    }]
+                })
+                .to_string()
+            }),
+        )
+        .route(
+            &format!("/assets/{asset}"),
+            axum::routing::get(move || async move { body.clone() }),
+        );
+    let base = spawn_server(app).await;
+    let dir = tempfile::tempdir().unwrap();
+    let inv = ClientCoreInventory::with_api_base(dir.path().to_path_buf(), &base)
+        .for_core(lanpath_common::CoreType::Mihomo);
+
+    let core = inv.download(version).await.unwrap();
+    assert_eq!(core.version, version);
+    assert_eq!(core.path, dir.path().join("cores/mihomo/1.19.29/mihomo"));
+}
+
+#[test]
+fn mihomo_zip_selects_upstream_variant_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive_path = dir.path().join("mihomo.zip");
+    {
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        use std::io::Write as _;
+        zip.start_file("mihomo-windows-amd64-v2.exe", options)
+            .unwrap();
+        zip.write_all(b"fake-mihomo").unwrap();
+        zip.finish().unwrap();
+    }
+    let unpacked = download::extract_zip(
+        &archive_path,
+        dir.path(),
+        "mihomo",
+        lanpath_common::CoreType::Mihomo,
+    )
+    .unwrap();
+    assert_eq!(
+        unpacked.file_name().unwrap().to_string_lossy(),
+        version::binary_name_on_disk_for(lanpath_common::CoreType::Mihomo)
+    );
+    assert_eq!(std::fs::read(unpacked).unwrap(), b"fake-mihomo");
+}
+
 // ---------- ⑤ Version probe: `version` / `--version` / `-v` three forms ----------
 //
 // Two fake binaries: one only supports `version` subcommand (sing-box 1.14+, multi-line output),
@@ -276,14 +404,14 @@ fn infers_core_type_from_file_name() {
         version::infer_core_type(Path::new("/usr/local/bin/singbox")),
         Some(lanpath_common::CoreType::SingBox)
     );
-    // mihomo / clash 文件名不再识别（mihomo 支持已移除）。
+    // Mihomo 与 Clash Meta 命名都必须能推断类型。
     assert_eq!(
         version::infer_core_type(Path::new("/usr/local/bin/mihomo")),
-        None
+        Some(lanpath_common::CoreType::Mihomo)
     );
     assert_eq!(
         version::infer_core_type(Path::new("C:\\cores\\clash.exe")),
-        None
+        Some(lanpath_common::CoreType::Mihomo)
     );
     assert_eq!(
         version::infer_core_type(Path::new("/usr/bin/unknown")),
@@ -452,7 +580,13 @@ fn core_zip_extracts_stored_and_deflated_windows_archives() {
             .unwrap();
         writer.write_all(b"expected-core-binary").unwrap();
         writer.finish().unwrap();
-        let output = super::download::extract_zip(&archive, temporary.path(), "sing-box").unwrap();
+        let output = super::download::extract_zip(
+            &archive,
+            temporary.path(),
+            "sing-box",
+            lanpath_common::CoreType::SingBox,
+        )
+        .unwrap();
         assert_eq!(std::fs::read(output).unwrap(), b"expected-core-binary");
     }
 }

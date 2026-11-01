@@ -8,6 +8,60 @@ fn service(root: &std::path::Path) -> BusinessService {
     BusinessService::new(root, None, Bindings::new(17899, 19090))
 }
 
+#[tokio::test]
+async fn mihomo_selection_generates_mihomo_config_from_clash_source() {
+    let root = tempfile::tempdir().unwrap();
+    let service = service(root.path());
+    let subscription = service
+        .subscription_store()
+        .add("fixture", "https://example.invalid/sub", true, None)
+        .unwrap();
+    service
+        .subscription_store()
+        .write_cached_content(
+            subscription.id,
+            &CachedSubscriptionContent {
+                format: SubFormat::ClashYaml,
+                singbox_nodes: Vec::new(),
+            },
+        )
+        .unwrap();
+    service
+        .subscription_store()
+        .write_source(
+            subscription.id,
+            &SubscriptionSource {
+                format: SubFormat::ClashYaml,
+                content: "proxies:\n  - name: clash-node\n    type: ss\n    server: 127.0.0.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: fixture\n".into(),
+            },
+        )
+        .unwrap();
+    service
+        .set_active_subscription(Some(subscription.id))
+        .unwrap();
+    let mut config = service.client_config().unwrap();
+    let binary = root.path().join("cores/mihomo/1.19.29/mihomo");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::write(&binary, b"fixture").unwrap();
+    config.core_binary = binary;
+    config.core_type = lanpath_common::CoreType::Mihomo;
+    config.save().unwrap();
+
+    let generated = service.build_config(false).await.unwrap();
+    assert_eq!(
+        generated.pointer("/proxies/0/name"),
+        Some(&json!("clash-node"))
+    );
+    assert_eq!(
+        generated.pointer("/proxy-groups/0/name"),
+        Some(&json!("proxy"))
+    );
+    assert_eq!(generated.pointer("/mixed-port"), Some(&json!(17899)));
+    assert_eq!(generated.pointer("/mode"), Some(&json!("rule")));
+    assert!(generated.get("inbounds").is_none());
+    assert!(generated.get("route").is_none());
+}
+
 #[test]
 fn mitm_settings_preserve_network_modes_and_normalize_hostnames() {
     let root = tempfile::tempdir().unwrap();

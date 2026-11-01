@@ -1,10 +1,12 @@
 //! Core process manager trait, factory and shared helpers.
 //!
-//! 管理器实现按核心拆分为子模块：[`singbox`]。
+//! 管理器实现按核心拆分为子模块：[`singbox`]、[`mihomo`]。
 
+mod mihomo;
 mod path;
 mod singbox;
 
+pub use mihomo::*;
 pub use singbox::*;
 
 use lanpath_common::{CoreType, LanpathResult};
@@ -15,7 +17,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
 
-/// Manages the lifecycle of a proxy core (sing-box).
+/// Manages the lifecycle of a proxy core.
 #[async_trait::async_trait]
 pub trait CoreManager: Send + Sync {
     /// Core type this manager handles.
@@ -66,6 +68,10 @@ impl CoreManagerFactory {
     ) -> LanpathResult<Box<dyn CoreManager>> {
         match core_type {
             CoreType::SingBox => Ok(Box::new(SingBoxProcessManager::new(
+                binary_path,
+                config_dir,
+            )?)),
+            CoreType::Mihomo => Ok(Box::new(MihomoProcessManager::new(
                 binary_path,
                 config_dir,
             )?)),

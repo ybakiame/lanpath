@@ -70,9 +70,6 @@ impl ProfileStore {
 /// `Profile{name:"Default"}` (override content preserved as-is) during
 /// the first call to [`ProfileStoreV2::load`], then deleted; no migration is performed when
 /// `profiles.json` already exists.
-///
-/// 存量归一化：客户端仅支持 sing-box，`profiles.json` 中旧版 `core_type: "mihomo"` 的模板
-/// 在首次 `load` 时一次性剔除并写回（`core_type` 字段本身已被 serde 忽略）。
 #[derive(Debug, Clone)]
 pub struct ProfileStoreV2 {
     data_dir: PathBuf,
@@ -99,50 +96,21 @@ impl ProfileStoreV2 {
     /// When `profiles.json` is missing: if old `profile.json` exists, migrate it to the
     /// default template once and delete the old file; otherwise return empty list. When
     /// `profiles.json` is corrupted, log warning and fall back to empty list.
-    ///
-    /// 存量归一化：`core_type: "mihomo"` 的旧模板在读取时剔除，有剔除时写回磁盘。
     pub fn load(&self) -> LanpathResult<Vec<Profile>> {
         let path = self.profiles_file();
         if path.exists() {
             let text = std::fs::read_to_string(&path)?;
-            // 先按 JSON 值解析以便识别旧版 mihomo 模板（Profile 已无 core_type 字段，
-            // 直接反序列化会静默丢失该信息）。
-            let raw: Vec<serde_json::Value> = match serde_json::from_str(&text) {
-                Ok(raw) => raw,
+            return match serde_json::from_str::<Vec<Profile>>(&text) {
+                Ok(profiles) => Ok(profiles),
                 Err(e) => {
                     tracing::warn!(
                         path = %path.display(),
                         error = %e,
                         "profiles.json unreadable, fall back to empty"
                     );
-                    return Ok(Vec::new());
+                    Ok(Vec::new())
                 }
             };
-            let before = raw.len();
-            let kept: Vec<serde_json::Value> = raw
-                .into_iter()
-                .filter(|p| p.get("core_type").and_then(|v| v.as_str()) != Some("mihomo"))
-                .collect();
-            let profiles: Vec<Profile> =
-                match serde_json::from_value(serde_json::Value::Array(kept)) {
-                    Ok(profiles) => profiles,
-                    Err(e) => {
-                        tracing::warn!(
-                            path = %path.display(),
-                            error = %e,
-                            "profiles.json unreadable, fall back to empty"
-                        );
-                        return Ok(Vec::new());
-                    }
-                };
-            if profiles.len() != before {
-                tracing::info!(
-                    removed = before - profiles.len(),
-                    "profiles.json 中的 mihomo 覆写模板已剔除并写回"
-                );
-                self.save(&profiles)?;
-            }
-            return Ok(profiles);
         }
         let legacy = self.legacy_file();
         if legacy.exists() {

@@ -4,16 +4,23 @@ mod render;
 use std::sync::Arc;
 
 use gpui_kit::{Context, EventEmitter, Task, Window};
-use lanpath_client::core_management::{CoreManagementService, ManagedCore, RemoteChannel};
+use lanpath_client::{
+    core_management::{CoreManagementService, ManagedCore, RemoteChannel},
+    cores::{CoreChannel, channel_of_version},
+};
+use lanpath_common::CoreType;
 
 use crate::{runtime::DesktopRuntime, startup::StartupProgress};
 
 pub(crate) struct CoreSelectionChanged;
 
-/// Owns inventory snapshots, in-flight work, and the last actual startup attempt.
+/// Owns the selected inventory, the independent active core, and in-flight work.
 pub(crate) struct CoreManagementView {
     core: Arc<DesktopRuntime>,
     service: Option<CoreManagementService>,
+    selected_core: CoreType,
+    selected_channel: CoreChannel,
+    active_core: Option<ManagedCore>,
     local: Vec<ManagedCore>,
     remote: Vec<RemoteChannel>,
     remote_checked: bool,
@@ -41,16 +48,36 @@ impl CoreManagementView {
                     business.data_dir().to_path_buf(),
                 ))
             });
-        let (service, local, error) = match loaded {
-            Ok(service) => match service.list_local() {
-                Ok(local) => (Some(service), local, None),
-                Err(error) => (Some(service), Vec::new(), Some(error.to_string())),
-            },
-            Err(error) => (None, Vec::new(), Some(error)),
+        let (service, selected_core, active_core, local, error) = match loaded {
+            Ok(service) => {
+                let active = service.active_core().ok();
+                let selected = active
+                    .as_ref()
+                    .map(ManagedCore::core_type)
+                    .unwrap_or_default();
+                match service.for_core(selected).list_local() {
+                    Ok(local) => (Some(service), selected, active, local, None),
+                    Err(error) => (
+                        Some(service),
+                        selected,
+                        active,
+                        Vec::new(),
+                        Some(error.to_string()),
+                    ),
+                }
+            }
+            Err(error) => (None, CoreType::SingBox, None, Vec::new(), Some(error)),
         };
+        let selected_channel = active_core
+            .as_ref()
+            .map(|core| supported_channel(channel_of_version(core.version())))
+            .unwrap_or(CoreChannel::Stable);
         Self {
             core,
             service,
+            selected_core,
+            selected_channel,
+            active_core,
             local,
             remote: Vec::new(),
             remote_checked: false,
@@ -93,5 +120,12 @@ impl CoreManagementView {
 
     fn selection_disabled(&self) -> bool {
         self.actions_disabled() || self.core.core_override().is_some()
+    }
+}
+
+fn supported_channel(channel: CoreChannel) -> CoreChannel {
+    match channel {
+        CoreChannel::Stable => CoreChannel::Stable,
+        CoreChannel::Beta | CoreChannel::Prerelease => CoreChannel::Prerelease,
     }
 }

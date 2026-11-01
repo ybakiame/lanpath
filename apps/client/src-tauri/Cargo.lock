@@ -3109,6 +3109,7 @@ dependencies = [
  "lanpath-common",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",

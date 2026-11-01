@@ -28,8 +28,6 @@ mod journal;
 #[cfg(windows)]
 mod launch;
 #[cfg(windows)]
-mod managed_seed;
-#[cfg(windows)]
 mod network;
 #[cfg(windows)]
 mod security;
@@ -41,8 +39,6 @@ mod staging_lock;
 pub(crate) use ipc::Pipe;
 #[cfg(windows)]
 pub use launch::Broker;
-#[cfg(windows)]
-pub(crate) use managed_seed::install_bundled_core;
 
 pub fn dispatch_from_env() -> lanpath_common::LanpathResult<bool> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();

@@ -3,13 +3,12 @@ use std::path::PathBuf;
 use futures::{StreamExt as _, channel::mpsc};
 use gpui_kit::component::{WindowExt as _, button::ButtonVariant};
 use gpui_kit::{AppContext as _, Context, Window};
-use lanpath_client::{core_management::ManagedCore, cores::CoreDownloadStage};
+use lanpath_client::{core_management::ManagedCore, cores::CoreChannel, cores::CoreDownloadStage};
+use lanpath_common::CoreType;
 
 use super::{CoreManagementView, CoreSelectionChanged};
 
 enum Mutation {
-    #[cfg(windows)]
-    Bundled,
     Download(String),
     Select(PathBuf),
     Delete(PathBuf),
@@ -17,20 +16,47 @@ enum Mutation {
 
 enum Update {
     Stage(CoreDownloadStage),
-    Finished(Result<(), String>, Result<Vec<ManagedCore>, String>),
+    Finished(
+        Result<(), String>,
+        Result<Vec<ManagedCore>, String>,
+        Option<ManagedCore>,
+    ),
 }
 
 impl CoreManagementView {
+    pub(super) fn select_core_type(&mut self, kind: CoreType, cx: &mut Context<Self>) {
+        if self.actions_disabled() || self.selected_core == kind {
+            return;
+        }
+        self.selected_core = kind;
+        self.remote.clear();
+        self.remote_checked = false;
+        self.error = None;
+        self.refresh(cx);
+    }
+
+    pub(super) fn select_channel(&mut self, channel: CoreChannel, cx: &mut Context<Self>) {
+        if self.selected_channel != channel {
+            self.selected_channel = channel;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.actions_disabled() {
             return;
         }
-        let Some(service) = &self.service else {
+        let Some(service) = self
+            .service
+            .as_ref()
+            .map(|service| service.for_core(self.selected_core))
+        else {
             return;
         };
         match service.list_local() {
             Ok(local) => {
                 self.local = local;
+                self.active_core = self.service.as_ref().and_then(|s| s.active_core().ok());
                 self.error = None;
             }
             Err(error) => self.error = Some(format!("刷新本地核心失败：{error}；保留上次列表")),
@@ -42,12 +68,16 @@ impl CoreManagementView {
         if self.actions_disabled() {
             return;
         }
-        let Some(service) = self.service.clone() else {
+        let Some(service) = self
+            .service
+            .as_ref()
+            .map(|service| service.for_core(self.selected_core))
+        else {
             return;
         };
         self.working = true;
         self.error = None;
-        self.stage = Some("正在查询 GitHub 远端通道".into());
+        self.stage = Some(format!("正在查询 {} 更新", self.selected_core));
         let core = self.core.clone();
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = cx
@@ -69,20 +99,13 @@ impl CoreManagementView {
                         this.error = None;
                     }
                     Err(error) => {
-                        this.error = Some(format!("检查远端通道失败：{error}；保留上次列表"))
+                        this.error = Some(format!("检查更新失败：{error}；保留上次版本信息"))
                     }
                 }
                 cx.notify();
             });
         }));
         cx.notify();
-    }
-
-    #[cfg(windows)]
-    pub(super) fn install_bundled(&mut self, cx: &mut Context<Self>) {
-        if !self.selection_disabled() {
-            self.mutate(Mutation::Bundled, cx);
-        }
     }
 
     pub(super) fn download(&mut self, version: String, cx: &mut Context<Self>) {
@@ -132,7 +155,6 @@ impl CoreManagementView {
                 .cancel_text("取消")
                 .on_ok(move |_, _, cx| {
                     let _ = view.update(cx, |this, cx| {
-                        // Modal confirmation must re-check a later start/close transition.
                         if !this.selection_disabled() {
                             this.mutate(Mutation::Delete(path.clone()), cx);
                         }
@@ -146,14 +168,17 @@ impl CoreManagementView {
         if self.selection_disabled() {
             return;
         }
-        let Some(service) = self.service.clone() else {
+        let Some(service) = self
+            .service
+            .as_ref()
+            .map(|service| service.for_core(self.selected_core))
+        else {
             return;
         };
+        let active_service = self.service.clone();
         self.working = true;
         self.error = None;
         self.stage = Some(match &mutation {
-            #[cfg(windows)]
-            Mutation::Bundled => "正在验证并安装内置管理核心".into(),
             Mutation::Download(version) => format!("准备下载 {version}"),
             Mutation::Select(_) => "正在探测并保存选中核心".into(),
             Mutation::Delete(_) => "正在删除核心版本目录".into(),
@@ -164,11 +189,6 @@ impl CoreManagementView {
             let (sender, mut receiver) = mpsc::unbounded();
             let work = cx.background_spawn(async move {
                 let result = core.mutate_core_inventory(|| match mutation {
-                    #[cfg(windows)]
-                    Mutation::Bundled => core.business().and_then(|business| {
-                        crate::privileged::install_bundled_core(business.data_dir())
-                            .map_err(|error| error.to_string())
-                    }),
                     Mutation::Download(version) => {
                         let progress = |stage| {
                             let _ = sender.unbounded_send(Update::Stage(stage));
@@ -186,19 +206,21 @@ impl CoreManagementView {
                     }
                 });
                 let local = service.list_local().map_err(|error| error.to_string());
-                let _ = sender.unbounded_send(Update::Finished(result, local));
+                let active = active_service.and_then(|service| service.active_core().ok());
+                let _ = sender.unbounded_send(Update::Finished(result, local, active));
             });
             while let Some(update) = receiver.next().await {
-                let finished = matches!(&update, Update::Finished(_, _));
+                let finished = matches!(&update, Update::Finished(_, _, _));
                 let _ = this.update(cx, |this, cx| {
                     match update {
                         Update::Stage(stage) => this.stage = Some(stage_label(stage).into()),
-                        Update::Finished(result, local) => {
+                        Update::Finished(result, local, active) => {
                             this.working = false;
                             this.stage = None;
                             this.task = None;
                             let changed = selection_changed && result.is_ok();
                             this.error = result.err();
+                            this.active_core = active;
                             match local {
                                 Ok(local) => this.local = local,
                                 Err(error) => {

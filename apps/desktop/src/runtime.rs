@@ -21,7 +21,8 @@ use lanpath_client::{
     mitm::{MitmCaView, MitmService, MitmSession},
     remote::{RemoteTaskView, ScriptTaskSession},
 };
-use lanpath_engine::SingBoxProcessManager;
+use lanpath_common::{CoreType, LanpathResult, ProcessStopKind};
+use lanpath_engine::{CoreManager, MihomoProcessManager, SingBoxProcessManager};
 use tokio::runtime::Runtime;
 
 use crate::{
@@ -45,10 +46,60 @@ struct RunResources {
     files: Vec<(String, String)>,
 }
 
+/// Concrete process manager selected by the saved core type. It retains
+/// `stop_process` receipts that the object-safe engine trait does not expose.
+pub(crate) enum ActiveCoreManager {
+    SingBox(SingBoxProcessManager),
+    Mihomo(MihomoProcessManager),
+}
+
+impl ActiveCoreManager {
+    pub(crate) fn new(
+        core_type: CoreType,
+        binary: &Path,
+        config_dir: &Path,
+    ) -> LanpathResult<Self> {
+        match core_type {
+            CoreType::SingBox => Ok(Self::SingBox(SingBoxProcessManager::new(
+                binary, config_dir,
+            )?)),
+            CoreType::Mihomo => Ok(Self::Mihomo(MihomoProcessManager::new(binary, config_dir)?)),
+        }
+    }
+
+    pub(crate) async fn start(&self, config: &serde_json::Value) -> LanpathResult<()> {
+        match self {
+            Self::SingBox(manager) => manager.start(config).await,
+            Self::Mihomo(manager) => manager.start(config).await,
+        }
+    }
+
+    pub(crate) async fn is_running(&self) -> bool {
+        match self {
+            Self::SingBox(manager) => manager.is_running().await,
+            Self::Mihomo(manager) => manager.is_running().await,
+        }
+    }
+
+    pub(crate) async fn stop_process(&self) -> LanpathResult<ProcessStopKind> {
+        match self {
+            Self::SingBox(manager) => manager.stop_process().await,
+            Self::Mihomo(manager) => manager.stop_process().await,
+        }
+    }
+
+    pub(crate) fn core_type(&self) -> CoreType {
+        match self {
+            Self::SingBox(_) => CoreType::SingBox,
+            Self::Mihomo(_) => CoreType::Mihomo,
+        }
+    }
+}
+
 pub(crate) struct DesktopRuntime {
     // Keep the executor alive for lifecycle/output-reader teardown, and retain
     // the directory lease until every service and the executor have dropped.
-    manager: tokio::sync::Mutex<Option<Arc<SingBoxProcessManager>>>,
+    manager: tokio::sync::Mutex<Option<Arc<ActiveCoreManager>>>,
     broker: tokio::sync::Mutex<Option<Arc<Mutex<Broker>>>>,
     lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
     live_inputs: tokio::sync::Mutex<Option<remote::LiveInputs>>,

@@ -27,6 +27,47 @@ fn features_with_ui(ui: &str) -> PanelFeatures {
 }
 
 #[test]
+fn mihomo_panel_config_passes_real_mihomo_check() {
+    let Some(bin) = mihomo_binary() else {
+        return;
+    };
+    let nodes = vec![json!({
+        "name": "direct",
+        "type": "ss",
+        "server": "127.0.0.1",
+        "port": 8388,
+        "cipher": "aes-256-gcm",
+        "password": "test"
+    })];
+    let mut cfg = crate::profile::mihomo_template(&nodes);
+    compose_mihomo_config(&mut cfg, 17890, None).unwrap();
+    let features = PanelFeatures {
+        tun_enabled: false,
+        clash_api_secret: String::new(),
+        data_dir: "/tmp/lanpath-client-test".to_string(),
+        ..singbox_features()
+    };
+    apply_mihomo_panel_features(&mut cfg, &features);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    std::fs::write(&path, serde_yaml::to_string(&cfg).unwrap()).unwrap();
+    let out = std::process::Command::new(&bin)
+        .arg("-t")
+        .arg("-d")
+        .arg(dir.path())
+        .arg("-f")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "mihomo check failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn singbox_tun_clash_api_passes_real_singbox_check() {
     let Some(bin) = sing_box_binary() else {
         return;

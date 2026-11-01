@@ -5,8 +5,10 @@
 apps/client/src/pages 与 @lanpath/ui 共用双端页面。@lanpath/client-core 是命令、状态与 hooks 入口。
 apps/client/src-tauri 为独立 Cargo 壳，经 target 依赖门控区分桌面/Android。
 lanpath-tauri 实现共享命令；lanpath-client 管理订阅、配置、策略、流量与本地 SQLite。
-lanpath-engine 只保留 sing-box 管理器和进程生命周期；lanpath-common 仅含错误、CoreType 和 OS 工具，
-不引入 Sea-ORM、tonic 或服务端模型。lanpath-mitm/lanpath-script 属于客户端。
+lanpath-engine 按核心类型管理 sing-box/Mihomo 进程与共享生命周期；lanpath-common 仅含错误、CoreType 和 OS 工具，
+不引入 Sea-ORM、tonic 或服务端模型。现行 Tauri/React 前端与 Android 仍只暴露 sing-box；
+GPUI 实验桌面按 ADR-0017 支持双核心。
+lanpath-mitm/lanpath-script 属于客户端。
 Android 经 Kotlin VpnPlugin 和 com.ybakiame.lanpath.core.libbox 运行内嵌 Go 引擎。
 
 客户端不依赖 Hub/Agent/Proto/DB crate，订阅与可选服务端集成通过公开协议。

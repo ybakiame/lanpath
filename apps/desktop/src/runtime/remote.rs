@@ -2,7 +2,6 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use lanpath_client::remote::{FetchReport, RemoteFetchContext, RemoteResourceService};
 use lanpath_common::{LanpathError, LanpathResult, ProcessIdentity};
-use lanpath_engine::CoreManager;
 
 use super::DesktopRuntime;
 use crate::privileged::SessionState;
@@ -76,8 +75,12 @@ impl DesktopRuntime {
             if !manager.is_running().await {
                 return Err("核心已退出".into());
             }
-            let bytes = std::fs::read(self.business()?.data_dir().join("sing-box.pid"))
-                .map_err(|error| error.to_string())?;
+            let bytes = std::fs::read(
+                self.business()?
+                    .data_dir()
+                    .join(format!("{}.pid", manager.core_type().binary_name())),
+            )
+            .map_err(|error| error.to_string())?;
             serde_json::from_slice::<Record>(&bytes)
                 .map_err(|error| error.to_string())?
                 .identity

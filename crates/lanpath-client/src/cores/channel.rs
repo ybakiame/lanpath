@@ -7,7 +7,7 @@
 use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde::{Deserialize, Serialize};
 
-use super::ClientCoreInventory;
+use super::{ClientCoreInventory, safety};
 
 /// Release channel of a sing-box version (aligned with the desktop core-management
 /// channel model: 稳定版 / 测试版 / 预发布版, see `.reference/GUI.for.SingBox`).
@@ -68,7 +68,7 @@ impl ClientCoreInventory {
     /// the first match per channel wins. Channels without any matching release in the
     /// window are omitted from the result.
     pub async fn list_remote_channels(&self) -> LanpathResult<Vec<RemoteChannelVersion>> {
-        let (owner, repo) = CoreType::SingBox.github_repo();
+        let (owner, repo) = self.core_type.github_repo();
         let url = format!(
             "{}/repos/{}/{}/releases?per_page=30",
             self.api_base, owner, repo
@@ -100,11 +100,39 @@ impl ClientCoreInventory {
             let Some(tag) = release.get("tag_name").and_then(|v| v.as_str()) else {
                 continue;
             };
-            let version = tag.strip_prefix('v').unwrap_or(tag);
-            if version.is_empty() {
+            let version = match self.core_type {
+                CoreType::SingBox => {
+                    let version = tag.strip_prefix('v').unwrap_or(tag);
+                    if version.is_empty() {
+                        continue;
+                    }
+                    version.to_string()
+                }
+                CoreType::Mihomo if tag == "Prerelease-Alpha" => {
+                    match self.mihomo_alpha_version(&release).await {
+                        Ok(version) => version,
+                        Err(error) => {
+                            tracing::warn!(error = %error, "Mihomo Alpha 版本读取失败");
+                            continue;
+                        }
+                    }
+                }
+                CoreType::Mihomo => {
+                    let version = tag.strip_prefix('v').unwrap_or(tag);
+                    if !version.starts_with(|c: char| c.is_ascii_digit()) {
+                        continue;
+                    }
+                    version.to_string()
+                }
+            };
+            let Ok(version) = safety::normalized_version_for(self.core_type, &version) else {
                 continue;
-            }
-            let channel = channel_of_version(version);
+            };
+            let channel = if version.starts_with("alpha-") {
+                CoreChannel::Prerelease
+            } else {
+                channel_of_version(version)
+            };
             if channels
                 .iter()
                 .any(|c: &RemoteChannelVersion| c.channel == channel)
@@ -117,5 +145,46 @@ impl ClientCoreInventory {
             });
         }
         Ok(channels)
+    }
+
+    async fn mihomo_alpha_version(&self, release: &serde_json::Value) -> LanpathResult<String> {
+        let url = release
+            .get("assets")
+            .and_then(|value| value.as_array())
+            .and_then(|assets| {
+                assets
+                    .iter()
+                    .find(|asset| asset.get("name").and_then(|v| v.as_str()) == Some("version.txt"))
+            })
+            .and_then(|asset| asset.get("browser_download_url"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| LanpathError::Core("Mihomo Alpha release has no version.txt".into()))?;
+        let url = crate::apply_github_proxy_prefix(url, &self.github_proxy_prefix());
+        let resp = self
+            .http_client()?
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(super::HTTP_TIMEOUT_SECS))
+            .header("User-Agent", "lanpath-client")
+            .send()
+            .await
+            .map_err(|error| {
+                LanpathError::Core(format!("Mihomo version request failed: {error}"))
+            })?;
+        if !resp.status().is_success() {
+            return Err(LanpathError::Core(format!(
+                "Mihomo version.txt returned status {}",
+                resp.status()
+            )));
+        }
+        let version = resp
+            .text()
+            .await
+            .map_err(|error| LanpathError::Core(format!("Mihomo version read failed: {error}")))?
+            .trim()
+            .to_string();
+        if version.is_empty() {
+            return Err(LanpathError::Core("Mihomo version.txt is empty".into()));
+        }
+        Ok(version)
     }
 }

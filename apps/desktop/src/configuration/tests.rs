@@ -389,7 +389,12 @@ async fn real_core_checks_generated_value() {
     assert!(binary.is_absolute());
     let root = tempfile::tempdir().unwrap();
     let root_path = root.path().canonicalize().unwrap();
-    let store = ConfigValidator::new(&root_path, Some(binary), bindings());
+    let store = ConfigValidator::new(
+        &root_path,
+        Some(binary),
+        lanpath_common::CoreType::SingBox,
+        bindings(),
+    );
     let valid = document(&root_path);
     store.validate_value(&valid).await.unwrap();
     let mut invalid = valid;

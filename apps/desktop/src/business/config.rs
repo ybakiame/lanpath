@@ -1,9 +1,9 @@
 use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
 use lanpath_client::{
     EffectiveOverrides, PanelFeatures, ProfileStoreV2, RemoteFetchContext, RequestProxyMode,
-    SubscriptionStore, apply_panel_features, build_core_config_v2, compose_singbox_config,
-    core_config::MitmChain, inject_local_override_warn_only, prepare_missing_rule_sets_warn_only,
-    resolve_remote_overrides_with_context,
+    SubscriptionStore, apply_panel_features, build_core_config_v2, compose_mihomo_config,
+    compose_singbox_config, core_config::MitmChain, inject_local_override_warn_only,
+    prepare_missing_rule_sets_warn_only, resolve_remote_overrides_with_context,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use serde_json::Value;
@@ -27,6 +27,7 @@ impl BusinessService {
         // Both preview and start prepare before a core session is admitted.
         // A saved Core port is never permission to borrow an unrelated listener.
         let cache_only = config.request_proxy_mode == RequestProxyMode::Core;
+        let use_mihomo = config.core_type == lanpath_common::CoreType::Mihomo;
         let selected_id = config
             .active_subscription_id
             .ok_or_else(|| LanpathError::Client("请先在订阅页选择要使用的订阅".into()))?;
@@ -72,6 +73,7 @@ impl BusinessService {
         } else {
             RemoteFetchContext::stopped(config)?
         };
+        let source = store.load_source(selected.id)?;
         let subscription = serde_json::json!({ "outbounds": nodes });
         let (effective, warnings) = match selected.profile_id {
             Some(profile_id) => {
@@ -93,6 +95,27 @@ impl BusinessService {
         };
         for warning in warnings {
             tracing::warn!(%warning, "实验覆写远程资源降级");
+        }
+        if use_mihomo {
+            if slices != ConfigSlices::default() {
+                tracing::warn!(
+                    "Mihomo 启动未应用 sing-box 配置切片；配置页内容保留供切换回 sing-box 使用"
+                );
+            }
+            let nodes = lanpath_client::subscription::mihomo_nodes_from_subscription(
+                source.as_ref(),
+                subscription["outbounds"]
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            )?;
+            let mut profile_config =
+                lanpath_client::build_mihomo_config_v2(&nodes, &effective).await?;
+            compose_mihomo_config(&mut profile_config, mixed_port, mitm_chain)?;
+            let mut value = profile_config;
+            lanpath_client::core_config::apply_mihomo_panel_features(&mut value, &features);
+            remove_mihomo_dashboard_download(&mut value);
+            return Ok((value, Vec::new()));
         }
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
         let mut value = compose_singbox_config(&profile_config, mixed_port, mitm_chain)?;
@@ -174,5 +197,12 @@ fn remove_dashboard_download(value: &mut Value) {
     {
         api.remove("external_ui");
         api.remove("external_ui_download_url");
+    }
+}
+
+fn remove_mihomo_dashboard_download(value: &mut Value) {
+    if let Some(object) = value.as_object_mut() {
+        object.remove("external-ui");
+        object.remove("external-ui-url");
     }
 }

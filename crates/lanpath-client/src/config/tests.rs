@@ -202,10 +202,9 @@ fn load_save_roundtrip() {
     assert_eq!(cfg, loaded);
 }
 
-/// 存量归一化：旧版 `core_type: "mihomo"` 的 client.json 加载时归一化——`core_type`
-/// 字段被忽略；`core_binary` 指向 mihomo 二进制时重置为空并写回磁盘。
+/// 旧版 `core_type: "mihomo"` 与二进制路径原样保留，运行时可继续加载。
 #[test]
-fn load_normalizes_legacy_mihomo_config_and_writes_back() {
+fn load_preserves_legacy_mihomo_config() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("client.json"),
@@ -219,26 +218,26 @@ fn load_normalizes_legacy_mihomo_config_and_writes_back() {
     .unwrap();
 
     let loaded = ClientConfig::load(dir.path()).unwrap();
-    assert!(
-        loaded.core_binary.as_os_str().is_empty(),
-        "mihomo 二进制应重置为自动选择"
+    assert_eq!(
+        loaded.core_binary,
+        PathBuf::from("/home/u/.proxy-panel-client/cores/mihomo/1.19.29/mihomo")
     );
+    assert_eq!(loaded.core_type, CoreType::Mihomo);
 
-    // 已写回：再次读取磁盘文件，core_type 字段被剔除、core_binary 为空。
+    // Loading does not mutate a valid legacy document.
     let text = std::fs::read_to_string(dir.path().join("client.json")).unwrap();
     let raw: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert!(raw.get("core_type").is_none());
-    assert_eq!(raw["core_binary"], "");
-
-    // 再次加载幂等（不报错）。
-    let again = ClientConfig::load(dir.path()).unwrap();
-    assert_eq!(again, loaded);
+    assert_eq!(raw["core_type"], "mihomo");
+    assert_eq!(
+        raw["core_binary"],
+        "/home/u/.proxy-panel-client/cores/mihomo/1.19.29/mihomo"
+    );
+    assert_eq!(ClientConfig::load(dir.path()).unwrap(), loaded);
 }
 
-/// 存量归一化：旧版 `core_type: "mihomo"` 但 core_binary 指向非 mihomo 路径时，
-/// 保留 core_binary 原值。
+/// 显式类型与二进制名称不一致时，以真实二进制身份为准。
 #[test]
-fn load_normalizes_legacy_mihomo_keeps_non_mihomo_binary() {
+fn load_infers_core_type_from_binary_path() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("client.json"),
@@ -252,6 +251,7 @@ fn load_normalizes_legacy_mihomo_keeps_non_mihomo_binary() {
 
     let loaded = ClientConfig::load(dir.path()).unwrap();
     assert_eq!(loaded.core_binary, PathBuf::from("/usr/local/bin/sing-box"));
+    assert_eq!(loaded.core_type, CoreType::SingBox);
 }
 
 /// 旧版 `core_type: "singbox"` 配置正常加载，字段被忽略、core_binary 不受影响。

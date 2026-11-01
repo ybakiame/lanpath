@@ -71,12 +71,13 @@ pub(crate) fn panel_features_tun_auto_route(is_android: bool, tun_auto_route: bo
     if is_android { true } else { tun_auto_route }
 }
 
-/// Calculate number of rules in composed config (sing-box `route.rules` array length,
-/// missing array treated as 0).
+/// Calculate number of rules in composed config (`route.rules` for sing-box,
+/// top-level `rules` for Mihomo; missing array treated as 0).
 pub(crate) fn config_json_rule_count(config_json: &serde_json::Value) -> u64 {
     config_json
         .get("route")
         .and_then(|r| r.get("rules"))
+        .or_else(|| config_json.get("rules"))
         .and_then(|rules| rules.as_array())
         .map_or(0, |rules| rules.len() as u64)
 }

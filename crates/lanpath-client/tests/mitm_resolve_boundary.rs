@@ -183,7 +183,8 @@ async fn real_singbox_mitm_mock_skips_only_selected_main_in_resolution() {
         }],
         ..Default::default()
     };
-    let runner = CoreRunner::create(&binary, dir.path()).unwrap();
+    let runner =
+        CoreRunner::create(lanpath_common::CoreType::SingBox, &binary, dir.path()).unwrap();
     drop((main_reservation, return_reservation, api_reservation));
     // Always stop the owned fixture core before propagating an assertion panic.
     let outcome = std::panic::AssertUnwindSafe(async {

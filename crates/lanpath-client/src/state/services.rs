@@ -22,7 +22,11 @@ impl ClientState {
         tracing::info!("Starting core (Android built-in libbox)");
         #[cfg(not(target_os = "android"))]
         tracing::info!(binary = %self.config.core_binary.display(), "Starting core");
-        let core = CoreRunner::create(&self.config.core_binary, &self.config.data_dir)?;
+        let core = CoreRunner::create(
+            self.config.core_type,
+            &self.config.core_binary,
+            &self.config.data_dir,
+        )?;
 
         // ADR-0012 D2+D4（桌面）：先收割上次实例遗留的核心进程（孤儿占用端口
         // 场景自愈），再探测端口占用；被外部进程占用时报错并指明占用者。
@@ -89,6 +93,17 @@ impl ClientState {
                     .find(|inbound| inbound["tag"] == "mitm-return")
             })
             .and_then(|inbound| inbound["listen_port"].as_u64())
+            .or_else(|| {
+                config_json
+                    .get("listeners")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|listeners| {
+                        listeners
+                            .iter()
+                            .find(|listener| listener["name"] == "mitm-return")
+                    })
+                    .and_then(|listener| listener["port"].as_u64())
+            })
             .and_then(|port| u16::try_from(port).ok())
             .unwrap_or(self.config.mixed_port);
         let endpoint = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);

@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lanpath_common::{LanpathError, LanpathResult};
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use toml_edit::{DocumentMut, Item};
 
@@ -21,7 +21,7 @@ pub const LEGACY_APPEARANCE_FILE: &str = "appearance.json";
 #[serde(default)]
 pub struct CoreSettings {
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: CoreType,
     pub channel: String,
     pub current: Option<CoreVersionSettings>,
     pub previous: Option<CoreVersionSettings>,
@@ -30,7 +30,7 @@ pub struct CoreSettings {
 impl Default for CoreSettings {
     fn default() -> Self {
         Self {
-            kind: "sing-box".into(),
+            kind: CoreType::SingBox,
             channel: "stable".into(),
             current: None,
             previous: None,
@@ -53,10 +53,7 @@ impl CoreVersionSettings {
             .and_then(|name| name.to_str())
             .unwrap_or_default()
             .to_string();
-        Self {
-            version,
-            path: path.to_path_buf(),
-        }
+        Self { version, path }
     }
 }
 
@@ -79,18 +76,14 @@ fn persist_core_current(root: &Path, path: Option<&Path>) -> LanpathResult<()> {
         return Ok(());
     };
     let current = CoreVersionSettings::from_path(root, path);
-    if settings
+    let same_as_current = settings
         .current
         .as_ref()
-        .is_none_or(|old| old.path != current.path)
-    {
+        .is_some_and(|old| old.path.strip_prefix(root).unwrap_or(&old.path) == current.path);
+    if !same_as_current {
         settings.previous = settings.current.take();
     }
-    settings.kind = path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .unwrap_or("sing-box")
-        .to_string();
+    settings.kind = crate::cores::infer_core_type(path).unwrap_or(settings.kind);
     settings.channel = crate::cores::channel_of_version(&current.version)
         .as_str()
         .to_string();
@@ -107,16 +100,17 @@ fn persist_core_current(root: &Path, path: Option<&Path>) -> LanpathResult<()> {
 }
 
 pub fn has_flat_core_binary(root: &Path) -> LanpathResult<bool> {
-    let path = app_settings_path(root);
-    if !path.is_file() {
-        return Ok(false);
-    }
-    Ok(load_client(&path)?.get("core_binary").is_some())
+    Ok(load_app_section::<serde_json::Value>(root, "client")?
+        .as_ref()
+        .and_then(|client| client.get("core_binary"))
+        .is_some())
 }
 
 pub fn migrate_core_settings(root: &Path) -> LanpathResult<()> {
     let path = app_settings_path(root);
-    let mut raw = load_client(&path)?;
+    let Some(mut raw) = load_app_section::<serde_json::Value>(root, "client")? else {
+        return Ok(());
+    };
     let Some(binary) = raw
         .get("core_binary")
         .and_then(|value| value.as_str())
@@ -171,12 +165,9 @@ pub fn ensure_app_settings(root: &Path) -> LanpathResult<()> {
                         .map(PathBuf::from)
                 {
                     let current = CoreVersionSettings::from_path(root, &binary);
+                    let kind = crate::cores::infer_core_type(&binary).unwrap_or_default();
                     let core = CoreSettings {
-                        kind: binary
-                            .file_stem()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or("sing-box")
-                            .to_string(),
+                        kind,
                         channel: crate::cores::channel_of_version(&current.version)
                             .as_str()
                             .to_string(),
@@ -186,7 +177,13 @@ pub fn ensure_app_settings(root: &Path) -> LanpathResult<()> {
                     document["core"] = serialize_item(&core)?;
                     if let Some(object) = value.as_object_mut() {
                         object.remove("core_binary");
+                        object.remove("core_type");
                     }
+                }
+                if section == "client"
+                    && let Some(object) = value.as_object_mut()
+                {
+                    object.remove("core_type");
                 }
                 document[section] = serialize_item(&value)?;
             }
@@ -212,9 +209,12 @@ pub fn client_from_text(path: &Path, text: &str) -> LanpathResult<serde_json::Va
             .unwrap_or_else(|| toml::Value::Table(Default::default()));
         let mut value = serde_json::to_value(client)?;
         if let Some(root) = path.parent()
-            && let Some(current) = load_core_settings(root)?.and_then(|core| core.current)
+            && let Some(core) = load_core_settings(root)?
         {
-            value["core_binary"] = serde_json::to_value(current.path)?;
+            value["core_type"] = serde_json::to_value(core.kind)?;
+            if let Some(current) = core.current {
+                value["core_binary"] = serde_json::to_value(current.path)?;
+            }
         }
         Ok(value)
     } else {
@@ -234,6 +234,7 @@ pub fn persist_client(path: &Path, value: &serde_json::Value) -> LanpathResult<(
         let mut value = value.clone();
         if let Some(object) = value.as_object_mut() {
             object.remove("core_binary");
+            object.remove("core_type");
         }
         let merged = merge_app_section_text(&text, "client", &value)?;
         atomic_write(path, &merged)
@@ -385,6 +386,17 @@ mod tests {
     }
 
     #[test]
+    fn resaving_same_core_does_not_create_a_previous_version() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("cores/sing-box/1.2.3/sing-box");
+        persist_core_current(root.path(), Some(&path)).unwrap();
+        persist_core_current(root.path(), Some(&path)).unwrap();
+        let core = load_core_settings(root.path()).unwrap().unwrap();
+        assert_eq!(core.current.as_ref().unwrap().version, "1.2.3");
+        assert!(core.previous.is_none());
+    }
+
+    #[test]
     fn nested_core_selection_tracks_current_and_previous_versions() {
         let root = tempfile::tempdir().unwrap();
         let first = root.path().join("cores/sing-box/1.2.3/sing-box");
@@ -418,7 +430,7 @@ mod tests {
         );
         let core = load_core_settings(root.path()).unwrap().unwrap();
         assert_eq!(core.previous.as_ref().unwrap().version, "1.2.3");
-        assert_eq!(core.kind, "sing-box");
+        assert_eq!(core.kind, CoreType::SingBox);
         assert_eq!(core.channel, "stable");
     }
 }

@@ -2,31 +2,57 @@
 
 use std::path::{Component, Path};
 
-use lanpath_common::{LanpathError, LanpathResult};
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
 
 pub(crate) fn invalid(message: impl Into<String>) -> LanpathError {
     LanpathError::Core(message.into())
 }
 
-pub(crate) fn normalized_version(value: &str) -> LanpathResult<&str> {
+pub(crate) fn normalized_version_for(core_type: CoreType, value: &str) -> LanpathResult<&str> {
     let value = value.strip_prefix('v').unwrap_or(value);
-    let (base, prerelease) = value
-        .split_once('-')
-        .map_or((value, None), |(a, b)| (a, Some(b)));
-    let mut numbers = base.split('.');
-    let valid_numbers = (0..3).all(|_| {
-        numbers
-            .next()
-            .is_some_and(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-    }) && numbers.next().is_none();
-    let valid_prerelease = prerelease.is_none_or(|suffix| {
-        !suffix.is_empty()
-            && suffix.split('.').all(|part| {
-                !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-            })
-    });
-    if value.len() > 128 || !valid_numbers || !valid_prerelease {
-        return Err(invalid(format!("Invalid core version: {value}")));
+    let valid = match core_type {
+        CoreType::SingBox => {
+            let (base, prerelease) = value
+                .split_once('-')
+                .map_or((value, None), |(a, b)| (a, Some(b)));
+            let mut numbers = base.split('.');
+            let valid_numbers = (0..3).all(|_| {
+                numbers.next().is_some_and(|part| {
+                    !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                })
+            }) && numbers.next().is_none();
+            let valid_prerelease = prerelease.is_none_or(|suffix| {
+                !suffix.is_empty()
+                    && suffix.split('.').all(|part| {
+                        !part.is_empty()
+                            && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    })
+            });
+            valid_numbers && valid_prerelease
+        }
+        CoreType::Mihomo => {
+            let stable = {
+                let mut numbers = value.split('.');
+                (0..3).all(|_| {
+                    numbers.next().is_some_and(|part| {
+                        !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                    })
+                }) && numbers.next().is_none()
+            };
+            let alpha = value.strip_prefix("alpha-").is_some_and(|hash| {
+                hash.len() >= 7 && hash.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            });
+            stable || alpha
+        }
+    };
+    if value.len() > 128
+        || !valid
+        || value.starts_with('.')
+        || value.contains(['/', '\\', '\0', '?'])
+    {
+        return Err(invalid(format!(
+            "Invalid {core_type} core version: {value}"
+        )));
     }
     Ok(value)
 }

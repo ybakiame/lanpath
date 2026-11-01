@@ -1,3 +1,5 @@
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use super::protocol::{MAX_CONFIG, MAX_RESOURCES, Resource, failure};
 use crate::configuration::resources::TLS_INPUT_PATHS;
 use lanpath_common::LanpathResult;

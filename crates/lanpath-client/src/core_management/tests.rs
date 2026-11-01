@@ -34,7 +34,10 @@ fn save(root: &Path, selected: PathBuf) {
 fn retention_keeps_current_and_one_previous_version_per_channel() {
     let root = tempfile::tempdir().unwrap();
     let core = |version: &str| ManagedCore {
+        core_type: CoreType::SingBox,
         version: version.into(),
+        environment: None,
+        tags: Vec::new(),
         path: binary(root.path(), version),
         active: false,
     };
@@ -78,7 +81,10 @@ async fn invalid_versions_never_create_download_paths() {
 fn confinement_requires_exact_inventory_binary_and_rejects_traversal() {
     let root = tempfile::tempdir().unwrap();
     let path = seed(root.path(), "1.2.3", "1.2.3");
-    assert!(CoreManagementService::validate_managed_binary(root.path(), &path).is_ok());
+    assert!(
+        CoreManagementService::validate_managed_binary(root.path(), CoreType::SingBox, &path)
+            .is_ok()
+    );
     for invalid in [
         root.path().join("sing-box"),
         root.path()
@@ -92,7 +98,14 @@ fn confinement_requires_exact_inventory_binary_and_rejects_traversal() {
             .join(version::binary_name_on_disk()),
         path.parent().unwrap().join("other-binary"),
     ] {
-        assert!(CoreManagementService::validate_managed_binary(root.path(), &invalid).is_err());
+        assert!(
+            CoreManagementService::validate_managed_binary(
+                root.path(),
+                CoreType::SingBox,
+                &invalid
+            )
+            .is_err()
+        );
     }
 }
 
@@ -223,7 +236,10 @@ fn windows_hardlinked_binary_is_not_managed_inventory() {
     let target = binary(root.path(), "1.2.3");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::hard_link(&source, &target).unwrap();
-    assert!(CoreManagementService::validate_managed_binary(root.path(), &target).is_err());
+    assert!(
+        CoreManagementService::validate_managed_binary(root.path(), CoreType::SingBox, &target)
+            .is_err()
+    );
     assert!(
         CoreManagementService::experimental(root.path().to_path_buf())
             .delete(&target)
@@ -448,6 +464,102 @@ mod release {
         assert!(!binary(root.path(), "1.2.3").exists());
         assert!(!root.path().join("client.json").exists());
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn active_core_survives_type_switch_and_exposes_build_tags() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("cores/mihomo/1.19.29/mihomo");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "#!/bin/sh\n\
+         echo 'Mihomo Meta v1.19.29 linux amd64 with go1.25'\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    save(root.path(), path.clone());
+
+    let service = CoreManagementService::experimental(root.path().to_path_buf());
+    let active = service.active_core().unwrap();
+    assert_eq!(active.core_type(), CoreType::Mihomo);
+    assert_eq!(active.version(), "1.19.29");
+    assert_eq!(active.path(), path);
+
+    assert!(service.for_core(CoreType::Mihomo).list_local().unwrap()[0].is_active());
+    assert!(
+        service
+            .for_core(CoreType::SingBox)
+            .list_local()
+            .unwrap()
+            .is_empty()
+    );
+
+    service.for_core(CoreType::Mihomo).select(&path).unwrap();
+    let nested =
+        crate::settings::load_app_section::<crate::settings::CoreSettings>(root.path(), "core")
+            .unwrap()
+            .unwrap();
+    assert_eq!(nested.kind, CoreType::Mihomo);
+    assert_eq!(
+        nested.current.as_ref().unwrap().path,
+        Path::new("cores/mihomo/1.19.29/mihomo")
+    );
+    assert_eq!(
+        ClientConfig::load(root.path()).unwrap().core_type,
+        CoreType::Mihomo
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn active_core_details_include_singbox_environment_and_tags() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("cores/sing-box/1.15.0/sing-box");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "#!/bin/sh\n\
+         echo 'sing-box version 1.15.0'\n\
+         echo 'Environment: go1.25.1 linux/amd64'\n\
+         echo 'Tags: with_quic,with_dhcp,with_gvisor'\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    save(root.path(), path);
+
+    let active = CoreManagementService::experimental(root.path().to_path_buf())
+        .active_core()
+        .unwrap();
+    assert_eq!(active.environment(), Some("go1.25.1 linux/amd64"));
+    assert_eq!(active.tags(), ["with_quic", "with_dhcp", "with_gvisor"]);
+}
+#[tokio::test]
+#[ignore = "downloads the real Mihomo release from GitHub"]
+async fn downloads_and_verifies_real_mihomo_alpha() {
+    let root = tempfile::tempdir().unwrap();
+    let service =
+        CoreManagementService::experimental(root.path().to_path_buf()).for_core(CoreType::Mihomo);
+    let remote = service.list_remote_channels().await.unwrap();
+    let alpha = remote
+        .iter()
+        .find(|channel| channel.channel() == "prerelease")
+        .expect("Mihomo Alpha channel must be available");
+    let core = service.download(alpha.version()).await.unwrap();
+    assert_eq!(core.core_type(), CoreType::Mihomo);
+    assert_eq!(core.version(), alpha.version());
+    assert!(core.path().is_file());
+    assert_eq!(
+        service
+            .for_core(CoreType::Mihomo)
+            .active_core()
+            .unwrap()
+            .path(),
+        core.path()
+    );
 }
 
 #[cfg(windows)]

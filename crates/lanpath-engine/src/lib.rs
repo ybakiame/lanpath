@@ -1,4 +1,4 @@
-//! sing-box process lifecycle management for Lanpath.
+//! Proxy core process lifecycle management for Lanpath.
 mod lifecycle;
 pub mod manager;
 pub use manager::*;

@@ -18,21 +18,34 @@ pub struct CoreRunner {
 }
 
 impl CoreRunner {
-    /// 基于二进制路径 / 配置目录创建运行器（客户端仅支持 sing-box 核心）。
+    /// 基于核心类型、二进制路径和配置目录创建运行器。
     ///
     /// Android 下无法 spawn 核心二进制（核心由 Kotlin 侧 libbox 驱动），
-    /// 忽略 `binary_path` / `config_dir`，改为委托给已安装的核心引擎桥
-    /// （见 [`crate::core_engine`]；未安装时报明确错误）。
-    pub fn create(binary_path: &Path, config_dir: &Path) -> LanpathResult<Self> {
+    /// 因此仅接受 SingBox 并委托给已安装的核心引擎桥；Mihomo 返回明确的不支持错误。
+    pub fn create(
+        core_type: CoreType,
+        binary_path: &Path,
+        config_dir: &Path,
+    ) -> LanpathResult<Self> {
         #[cfg(target_os = "android")]
         {
             let _ = (binary_path, config_dir);
-            return Self::create_from_bridge();
+            return Self::create_for_android(core_type);
         }
         #[cfg(not(target_os = "android"))]
         {
-            let inner = CoreManagerFactory::create(CoreType::SingBox, binary_path, config_dir)?;
+            let inner = CoreManagerFactory::create(core_type, binary_path, config_dir)?;
             Ok(Self { inner })
+        }
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    fn create_for_android(core_type: CoreType) -> LanpathResult<Self> {
+        match core_type {
+            CoreType::SingBox => Self::create_from_bridge(),
+            CoreType::Mihomo => Err(lanpath_common::LanpathError::Client(
+                "Android 暂不支持 Mihomo 核心".into(),
+            )),
         }
     }
 
@@ -51,7 +64,7 @@ impl CoreRunner {
         Ok(Self { inner })
     }
 
-    /// 启动核心（`config_json` 为 sing-box 配置）。
+    /// 启动核心（`config_json` 为所选核心的配置）。
     pub async fn start(&self, config_json: &Value) -> LanpathResult<()> {
         self.inner.start(config_json).await
     }
@@ -114,6 +127,30 @@ mod tests {
         fn is_running<'a>(&'a self) -> BoxFuture<'a, bool> {
             Box::pin(async move { *self.running.lock().unwrap() })
         }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn desktop_create_uses_selected_core_type() {
+        let runner = CoreRunner::create(
+            CoreType::Mihomo,
+            Path::new("mihomo"),
+            Path::new("mihomo-data"),
+        )
+        .unwrap();
+        assert_eq!(runner.inner.core_type(), CoreType::Mihomo);
+    }
+
+    #[test]
+    fn android_rejects_mihomo_without_touching_bridge() {
+        let err = match CoreRunner::create_for_android(CoreType::Mihomo) {
+            Ok(_) => panic!("Android 创建 Mihomo 应明确报错"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("Android 暂不支持 Mihomo 核心"),
+            "意外错误信息：{err}"
+        );
     }
 
     /// 全局注册表是 `OnceLock`，进程内只能安装一次；Rust 测试并行跑在同一进程，

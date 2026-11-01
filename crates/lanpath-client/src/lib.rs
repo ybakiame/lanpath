@@ -4,7 +4,8 @@
 //! （[`node_convert`]）、通用订阅管理（[`subscription`]）、三方配置片段导入
 //! （[`import`]）、Profile 模板与复写（[`profile`]）、核心配置合成（[`core_config`]）、
 //! 系统代理（[`sysproxy`]）、核心运行器（[`runner`]）、核心引擎桥（[`core_engine`]）、
-//! MITM 构建（[`mitm`]）与运行状态编排（[`state`]）。仅支持 sing-box 核心。
+//! MITM 构建（[`mitm`]）与运行状态编排（[`state`]）。桌面支持 sing-box/Mihomo，
+//! Android 桥保持 sing-box。
 
 pub mod backup;
 pub mod config;

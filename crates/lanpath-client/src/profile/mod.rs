@@ -312,6 +312,62 @@ pub fn singbox_template(nodes: &[Value]) -> Value {
     cfg
 }
 
+/// Mihomo local template: DNS + all proxies + `proxy` (select) / `auto` (url-test)
+/// groups + `MATCH,proxy`.
+pub fn mihomo_template(nodes: &[Value]) -> Value {
+    let names: Vec<String> = nodes
+        .iter()
+        .filter_map(|node| node["name"].as_str().map(String::from))
+        .collect();
+    let mut auto_proxies: Vec<Value> = names.iter().cloned().map(Value::String).collect();
+    if auto_proxies.is_empty() {
+        auto_proxies.push(Value::String("DIRECT".to_string()));
+    }
+    let mut proxy_proxies = vec![Value::String("auto".to_string())];
+    proxy_proxies.extend(names.iter().cloned().map(Value::String));
+    let mut config = json!({
+        "log-level": "info",
+        "mode": "rule",
+        "allow-lan": false,
+        "bind-address": "127.0.0.1",
+        "dns": {
+            "enable": true,
+            "nameserver": ["223.5.5.5"],
+            "fallback": ["https://dns.google/dns-query"]
+        },
+        "proxy-groups": [
+            { "name": "proxy", "type": "select", "proxies": proxy_proxies },
+            {
+                "name": "auto",
+                "type": "url-test",
+                "proxies": auto_proxies,
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": 300
+            }
+        ],
+        "rules": ["MATCH,proxy"]
+    });
+    config["proxies"] = Value::Array(nodes.to_vec());
+    config
+}
+
+/// Build a Mihomo startup config from already-normalized Mihomo proxies and apply
+/// the same remote/local YAML and JS override stages as sing-box.
+pub async fn build_mihomo_config_v2(
+    nodes: &[Value],
+    effective: &EffectiveOverrides,
+) -> LanpathResult<Value> {
+    let config = mihomo_template(nodes);
+    let merged = apply_yaml_override(config, &effective.remote_yaml)?;
+    let merged = apply_yaml_override(merged, &effective.local_yaml)?;
+    let js = compose_js_chain(&effective.remote_js, &effective.local_js);
+    if js.is_empty() {
+        Ok(merged)
+    } else {
+        apply_js_override(merged, &js).await
+    }
+}
+
 /// Assembly (v2, supports remote override overlay): extract nodes → local template →
 /// ⓪ config slices → remote YAML → local YAML → remote JS → local JS → return
 /// sing-box-usable config.

@@ -1,7 +1,8 @@
 # 岚径 · Lanpath
 
 跨平台代理客户端：订阅、代理策略、DNS/规则、流量与日志诊断；桌面额外提供 MITM 和脚本。
-现行发行桌面及 Android 共用 Tauri 2 + React UI，当前仅使用 sing-box 运行核心。
+现行发行桌面及 Android 共用 Tauri 2 + React UI；Tauri/Android 前端保持 sing-box。
+GPUI 实验版按 ADR-0017 支持 sing-box 与 Mihomo 核心切换。
 
 公开仓库：[ybakiame/lanpath](https://github.com/ybakiame/lanpath) ·
 首次测试版：[v0.1.1-beta.1](https://github.com/ybakiame/lanpath/releases/tag/v0.1.1-beta.1)。

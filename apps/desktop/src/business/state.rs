@@ -87,8 +87,16 @@ fn normalize(config: &mut ClientConfig, service: &BusinessService) -> bool {
         changed = true;
     }
     if !config.core_binary.as_os_str().is_empty()
+        && let Some(core_type) = lanpath_client::cores::infer_core_type(&config.core_binary)
+        && config.core_type != core_type
+    {
+        config.core_type = core_type;
+        changed = true;
+    }
+    if !config.core_binary.as_os_str().is_empty()
         && lanpath_client::core_management::CoreManagementService::validate_managed_binary(
             &service.root,
+            config.core_type,
             &config.core_binary,
         )
         .is_err()
