@@ -1,7 +1,7 @@
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     input::{Input, InputState},
     scroll::ScrollableElement as _,
 };
@@ -44,6 +44,41 @@ impl Render for RulesView {
                     .gap_2()
                     .child("规则与规则集")
                     .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("路由、资源与市场"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        ButtonGroup::new("rules-sections")
+                            .small()
+                            .compact()
+                            .outline()
+                            .children([
+                                Button::new("rules-section-rules")
+                                    .label("路由规则")
+                                    .selected(self.section == Section::Rules),
+                                Button::new("rules-section-sets")
+                                    .label("规则集")
+                                    .selected(self.section == Section::RuleSets),
+                                Button::new("rules-section-market")
+                                    .label("市场")
+                                    .selected(self.section == Section::Market),
+                            ])
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                let section = match indexes.first() {
+                                    Some(0) => Some(Section::Rules),
+                                    Some(1) => Some(Section::RuleSets),
+                                    Some(2) => Some(Section::Market),
+                                    _ => None,
+                                };
+                                if let Some(section) = section {
+                                    this.set_section(section, cx);
+                                }
+                            })),
+                    )
+                    .child(
                         Button::new("rules-save")
                             .label(match self.operation {
                                 Some(Operation::Save) => "保存中…",
@@ -82,37 +117,6 @@ impl Render for RulesView {
                         cx.theme().muted_foreground
                     })
                     .child(status),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child(
-                        Button::new("rules-section-rules")
-                            .label("路由规则")
-                            .selected(self.section == Section::Rules)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.set_section(Section::Rules, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("rules-section-sets")
-                            .label("规则集")
-                            .selected(self.section == Section::RuleSets)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_section(Section::RuleSets, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("rules-section-market")
-                            .label("市场")
-                            .selected(self.section == Section::Market)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.set_section(Section::Market, cx)),
-                            ),
-                    ),
             )
             .child(
                 div()

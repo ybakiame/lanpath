@@ -1,4 +1,7 @@
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Selectable as _, button::Button};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup},
+};
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::local_override::CustomRuleSetSource;
 
@@ -35,27 +38,58 @@ impl RulesView {
                     .flex()
                     .flex_wrap()
                     .gap_2()
-                    .children([
-                        (MarketGroup::All, "全部"),
-                        (MarketGroup::GeoIp, "GeoIP"),
-                        (MarketGroup::GeoSite, "GeoSite"),
-                    ].into_iter().map(|(group, label)| {
-                        Button::new(format!("market-group-{label}"))
-                            .label(label)
-                            .selected(self.market_group == group)
+                    .child(
+                        ButtonGroup::new("market-group")
+                            .small()
+                            .compact()
+                            .outline()
                             .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| this.set_market_group(group, cx)))
-                    }))
-                    .children([
-                        (DownloadSource::GitHub, "GitHub Raw"),
-                        (DownloadSource::JsDelivr, "jsDelivr CDN"),
-                    ].into_iter().map(|(source, label)| {
-                        Button::new(format!("market-source-{label}"))
-                            .label(label)
-                            .selected(self.download_source == source)
+                            .children([
+                                (MarketGroup::All, "全部"),
+                                (MarketGroup::GeoIp, "GeoIP"),
+                                (MarketGroup::GeoSite, "GeoSite"),
+                            ]
+                            .into_iter()
+                            .map(|(group, label)| {
+                                Button::new(format!("market-group-{label}"))
+                                    .label(label)
+                                    .selected(self.market_group == group)
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                let group = match indexes.first() {
+                                    Some(0) => MarketGroup::All,
+                                    Some(1) => MarketGroup::GeoIp,
+                                    Some(2) => MarketGroup::GeoSite,
+                                    _ => return,
+                                };
+                                this.set_market_group(group, cx);
+                            })),
+                    )
+                    .child(
+                        ButtonGroup::new("market-source")
+                            .small()
+                            .compact()
+                            .outline()
                             .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| this.set_download_source(source, cx)))
-                    })),
+                            .children([
+                                (DownloadSource::GitHub, "GitHub Raw"),
+                                (DownloadSource::JsDelivr, "jsDelivr CDN"),
+                            ]
+                            .into_iter()
+                            .map(|(source, label)| {
+                                Button::new(format!("market-source-{label}"))
+                                    .label(label)
+                                    .selected(self.download_source == source)
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                let source = if indexes.first() == Some(&1) {
+                                    DownloadSource::JsDelivr
+                                } else {
+                                    DownloadSource::GitHub
+                                };
+                                this.set_download_source(source, cx);
+                            })),
+                    ),
             )
             .children(query.trim().is_empty().then(|| {
                 div()

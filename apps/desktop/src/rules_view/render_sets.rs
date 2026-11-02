@@ -1,8 +1,9 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     input::Editor,
     scroll::ScrollableElement as _,
+    switch::Switch,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::local_override::{CustomRuleSetSource, RuleMatchType, parse_rule_set_tags};
@@ -43,9 +44,9 @@ impl RulesView {
                         Button::new("ruleset-add")
                             .label("新建规则集…")
                             .disabled(disabled)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.add_rule_set(window, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_new_rule_set(window, cx)
+                            })),
                     )
                     .child(
                         Button::new("ruleset-update-all")
@@ -128,13 +129,9 @@ impl RulesView {
                                     })),
                             )
                             .child(
-                                Button::new(format!("ruleset-category-select-{}", set.id))
-                                    .label(if self.category_selection.contains(&set.id) {
-                                        "已选"
-                                    } else {
-                                        "选择"
-                                    })
-                                    .selected(self.category_selection.contains(&set.id))
+                                Switch::new(format!("ruleset-category-select-{}", set.id))
+                                    .label("批量分类")
+                                    .checked(self.category_selection.contains(&set.id))
                                     .disabled(disabled)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.toggle_category_selection(&category_id, cx)
@@ -181,22 +178,28 @@ impl RulesView {
                             .flex_wrap()
                             .gap_2()
                             .child(
-                                Button::new("ruleset-source-remote")
-                                    .label("远程 URL")
-                                    .selected(remote)
+                                ButtonGroup::new("ruleset-source")
+                                    .small()
+                                    .compact()
+                                    .outline()
                                     .disabled(disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_source_kind(true, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("ruleset-source-manual")
-                                    .label("手动 JSON")
-                                    .selected(!remote)
-                                    .disabled(disabled)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_source_kind(false, window, cx)
-                                    })),
+                                    .children([
+                                        Button::new("ruleset-source-remote")
+                                            .label("远程 URL")
+                                            .selected(remote),
+                                        Button::new("ruleset-source-manual")
+                                            .label("手动 JSON")
+                                            .selected(!remote),
+                                    ])
+                                    .on_click(cx.listener(
+                                        |this, indexes: &Vec<usize>, window, cx| {
+                                            this.set_source_kind(
+                                                indexes.first() != Some(&1),
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
                             )
                             .children(remote.then(|| {
                                 Button::new("ruleset-update-one")

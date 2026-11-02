@@ -1,6 +1,7 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     input::Input,
     scroll::ScrollableElement as _,
     switch::Switch,
@@ -53,7 +54,9 @@ impl RulesView {
                         Button::new("rule-add")
                             .label("新建规则…")
                             .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| this.add_rule(window, cx))),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_new_rule(window, cx)),
+                            ),
                     )
                     .child(
                         Button::new("rule-delete")
@@ -107,13 +110,9 @@ impl RulesView {
                                     })),
                             )
                             .child(
-                                Button::new(format!("rule-toggle-{}", rule.id))
-                                    .label(if rule.enabled {
-                                        "已启用"
-                                    } else {
-                                        "已停用"
-                                    })
-                                    .selected(rule.enabled)
+                                Switch::new(format!("rule-toggle-{}", rule.id))
+                                    .label("启用")
+                                    .checked(rule.enabled)
                                     .disabled(disabled)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.toggle_rule(&toggle_id, cx)
@@ -121,7 +120,9 @@ impl RulesView {
                             )
                             .child(
                                 Button::new(format!("rule-up-{}", rule.id))
-                                    .label("上移")
+                                    .icon(IconName::ArrowUp)
+                                    .accessibility_label("上移规则")
+                                    .tooltip("上移")
                                     .disabled(disabled || index == 0)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.move_rule(&up_id, -1, cx)
@@ -129,7 +130,9 @@ impl RulesView {
                             )
                             .child(
                                 Button::new(format!("rule-down-{}", rule.id))
-                                    .label("下移")
+                                    .icon(IconName::ArrowDown)
+                                    .accessibility_label("下移规则")
+                                    .tooltip("下移")
                                     .disabled(disabled || index + 1 == rules.len())
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.move_rule(&down_id, 1, cx)
@@ -156,18 +159,26 @@ impl RulesView {
                         cx,
                     ))
                     .child(field("名称", &self.inputs.rule_name, disabled))
-                    .child(div().flex().flex_wrap().gap_2().children(
-                        match_types().into_iter().map(|(kind, label)| {
-                            let selected = rule.match_type == kind;
-                            Button::new(format!("rule-match-{label}"))
-                                .label(label)
-                                .selected(selected)
-                                .disabled(disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_rule_match(kind.clone(), cx)
-                                }))
-                        }),
-                    ))
+                    .child(
+                        ButtonGroup::new("rule-match-type")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(match_types().into_iter().map(|(kind, label)| {
+                                let selected = rule.match_type == kind;
+                                Button::new(format!("rule-match-{label}"))
+                                    .label(label)
+                                    .selected(selected)
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                if let Some((kind, _)) =
+                                    indexes.first().map(|index| match_types()[*index].clone())
+                                {
+                                    this.set_rule_match(kind, cx);
+                                }
+                            })),
+                    )
                     .children((!is_final).then(|| {
                         div()
                             .flex()
@@ -195,25 +206,36 @@ impl RulesView {
                             .child("最终规则不需要匹配目标；首个启用的最终规则写入 route.final。")
                     }))
                     .child(
-                        div().flex().flex_wrap().gap_2().children(
-                            [
-                                (RuleAction::Proxy, "代理"),
-                                (RuleAction::Direct, "直连"),
-                                (RuleAction::Reject, "拒绝"),
-                                (RuleAction::Outbound { tag: String::new() }, "指定出站"),
-                            ]
-                            .into_iter()
-                            .map(|(action, label)| {
-                                let selected = same_action_kind(&rule.action, &action);
-                                Button::new(format!("rule-action-{label}"))
-                                    .label(label)
-                                    .selected(selected)
-                                    .disabled(disabled)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.set_rule_action(action.clone(), cx)
-                                    }))
-                            }),
-                        ),
+                        ButtonGroup::new("rule-action")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(
+                                [
+                                    (RuleAction::Proxy, "代理"),
+                                    (RuleAction::Direct, "直连"),
+                                    (RuleAction::Reject, "拒绝"),
+                                    (RuleAction::Outbound { tag: String::new() }, "指定出站"),
+                                ]
+                                .into_iter()
+                                .map(|(action, label)| {
+                                    let selected = same_action_kind(&rule.action, &action);
+                                    Button::new(format!("rule-action-{label}"))
+                                        .label(label)
+                                        .selected(selected)
+                                }),
+                            )
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                let action = match indexes.first() {
+                                    Some(0) => RuleAction::Proxy,
+                                    Some(1) => RuleAction::Direct,
+                                    Some(2) => RuleAction::Reject,
+                                    Some(3) => RuleAction::Outbound { tag: String::new() },
+                                    _ => return,
+                                };
+                                this.set_rule_action(action, cx);
+                            })),
                     )
                     .children(
                         is_outbound
