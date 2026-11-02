@@ -1,7 +1,8 @@
 use gpui_kit::component::{
-    Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     scroll::ScrollableElement as _,
+    switch::Switch,
 };
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::config_slices::{
@@ -44,27 +45,32 @@ impl ConfigSlicesView {
                     .flex_wrap()
                     .gap_2()
                     .child(
-                        Button::new("dns-follow")
-                            .label("跟随系统")
-                            .selected(follow_system)
+                        ButtonGroup::new("dns-mode")
+                            .small()
+                            .compact()
+                            .outline()
                             .disabled(disabled)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_dns_mode(DnsMode::FollowSystem, cx)
+                            .children([
+                                Button::new("dns-follow")
+                                    .label("跟随系统")
+                                    .selected(follow_system),
+                                Button::new("dns-takeover")
+                                    .label("DNS 接管")
+                                    .selected(!follow_system),
+                            ])
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                let mode = if indexes.first() == Some(&1) {
+                                    DnsMode::Takeover
+                                } else {
+                                    DnsMode::FollowSystem
+                                };
+                                this.set_dns_mode(mode, cx);
                             })),
                     )
                     .child(
-                        Button::new("dns-takeover")
-                            .label("DNS 接管")
-                            .selected(!follow_system)
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.set_dns_mode(DnsMode::Takeover, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("dns-reverse")
+                        Switch::new("dns-reverse")
                             .label("反向映射")
-                            .selected(slices.dns.reverse_mapping)
+                            .checked(slices.dns.reverse_mapping)
                             .disabled(disabled)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.toggle_reverse_mapping(cx)),
@@ -72,19 +78,25 @@ impl ConfigSlicesView {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .children(dns_strategies().into_iter().map(|(strategy, label)| {
-                        Button::new(format!("dns-strategy-{}", strategy.as_str()))
-                            .label(label)
-                            .selected(slices.dns.strategy == strategy)
-                            .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_dns_strategy(strategy, cx)
-                            }))
-                    })),
+                div().flex().flex_wrap().gap_2().child(
+                    ButtonGroup::new("dns-strategy")
+                        .small()
+                        .compact()
+                        .outline()
+                        .disabled(disabled)
+                        .children(dns_strategies().into_iter().map(|(strategy, label)| {
+                            Button::new(format!("dns-strategy-{}", strategy.as_str()))
+                                .label(label)
+                                .selected(slices.dns.strategy == strategy)
+                        }))
+                        .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                            if let Some((strategy, _)) =
+                                indexes.first().map(|index| dns_strategies()[*index])
+                            {
+                                this.set_dns_strategy(strategy, cx);
+                            }
+                        })),
+                ),
             )
             .child(field(
                 "默认 DNS 服务器 tag",
@@ -149,9 +161,9 @@ impl ConfigSlicesView {
                             .flex_wrap()
                             .gap_2()
                             .child(
-                                Button::new("dns-server-enabled")
-                                    .label("启用")
-                                    .selected(server.enabled)
+                                Switch::new("dns-server-enabled")
+                                    .label("启用此服务器")
+                                    .checked(server.enabled)
                                     .disabled(disabled)
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.toggle_dns_server(cx)),
@@ -180,17 +192,25 @@ impl ConfigSlicesView {
                             .child(field("Tag", &self.inputs.dns_server_tag, disabled))
                             .child(field("显示名称", &self.inputs.dns_server_name, disabled)),
                     )
-                    .child(div().flex().flex_wrap().gap_2().children(
-                        dns_server_types().into_iter().map(|(kind, label)| {
-                            Button::new(format!("dns-server-type-{}", kind.as_str()))
-                                .label(label)
-                                .selected(server_kind == Some(kind))
-                                .disabled(disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_dns_server_type(kind, cx)
-                                }))
-                        }),
-                    ))
+                    .child(
+                        ButtonGroup::new("dns-server-type")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(dns_server_types().into_iter().map(|(kind, label)| {
+                                Button::new(format!("dns-server-type-{}", kind.as_str()))
+                                    .label(label)
+                                    .selected(server_kind == Some(kind))
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                if let Some((kind, _)) =
+                                    indexes.first().map(|index| dns_server_types()[*index])
+                                {
+                                    this.set_dns_server_type(kind, cx);
+                                }
+                            })),
+                    )
                     .child(
                         div()
                             .flex()
@@ -237,19 +257,26 @@ impl ConfigSlicesView {
                             )),
                     )
                     .child(
-                        div().flex().flex_wrap().gap_2().children(
-                            optional_dns_strategies()
-                                .into_iter()
-                                .map(|(strategy, label)| {
+                        ButtonGroup::new("dns-server-strategy")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(optional_dns_strategies().into_iter().map(
+                                |(strategy, label)| {
                                     Button::new(format!("dns-server-strategy-{label}"))
                                         .label(label)
                                         .selected(server.strategy == strategy)
-                                        .disabled(disabled)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.set_dns_server_strategy(strategy, cx)
-                                        }))
-                                }),
-                        ),
+                                },
+                            ))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                if let Some((strategy, _)) = indexes
+                                    .first()
+                                    .map(|index| optional_dns_strategies()[*index])
+                                {
+                                    this.set_dns_server_strategy(strategy, cx);
+                                }
+                            })),
                     )
             }))
             .child(section_title(
@@ -302,35 +329,51 @@ impl ConfigSlicesView {
                     .flex_col()
                     .gap_2()
                     .child(
-                        Button::new("dns-rule-enabled")
-                            .label("启用规则")
-                            .selected(rule.enabled)
+                        Switch::new("dns-rule-enabled")
+                            .label("启用此规则")
+                            .checked(rule.enabled)
                             .disabled(disabled)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_dns_rule(cx))),
                     )
-                    .child(div().flex().flex_wrap().gap_2().children(
-                        dns_match_types().into_iter().map(|(kind, label)| {
-                            Button::new(format!("dns-match-{}", kind.field()))
-                                .label(label)
-                                .selected(rule_match == Some(kind))
-                                .disabled(disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_dns_rule_match(kind, cx)
-                                }))
-                        }),
-                    ))
+                    .child(
+                        ButtonGroup::new("dns-match-type")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(dns_match_types().into_iter().map(|(kind, label)| {
+                                Button::new(format!("dns-match-{}", kind.field()))
+                                    .label(label)
+                                    .selected(rule_match == Some(kind))
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                if let Some((kind, _)) =
+                                    indexes.first().map(|index| dns_match_types()[*index])
+                                {
+                                    this.set_dns_rule_match(kind, cx);
+                                }
+                            })),
+                    )
                     .child(field("匹配目标", &self.inputs.dns_rule_target, disabled))
-                    .child(div().flex().flex_wrap().gap_2().children(
-                        dns_actions().into_iter().map(|(action, label)| {
-                            Button::new(format!("dns-action-{label}"))
-                                .label(label)
-                                .selected(rule_action == Some(action))
-                                .disabled(disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_dns_rule_action(action, cx)
-                                }))
-                        }),
-                    ))
+                    .child(
+                        ButtonGroup::new("dns-rule-action")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(disabled)
+                            .children(dns_actions().into_iter().map(|(action, label)| {
+                                Button::new(format!("dns-action-{label}"))
+                                    .label(label)
+                                    .selected(rule_action == Some(action))
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                                if let Some((action, _)) =
+                                    indexes.first().map(|index| dns_actions()[*index])
+                                {
+                                    this.set_dns_rule_action(action, cx);
+                                }
+                            })),
+                    )
                     .child(
                         div()
                             .flex()

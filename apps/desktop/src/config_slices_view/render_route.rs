@@ -1,4 +1,8 @@
-use gpui_kit::component::{Disableable as _, Selectable as _, button::Button};
+use gpui_kit::component::{
+    Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup},
+    switch::Switch,
+};
 use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
 use lanpath_client::config_slices::DnsStrategy;
 
@@ -39,18 +43,25 @@ impl ConfigSlicesView {
                     )),
             )
             .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .children(route_strategies().into_iter().map(|(strategy, label)| {
-                        Button::new(format!("route-strategy-{label}"))
-                            .label(label)
-                            .selected(slices.route.resolver.strategy == strategy)
-                            .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_route_strategy(strategy, cx)
-                            }))
-                    })),
+                div().flex().gap_2().child(
+                    ButtonGroup::new("route-strategy")
+                        .small()
+                        .compact()
+                        .outline()
+                        .disabled(disabled)
+                        .children(route_strategies().into_iter().map(|(strategy, label)| {
+                            Button::new(format!("route-strategy-{label}"))
+                                .label(label)
+                                .selected(slices.route.resolver.strategy == strategy)
+                        }))
+                        .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
+                            if let Some((strategy, _)) =
+                                indexes.first().map(|index| route_strategies()[*index])
+                            {
+                                this.set_route_strategy(strategy, cx);
+                            }
+                        })),
+                ),
             )
             .child(section_title(
                 "缓存文件",
@@ -62,16 +73,16 @@ impl ConfigSlicesView {
                     .flex()
                     .gap_2()
                     .child(
-                        Button::new("cache-enabled")
+                        Switch::new("cache-enabled")
                             .label("启用缓存")
-                            .selected(cache.enabled)
+                            .checked(cache.enabled)
                             .disabled(disabled)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_cache_enabled(cx))),
                     )
                     .child(
-                        Button::new("cache-fakeip")
+                        Switch::new("cache-fakeip")
                             .label("持久化 FakeIP")
-                            .selected(cache.store_fakeip)
+                            .checked(cache.store_fakeip)
                             .disabled(disabled || !cache.enabled)
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_cache_fakeip(cx))),
                     ),

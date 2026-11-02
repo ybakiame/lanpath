@@ -1,9 +1,10 @@
 use gpui_kit::component::{
-    Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     scroll::ScrollableElement as _,
+    switch::Switch,
 };
-use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, div};
+use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, Window, div};
 use lanpath_client::config_slices::OutboundProtocol;
 
 use super::{
@@ -74,19 +75,33 @@ impl ConfigSlicesView {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .children(outbound_kinds().into_iter().map(|(kind, label)| {
-                        Button::new(format!("outbound-add-{label}"))
-                            .label(format!("新增 {label}"))
-                            .disabled(disabled)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.add_outbound(kind, window, cx)
-                            }))
-                    })),
+                div().flex().flex_wrap().gap_2().child(
+                    Button::new("outbound-add")
+                        .label(if self.adding_outbound {
+                            "收起新增"
+                        } else {
+                            "新增出站"
+                        })
+                        .disabled(disabled)
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_add_outbound(cx))),
+                ),
             )
+            .children(self.adding_outbound.then(|| {
+                ButtonGroup::new("outbound-add-kind")
+                    .small()
+                    .compact()
+                    .outline()
+                    .children(outbound_kinds().into_iter().map(|(_kind, label)| {
+                        Button::new(format!("outbound-add-kind-{label}")).label(label)
+                    }))
+                    .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
+                        if let Some((kind, _)) =
+                            indexes.first().map(|index| outbound_kinds()[*index])
+                        {
+                            this.add_outbound_kind(kind, window, cx);
+                        }
+                    }))
+            }))
             .children(outbound.map(|outbound| {
                 let protocol_locked = disabled || outbound.builtin;
                 let is_group = outbound.protocol.is_group();
@@ -100,9 +115,9 @@ impl ConfigSlicesView {
                             .flex_wrap()
                             .gap_2()
                             .child(
-                                Button::new("outbound-enabled")
-                                    .label("启用")
-                                    .selected(outbound.enabled)
+                                Switch::new("outbound-enabled")
+                                    .label("启用此出站")
+                                    .checked(outbound.enabled)
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_outbound_enabled(cx)
@@ -113,20 +128,44 @@ impl ConfigSlicesView {
                             })),
                     )
                     .child(field("名称", &self.inputs.out_name, protocol_locked))
-                    .child(div().flex().flex_wrap().gap_2().children(
-                        outbound_kinds().into_iter().map(|(kind, label)| {
-                            Button::new(format!("outbound-kind-{label}"))
-                                .label(label)
-                                .selected(selected_kind == Some(kind))
-                                .disabled(protocol_locked)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.set_outbound_kind(kind, window, cx)
-                                }))
-                        }),
-                    ))
+                    .child(
+                        ButtonGroup::new("outbound-kind")
+                            .small()
+                            .compact()
+                            .outline()
+                            .disabled(protocol_locked)
+                            .children(outbound_kinds().into_iter().map(|(kind, label)| {
+                                Button::new(format!("outbound-kind-{label}"))
+                                    .label(label)
+                                    .selected(selected_kind == Some(kind))
+                            }))
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
+                                if let Some((kind, _)) =
+                                    indexes.first().map(|index| outbound_kinds()[*index])
+                                {
+                                    this.set_outbound_kind(kind, window, cx);
+                                }
+                            })),
+                    )
                     .children((!is_group).then(|| self.render_node_fields(outbound, disabled, cx)))
                     .children(is_group.then(|| self.render_group_fields(outbound, disabled, cx)))
             }))
+    }
+
+    fn toggle_add_outbound(&mut self, cx: &mut Context<Self>) {
+        self.adding_outbound = !self.adding_outbound;
+        cx.notify();
+    }
+
+    fn add_outbound_kind(
+        &mut self,
+        kind: OutboundKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.add_outbound(kind, window, cx);
+        self.adding_outbound = false;
+        cx.notify();
     }
 
     fn render_node_fields(
@@ -180,18 +219,18 @@ impl ConfigSlicesView {
                             .flex_wrap()
                             .gap_2()
                             .child(
-                                Button::new("outbound-tls")
-                                    .label("TLS")
-                                    .selected(tls.enabled)
+                                Switch::new("outbound-tls")
+                                    .label("启用 TLS")
+                                    .checked(tls.enabled)
                                     .disabled(disabled)
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.toggle_outbound_tls(cx)),
                                     ),
                             )
                             .child(
-                                Button::new("outbound-insecure")
+                                Switch::new("outbound-insecure")
                                     .label("跳过证书验证")
-                                    .selected(tls.insecure)
+                                    .checked(tls.insecure)
                                     .disabled(disabled || !tls.enabled)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_outbound_insecure(cx)
@@ -277,9 +316,9 @@ impl ConfigSlicesView {
                 member_locked,
             ))
             .child(
-                Button::new("outbound-interrupt")
+                Switch::new("outbound-interrupt")
                     .label("切换时中断已有连接")
-                    .selected(interrupt)
+                    .checked(interrupt)
                     .disabled(disabled)
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_outbound_interrupt(cx))),
             )

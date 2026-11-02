@@ -1,7 +1,7 @@
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     input::{Input, InputState},
     scroll::ScrollableElement as _,
 };
@@ -44,6 +44,41 @@ impl Render for ConfigSlicesView {
                     .gap_2()
                     .child("结构化配置")
                     .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("DNS、出站、路由与缓存"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        ButtonGroup::new("slices-sections")
+                            .small()
+                            .compact()
+                            .outline()
+                            .children([
+                                Button::new("slices-section-dns")
+                                    .label("DNS")
+                                    .selected(self.section == Section::Dns),
+                                Button::new("slices-section-outbounds")
+                                    .label("出站与分组")
+                                    .selected(self.section == Section::Outbounds),
+                                Button::new("slices-section-route")
+                                    .label("路由与缓存")
+                                    .selected(self.section == Section::RouteCache),
+                            ])
+                            .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
+                                let section = match indexes.first() {
+                                    Some(0) => Some(Section::Dns),
+                                    Some(1) => Some(Section::Outbounds),
+                                    Some(2) => Some(Section::RouteCache),
+                                    _ => None,
+                                };
+                                if let Some(section) = section {
+                                    this.set_section(section, window, cx);
+                                }
+                            })),
+                    )
+                    .child(
                         Button::new("slices-save")
                             .label(match self.operation {
                                 Some(Operation::Save) => "保存中…",
@@ -76,37 +111,6 @@ impl Render for ConfigSlicesView {
                         cx.theme().muted_foreground
                     })
                     .child(status),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child(
-                        Button::new("slices-section-dns")
-                            .label("DNS")
-                            .selected(self.section == Section::Dns)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_section(Section::Dns, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("slices-section-outbounds")
-                            .label("出站与分组")
-                            .selected(self.section == Section::Outbounds)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_section(Section::Outbounds, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("slices-section-route")
-                            .label("默认路由与缓存")
-                            .selected(self.section == Section::RouteCache)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.set_section(Section::RouteCache, window, cx)
-                            })),
-                    ),
             )
             .child(
                 div()

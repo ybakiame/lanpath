@@ -55,6 +55,7 @@ pub(crate) struct ConfigSlicesView {
     selected_dns_server: Option<usize>,
     selected_dns_rule: Option<usize>,
     selected_outbound: Option<String>,
+    adding_outbound: bool,
     inputs: FormInputs,
     syncing: bool,
     dirty: bool,
@@ -93,6 +94,7 @@ impl ConfigSlicesView {
             selected_dns_server: None,
             selected_dns_rule: None,
             selected_outbound: None,
+            adding_outbound: false,
             inputs,
             syncing: false,
             dirty: false,
@@ -280,6 +282,7 @@ impl ConfigSlicesView {
         self.selected_dns_server = (!display.dns.servers.is_empty()).then_some(0);
         self.selected_dns_rule = (!display.dns.rules.is_empty()).then_some(0);
         self.selected_outbound = display.outbounds.items.first().map(|item| item.id.clone());
+        self.adding_outbound = false;
         self.saved = Some(display.clone());
         self.draft = Some(display);
         self.dirty = false;

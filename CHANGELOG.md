@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- GPUI 结构化配置页整合分段导航、保存与重新载入；模式/协议/策略使用紧凑 ButtonGroup，启用与缓存等状态改用 Switch。新增出站改为页内渐进展开的类型选择，创建后进入未保存状态，保持原有校验与草稿语义。
 - GPUI 核心管理改为“核心类型切换器 + 当前核心卡片 + 稳定/预发布切换器 + 单一版本信息卡片”；支持 sing-box/Mihomo 真实库存、发布通道、本地版本切换与构建 `Environment`/`Tags`，移除失效的“安装并选中内置核心”入口。Mihomo 稳定版使用 `v<semver>`，预发布从 `Prerelease-Alpha/version.txt` 读取 `alpha-<hash>`；Windows ZIP 按归档内实际 `mihomo-<variant>.exe` 识别二进制，版本探测只执行 `-v`，不再把裸 `version` 当作探测命令。Clash YAML 原始 proxies 直用，其他订阅经双向节点转换，Mihomo 使用 YAML 配置与 `-d/-f` 启动。Android 与 Windows 受限 TUN helper 明确仅支持 sing-box。选择仍持久化到 `app.toml` 的 `[core]`，数据根内路径保持相对。见 ADR-0017。
 - GPUI 覆写模板改为卡片与大型编辑/预览弹窗，卡片展示内容类型和远程来源；新增/编辑保留草稿确认，YAML/JS 编辑器占窗口高度 75%，并统一视图模块目录结构。
 - GPUI 移除标题栏和运行栏的重复页面标题，运行信息改为当前实际核心名称与代理端口。订阅新增/编辑改为居中弹窗并增强半透明遮罩与阴影，操作收进订阅卡片，原文通过大弹窗只读预览，UA 快捷项使用胶囊按钮。
