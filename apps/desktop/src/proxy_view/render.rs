@@ -18,29 +18,25 @@ impl Render for ProxyView {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child("代理策略")
-                    .children(
-                        [("rule", "规则"), ("global", "全局"), ("direct", "直连")].map(
-                            |(mode, label)| {
-                                Button::new(format!("proxy-mode-{mode}"))
-                                    .label(label)
-                                    .selected(self.mode == mode)
-                                    .disabled(busy)
-                                    .on_click(
-                                        cx.listener(move |this, _, _, cx| this.set_mode(mode, cx)),
-                                    )
-                            },
-                        ),
+            .gap_3()
+            .child(crate::design::page_header(
+                "代理策略",
+                "选择路由模式与当前节点",
+                crate::design::toolbar().children(
+                    [("rule", "规则"), ("global", "全局"), ("direct", "直连")].map(
+                        |(mode, label)| {
+                            Button::new(format!("proxy-mode-{mode}"))
+                                .label(label)
+                                .selected(self.mode == mode)
+                                .disabled(busy)
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.set_mode(mode, cx)),
+                                )
+                        },
                     ),
-            )
+                ),
+                cx,
+            ))
             .child(
                 div()
                     .flex()
@@ -102,6 +98,27 @@ impl Render for ProxyView {
                     .as_ref()
                     .map(|notice| div().text_sm().child(notice.clone())),
             )
-            .child(List::new(&self.list).flex_1().min_h_0().min_w_0())
+            .child(
+                crate::design::surface(cx)
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .child(if !self.running {
+                        crate::design::empty_state(
+                            gpui_kit::assets::IconName::Waypoints,
+                            "核心尚未启动",
+                            "启动核心后，在这里选择代理分组与节点。",
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        List::new(&self.list)
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .into_any_element()
+                    }),
+            )
     }
 }

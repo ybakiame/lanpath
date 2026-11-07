@@ -68,6 +68,12 @@ impl Render for MitmView {
             .min_h_0()
             .min_w_0()
             .gap_3()
+            .child(crate::design::page_header(
+                "MITM",
+                "管理 HTTPS 检查、证书信任与请求记录",
+                div(),
+                cx,
+            ))
             .child(
                 div()
                     .flex()

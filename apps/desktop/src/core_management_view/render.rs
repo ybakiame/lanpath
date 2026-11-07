@@ -168,13 +168,8 @@ impl Render for CoreManagementView {
             .min_w_0()
             .min_h_0()
             .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .gap_3()
-                    .child(div().text_lg().font_semibold().child("核心"))
+            .child(crate::design::page_header("核心", "选择核心类型，管理本地版本与更新",
+crate::design::toolbar()
                     .child(
                         ButtonGroup::new("core-type-switcher")
                             .small()
@@ -205,9 +200,8 @@ impl Render for CoreManagementView {
                             .label("刷新")
                             .disabled(disabled)
                             .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    ),
-            )
-            .child(div().flex().items_center().flex_wrap().gap_2().children(
+                    ), cx))
+            .child(div().flex().items_center().flex_wrap().gap_3().children(
                 self.core.core_override().map(|path| {
                     div()
                         .id("core-test-override")

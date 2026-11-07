@@ -1,5 +1,6 @@
 mod editing;
 mod inputs;
+mod outbound_dialogs;
 mod outbound_editing;
 mod render;
 mod render_dns;
@@ -21,7 +22,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Section {
+pub(crate) enum Section {
     Dns,
     Outbounds,
     RouteCache,
@@ -55,7 +56,7 @@ pub(crate) struct ConfigSlicesView {
     selected_dns_server: Option<usize>,
     selected_dns_rule: Option<usize>,
     selected_outbound: Option<String>,
-    adding_outbound: bool,
+    new_outbound_kind: OutboundKind,
     inputs: FormInputs,
     syncing: bool,
     dirty: bool,
@@ -94,7 +95,7 @@ impl ConfigSlicesView {
             selected_dns_server: None,
             selected_dns_rule: None,
             selected_outbound: None,
-            adding_outbound: false,
+            new_outbound_kind: OutboundKind::Vless,
             inputs,
             syncing: false,
             dirty: false,
@@ -127,13 +128,19 @@ impl ConfigSlicesView {
         cx.notify();
     }
 
-    fn set_section(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn set_section(
+        &mut self,
+        section: Section,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.reject_invalid_input(cx) {
-            return;
+            return false;
         }
         self.section = section;
         self.sync_inputs(window, cx);
         cx.notify();
+        true
     }
 
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -282,7 +289,6 @@ impl ConfigSlicesView {
         self.selected_dns_server = (!display.dns.servers.is_empty()).then_some(0);
         self.selected_dns_rule = (!display.dns.rules.is_empty()).then_some(0);
         self.selected_outbound = display.outbounds.items.first().map(|item| item.id.clone());
-        self.adding_outbound = false;
         self.saved = Some(display.clone());
         self.draft = Some(display);
         self.dirty = false;

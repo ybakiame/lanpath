@@ -25,6 +25,47 @@ fn bounded_custom_scale_and_black_preference_round_trip_exactly() {
 }
 
 #[test]
+fn material_is_backward_compatible_and_persists_without_changing_client_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let store = AppearanceStore::new(root.path());
+    let legacy = br#"{"theme":"dark","accent":"teal","pure_black":false,"scale_percent":117}"#;
+    std::fs::write(root.path().join("appearance.json"), legacy).unwrap();
+    let previous = store.load().unwrap();
+    assert_eq!(previous.material(), MaterialPreference::Acrylic);
+    store.save(previous).unwrap();
+    lanpath_client::settings::persist_app_section(
+        root.path(),
+        "client",
+        &serde_json::json!({"mixed_port": 17899}),
+    )
+    .unwrap();
+    let client: serde_json::Value =
+        lanpath_client::settings::load_app_section(root.path(), "client")
+            .unwrap()
+            .unwrap();
+    let solid = previous.with_material(MaterialPreference::Solid);
+    store.save(solid).unwrap();
+    assert_eq!(store.load().unwrap(), solid);
+    assert_eq!(
+        std::fs::read(root.path().join("appearance.json")).unwrap(),
+        legacy
+    );
+    assert_eq!(
+        lanpath_client::settings::load_app_section::<serde_json::Value>(root.path(), "client")
+            .unwrap()
+            .unwrap(),
+        client,
+    );
+    assert!(!solid.uses_acrylic(WindowAppearance::Dark));
+    assert!(
+        !previous
+            .with_pure_black(true)
+            .uses_acrylic(WindowAppearance::Dark)
+    );
+    assert_eq!(previous.uses_acrylic(WindowAppearance::Dark), cfg!(windows));
+}
+
+#[test]
 fn invalid_scale_save_leaves_valid_file_and_live_preferences_unchanged() {
     let root = tempfile::tempdir().unwrap();
     let store = AppearanceStore::new(root.path());
@@ -56,6 +97,7 @@ fn malformed_preferences_are_never_silently_replaced_by_save() {
     for (field, value) in [
         ("theme", serde_json::json!("automatic")),
         ("accent", serde_json::json!("red")),
+        ("material", serde_json::json!("glass")),
         ("pure_black", serde_json::json!("true")),
         ("scale_percent", serde_json::json!(74)),
         ("scale_percent", serde_json::json!(151)),

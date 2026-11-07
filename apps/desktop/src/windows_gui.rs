@@ -33,7 +33,7 @@ pub(crate) fn ensure_unelevated() -> LanpathResult<()> {
 }
 
 pub(crate) fn show_startup_error(message: &str) {
-    let title: Vec<u16> = crate::product::DISPLAY_NAME
+    let title: Vec<u16> = crate::product::window_title()
         .encode_utf16()
         .chain(Some(0))
         .collect();

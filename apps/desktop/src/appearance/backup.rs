@@ -83,6 +83,7 @@ mod tests {
         let store = AppearanceStore::new(dir.path());
         let preferences = AppearancePreferences::default()
             .with_accent(AccentPreference::Iris)
+            .with_material(super::super::MaterialPreference::Solid)
             .with_scale_percent(117);
         store.save(preferences).unwrap();
         let mut state = AppearanceState {
@@ -106,6 +107,7 @@ mod tests {
         assert_eq!(restored.theme(), ThemePreference::Dark);
         assert!(restored.pure_black());
         assert_eq!(restored.scale_percent(), 117);
+        assert_eq!(restored.material(), super::super::MaterialPreference::Solid);
         state
             .restore_portable(&Appearance {
                 theme: "light".into(),

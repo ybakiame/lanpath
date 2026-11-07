@@ -1,18 +1,10 @@
-use gpui_kit::base::StyledExt as _;
+mod render;
+
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _,
-    button::Button,
-    radio::{Radio, RadioGroup},
-    scroll::ScrollableElement as _,
     searchable_list::SearchableListItem,
-    select::{Select, SelectEvent, SelectState},
-    switch::Switch,
+    select::{SelectEvent, SelectState},
 };
-use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
-    div,
-};
+use gpui_kit::{AppContext as _, Context, Entity, SharedString, Subscription, Window};
 
 use crate::appearance::{
     self, AccentPreference, AppearancePreferences, AppearanceState, ThemePreference,
@@ -81,7 +73,7 @@ impl AppearanceView {
         let preferences = state.preferences();
         let error = state.load_error().map(str::to_owned);
         // Use the actual window appearance once available (notably on Linux).
-        appearance::apply(preferences, window.appearance(), cx);
+        appearance::apply_to_window(preferences, window, cx);
         let scale = cx.new(|cx| {
             SelectState::new(scale_options(preferences.scale_percent()), None, window, cx)
         });
@@ -107,7 +99,7 @@ impl AppearanceView {
         );
         let appearance_subscription = cx.observe_window_appearance(window, |this, window, cx| {
             if this.preferences.theme() == ThemePreference::System {
-                appearance::apply(this.preferences, window.appearance(), cx);
+                appearance::apply_to_window(this.preferences, window, cx);
             }
             cx.notify();
         });
@@ -144,7 +136,7 @@ impl AppearanceView {
             Ok(()) => {
                 self.preferences = preferences;
                 self.error = None;
-                appearance::apply(preferences, window.appearance(), cx);
+                appearance::apply_to_window(preferences, window, cx);
             }
             Err(error) => self.error = Some(format!("无法保存外观偏好：{error}")),
         }
@@ -160,7 +152,7 @@ impl AppearanceView {
                 self.preferences = cx.global::<AppearanceState>().preferences();
                 self.error = None;
                 self.sync_scale(window, cx);
-                appearance::apply(self.preferences, window.appearance(), cx);
+                appearance::apply_to_window(self.preferences, window, cx);
             }
             Err(error) => self.error = Some(format!("无法载入外观偏好：{error}")),
         }
@@ -173,186 +165,6 @@ impl AppearanceView {
             state.set_items(scale_options(percent), window, cx);
             state.set_selected_value(&percent, window, cx);
         });
-    }
-}
-
-impl Render for AppearanceView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let disabled = self.closing || cx.global::<AppearanceState>().load_error().is_some();
-        let dark = self.preferences.is_dark(window.appearance());
-        let status = self.error.clone().unwrap_or_else(|| {
-            format!(
-                "更改立即保存到实验目录 · 当前{} · 缩放 {}%",
-                if dark { "深色" } else { "浅色" },
-                self.preferences.scale_percent()
-            )
-        });
-        div()
-            .id("appearance-page")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .child(
-                div()
-                    .id("appearance-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .overflow_y_scrollbar()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_shrink_0()
-                            .min_w_0()
-                            .w_full()
-                            .max_w(gpui_kit::rems(64.0))
-                            .gap_6()
-                            .p_1()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .flex_wrap()
-                                    .gap_3()
-                                    .child(div().text_lg().font_semibold().child("外观"))
-                                    .child(
-                                        Button::new("appearance-reload")
-                                            .label("重新载入外观")
-                                            .disabled(self.closing)
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.reload(window, cx);
-                                            })),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .id("appearance-status")
-                                    .role(Role::Status)
-                                    .aria_label(status.clone())
-                                    .text_sm()
-                                    .text_color(if self.error.is_some() {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(status),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_3()
-                                    .child(div().font_semibold().child("主题"))
-                                    .child(
-                                        RadioGroup::horizontal("appearance-theme")
-                                            .selected_index(THEMES.iter().position(
-                                                |(value, _, _)| *value == self.preferences.theme(),
-                                            ))
-                                            .disabled(disabled)
-                                            .children(THEMES.iter().map(|(_, id, label)| {
-                                                Radio::new(*id)
-                                                    .label(*label)
-                                                    .accessibility_label(*label)
-                                            }))
-                                            .on_change(cx.listener(
-                                                |this, ix: &usize, window, cx| {
-                                                    if let Some((theme, _, _)) = THEMES.get(*ix) {
-                                                        this.change(
-                                                            this.preferences.with_theme(*theme),
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                },
-                                            )),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_3()
-                                    .child(div().font_semibold().child("强调色"))
-                                    .child(
-                                        RadioGroup::horizontal("appearance-accent")
-                                            .selected_index(ACCENTS.iter().position(
-                                                |(value, _, _)| *value == self.preferences.accent(),
-                                            ))
-                                            .disabled(disabled)
-                                            .children(ACCENTS.iter().map(|(_, id, label)| {
-                                                Radio::new(*id)
-                                                    .label(*label)
-                                                    .accessibility_label(*label)
-                                            }))
-                                            .on_change(cx.listener(
-                                                |this, ix: &usize, window, cx| {
-                                                    if let Some((accent, _, _)) = ACCENTS.get(*ix) {
-                                                        this.change(
-                                                            this.preferences.with_accent(*accent),
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                },
-                                            )),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(
-                                        Switch::new("appearance-pure-black")
-                                            .label("纯黑背景")
-                                            .checked(self.preferences.pure_black())
-                                            .disabled(disabled || !dark)
-                                            .on_change(cx.listener(
-                                                |this, checked: &bool, window, cx| {
-                                                    if this.preferences.is_dark(window.appearance())
-                                                    {
-                                                        this.change(
-                                                            this.preferences
-                                                                .with_pure_black(*checked),
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                },
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("仅在深色主题生效；切换到浅色时保留选择。"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(div().font_semibold().child("界面缩放"))
-                                    .child(
-                                        Select::new(&self.scale)
-                                            .id("appearance-scale")
-                                            .accessibility_label("界面缩放百分比")
-                                            .disabled(disabled)
-                                            .w_40(),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("同时缩放文字、控件和间距。"),
-                                    ),
-                            ),
-                    ),
-            )
     }
 }
 

@@ -1,14 +1,15 @@
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
-    button::{Button, ButtonGroup, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _,
+    button::{Button, ButtonVariants as _},
     input::{Input, InputState},
-    scroll::ScrollableElement as _,
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
+
+use gpui_kit::component::scroll::ScrollableElement as _;
 
 use super::{ConfigSlicesView, Operation, Section};
 
@@ -34,50 +35,10 @@ impl Render for ConfigSlicesView {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_2()
+            .gap_3()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child("结构化配置")
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("DNS、出站、路由与缓存"),
-                    )
+                crate::design::toolbar()
                     .child(div().flex_1())
-                    .child(
-                        ButtonGroup::new("slices-sections")
-                            .small()
-                            .compact()
-                            .outline()
-                            .children([
-                                Button::new("slices-section-dns")
-                                    .label("DNS")
-                                    .selected(self.section == Section::Dns),
-                                Button::new("slices-section-outbounds")
-                                    .label("出站与分组")
-                                    .selected(self.section == Section::Outbounds),
-                                Button::new("slices-section-route")
-                                    .label("路由与缓存")
-                                    .selected(self.section == Section::RouteCache),
-                            ])
-                            .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
-                                let section = match indexes.first() {
-                                    Some(0) => Some(Section::Dns),
-                                    Some(1) => Some(Section::Outbounds),
-                                    Some(2) => Some(Section::RouteCache),
-                                    _ => None,
-                                };
-                                if let Some(section) = section {
-                                    this.set_section(section, window, cx);
-                                }
-                            })),
-                    )
                     .child(
                         Button::new("slices-save")
                             .label(match self.operation {
@@ -104,7 +65,7 @@ impl Render for ConfigSlicesView {
                     .flex_shrink_0()
                     .min_w_0()
                     .max_h_16()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
                     .text_color(if self.error.is_some() {
                         cx.theme().danger
                     } else {
@@ -118,7 +79,7 @@ impl Render for ConfigSlicesView {
                     .min_h_0()
                     .min_w_0()
                     .overflow_y_scrollbar()
-                    .child(match self.section {
+                    .child(crate::design::surface(cx).p_4().child(match self.section {
                         Section::Dns => self.render_dns(disabled, cx).into_any_element(),
                         Section::Outbounds => {
                             self.render_outbounds(disabled, cx).into_any_element()
@@ -126,7 +87,7 @@ impl Render for ConfigSlicesView {
                         Section::RouteCache => {
                             self.render_route_cache(disabled, cx).into_any_element()
                         }
-                    }),
+                    })),
             )
     }
 }

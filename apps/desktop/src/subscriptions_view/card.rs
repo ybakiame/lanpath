@@ -209,7 +209,7 @@ impl SubscriptionsView {
                 Button::new("subscription-edit")
                     .small()
                     .icon(IconName::SquarePen)
-                    .label("编辑")
+                    .label("编辑…")
                     .disabled(disabled)
                     .on_click(cx.listener(|this, _, window, cx| {
                         let selected = this.selected;
@@ -221,7 +221,7 @@ impl SubscriptionsView {
                     .small()
                     .ghost()
                     .icon(IconName::FileText)
-                    .label("查看原文")
+                    .label("原文…")
                     .disabled(disabled)
                     .on_click(cx.listener(|this, _, window, cx| this.open_source(window, cx))),
             )
@@ -252,41 +252,7 @@ impl SubscriptionsView {
                         }),
                     ),
             )
-            .child(
-                Button::new("subscription-toggle")
-                    .small()
-                    .ghost()
-                    .icon(IconName::Power)
-                    .label(if item.enabled { "停用" } else { "启用" })
-                    .loading(matches!(self.busy, Some(Operation::Toggle)))
-                    .disabled(disabled)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.run(Operation::Toggle, window, cx)),
-                    ),
-            )
-            .child(
-                Button::new("subscription-export")
-                    .small()
-                    .ghost()
-                    .icon(IconName::Download)
-                    .label("导出原文")
-                    .loading(matches!(self.busy, Some(Operation::Export)))
-                    .disabled(disabled)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.run(Operation::Export, window, cx)),
-                    ),
-            )
-            .child(
-                Button::new("subscription-delete")
-                    .small()
-                    .danger()
-                    .outline()
-                    .icon(IconName::Trash)
-                    .label("删除")
-                    .loading(matches!(self.busy, Some(Operation::Delete)))
-                    .disabled(disabled)
-                    .on_click(cx.listener(|this, _, window, cx| this.request_delete(window, cx))),
-            )
+            .child(self.more_actions(item, disabled, cx))
             .into_any_element()
     }
 }

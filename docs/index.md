@@ -5,6 +5,8 @@
 - [测试](testing.md)
 - [运维与发布](operations.md)
 - [品牌](brand-guidelines.md)
+- [GPUI 桌面设计](desktop-design.md)
+- [GPUI 桌面重设计验证](testing/2026-11-07-gpui-desktop-redesign.md)
 - [ADR](adr/README.md)
 - [来源](source-provenance.json)
 - [协议采纳](adoption/adoption-report.md)

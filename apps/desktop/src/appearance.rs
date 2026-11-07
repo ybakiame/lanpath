@@ -2,6 +2,7 @@ mod backup;
 #[cfg(test)]
 mod tests;
 mod theme;
+pub(crate) use theme::{accent_color, preview_colors};
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,14 @@ pub(crate) enum AccentPreference {
     Blue,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MaterialPreference {
+    #[default]
+    Acrylic,
+    Solid,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AppearancePreferences {
@@ -37,6 +46,8 @@ pub(crate) struct AppearancePreferences {
     accent: AccentPreference,
     pure_black: bool,
     scale_percent: u16,
+    #[serde(default)]
+    material: MaterialPreference,
 }
 
 impl Default for AppearancePreferences {
@@ -46,6 +57,7 @@ impl Default for AppearancePreferences {
             accent: AccentPreference::Blue,
             pure_black: false,
             scale_percent: 100,
+            material: MaterialPreference::Acrylic,
         }
     }
 }
@@ -62,6 +74,21 @@ impl AppearancePreferences {
     }
     pub(crate) fn scale_percent(self) -> u16 {
         self.scale_percent
+    }
+
+    pub(crate) fn material(self) -> MaterialPreference {
+        self.material
+    }
+
+    pub(crate) fn with_material(mut self, material: MaterialPreference) -> Self {
+        self.material = material;
+        self
+    }
+
+    pub(crate) fn uses_acrylic(self, appearance: WindowAppearance) -> bool {
+        cfg!(windows)
+            && self.material == MaterialPreference::Acrylic
+            && !self.effective_pure_black(appearance)
     }
 
     pub(crate) fn with_theme(mut self, theme: ThemePreference) -> Self {
@@ -241,4 +268,17 @@ pub(crate) fn apply(
     cx: &mut App,
 ) {
     theme::apply(preferences, appearance, cx);
+}
+
+pub(crate) fn apply_to_window(
+    preferences: AppearancePreferences,
+    window: &mut gpui_kit::Window,
+    cx: &mut App,
+) {
+    apply(preferences, window.appearance(), cx);
+    window.set_background_appearance(if preferences.uses_acrylic(window.appearance()) {
+        gpui_kit::WindowBackgroundAppearance::Blurred
+    } else {
+        gpui_kit::WindowBackgroundAppearance::Opaque
+    });
 }

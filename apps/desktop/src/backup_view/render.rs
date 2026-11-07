@@ -46,10 +46,10 @@ impl Render for BackupView {
             .read(cx)
             .context_menu_capabilities()
             .is_masked();
-        let mut body = div().flex().flex_col().flex_shrink_0().gap_6().p_1().min_w_0()
+        let mut body = div().flex().flex_col().flex_shrink_0().gap_6().min_w_0()
             .w_full().max_w(gpui_kit::rems(64.0))
             .child(div().flex().flex_col().gap_2()
-                .child(div().text_lg().font_semibold().child("加密备份与恢复"))
+                .child(crate::design::page_header("备份与恢复", "加密导出配置，或预览并恢复备份", div(), cx))
                 .child(value("backup-root-scope", scope))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("仅备份可移植配置与资源；不含核心、证书、日志或本机 app.toml 外观段。外观仅携带主题、强调色和纯黑模式，本机缩放保持不变。")))

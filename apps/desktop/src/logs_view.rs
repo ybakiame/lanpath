@@ -250,6 +250,12 @@ impl Render for LogsView {
             .min_h_0()
             .min_w_0()
             .gap_2()
+            .child(crate::design::page_header(
+                "日志",
+                "查看运行事件与持久日志",
+                div(),
+                cx,
+            ))
             .child(
                 div()
                     .flex()

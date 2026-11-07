@@ -161,7 +161,7 @@ impl SessionView {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(TitleBar::new().child(crate::product::DISPLAY_NAME))
+            .child(TitleBar::new().child(crate::product::window_title()))
             .child(
                 div()
                     .flex()

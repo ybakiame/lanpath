@@ -45,7 +45,7 @@ impl DesktopView {
         self.cores.update(cx, |view, cx| view.set_closing(true, cx));
         self.diagnostics
             .update(cx, |view, cx| view.set_closing(true, cx));
-        self.about.update(cx, |view, cx| view.set_closing(true, cx));
+
         self.backups
             .update(cx, |view, cx| view.set_closing(true, cx));
         self.distribution
@@ -131,8 +131,7 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.diagnostics
                             .update(cx, |view, cx| view.set_closing(false, cx));
-                        this.about
-                            .update(cx, |view, cx| view.set_closing(false, cx));
+
                         this.backups
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.distribution
@@ -199,8 +198,7 @@ impl DesktopView {
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.diagnostics
                             .update(cx, |view, cx| view.set_closing(false, cx));
-                        this.about
-                            .update(cx, |view, cx| view.set_closing(false, cx));
+
                         this.backups
                             .update(cx, |view, cx| view.set_closing(false, cx));
                         this.distribution

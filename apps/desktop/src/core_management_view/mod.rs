@@ -91,6 +91,14 @@ impl CoreManagementView {
         }
     }
 
+    /// Retained actual selection, independent of the inventory browsing type.
+    pub(crate) fn selected_core_summary(&self) -> String {
+        self.active_core
+            .as_ref()
+            .map(|core| format!("{} · {}", core.core_type(), core.version()))
+            .unwrap_or_else(|| "尚未选择核心".into())
+    }
+
     pub(crate) fn busy(&self) -> bool {
         self.working
     }

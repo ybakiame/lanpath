@@ -1,10 +1,12 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    Disableable as _, Selectable as _, Sizable as _,
-    button::{Button, ButtonGroup, ButtonVariants as _},
-    scroll::ScrollableElement as _,
+    ActiveTheme as _, Disableable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
     switch::Switch,
 };
-use gpui_kit::{Context, IntoElement, ParentElement as _, Styled as _, Window, div};
+use gpui_kit::{
+    Context, IntoElement, ParentElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
+};
 use lanpath_client::config_slices::OutboundProtocol;
 
 use super::{
@@ -18,11 +20,6 @@ impl ConfigSlicesView {
         let Some(slices) = self.draft.as_ref() else {
             return div().child("出站配置不可用");
         };
-        let outbound = self
-            .selected_outbound
-            .as_deref()
-            .and_then(|id| self.outbound(id));
-        let selected_kind = outbound.map(|item| outbound_kind(&item.protocol));
         div()
             .flex()
             .flex_col()
@@ -34,145 +31,117 @@ impl ConfigSlicesView {
                 cx,
             ))
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .min_w_0()
-                    .h_auto()
-                    .max_h_32()
-                    .overflow_y_scrollbar()
-                    .gap_2()
-                    .children(slices.outbounds.items.iter().map(|item| {
-                        let id = item.id.clone();
-                        Button::new(format!("outbound-{}", item.id))
-                            .min_w_0()
-                            .max_w_full()
-                            .tooltip(item.name.clone())
-                            .label(format!(
-                                "{}{}",
-                                if item.builtin {
-                                    "内置 · "
-                                } else if !item.enabled {
-                                    "停用 · "
-                                } else {
-                                    ""
-                                },
-                                item.name
-                            ))
-                            .selected(self.selected_outbound.as_deref() == Some(item.id.as_str()))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_outbound(id.clone(), window, cx)
-                            }))
-                    }))
-                    .child(
-                        Button::new("outbound-remove")
-                            .label("删除")
-                            .danger()
-                            .disabled(disabled || outbound.is_none_or(|item| item.builtin))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.remove_outbound(window, cx)),
-                            ),
+                Button::new("outbound-add")
+                    .label("新增出站…")
+                    .disabled(disabled)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_new_outbound(window, cx)),
                     ),
             )
-            .child(
-                div().flex().flex_wrap().gap_2().child(
-                    Button::new("outbound-add")
-                        .label(if self.adding_outbound {
-                            "收起新增"
+            .child(div().flex().flex_col().min_w_0().gap_2().children(
+                slices.outbounds.items.iter().map(|item| {
+                    let id = item.id.clone();
+                    let selected = self.selected_outbound.as_deref() == Some(item.id.as_str());
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .p_3()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(if selected {
+                            cx.theme().primary
                         } else {
-                            "新增出站"
+                            cx.theme().border
                         })
-                        .disabled(disabled)
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_add_outbound(cx))),
-                ),
-            )
-            .children(self.adding_outbound.then(|| {
-                ButtonGroup::new("outbound-add-kind")
-                    .small()
-                    .compact()
-                    .outline()
-                    .children(outbound_kinds().into_iter().map(|(_kind, label)| {
-                        Button::new(format!("outbound-add-kind-{label}")).label(label)
-                    }))
-                    .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
-                        if let Some((kind, _)) =
-                            indexes.first().map(|index| outbound_kinds()[*index])
-                        {
-                            this.add_outbound_kind(kind, window, cx);
-                        }
-                    }))
-            }))
-            .children(outbound.map(|outbound| {
-                let protocol_locked = disabled || outbound.builtin;
-                let is_group = outbound.protocol.is_group();
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(
-                                Switch::new("outbound-enabled")
-                                    .label("启用此出站")
-                                    .checked(outbound.enabled)
-                                    .disabled(disabled)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.toggle_outbound_enabled(cx)
-                                    })),
+                        .bg(cx.theme().group_box)
+                        .child(
+                            Button::new(format!("outbound-{}", item.id))
+                                .accessibility_label(item.name.clone())
+                                .ghost()
+                                .w_full()
+                                .h_auto()
+                                .p_0()
+                                .justify_start()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.select_outbound(id.clone(), window, cx)
+                                }))
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .flex()
+                                        .flex_col()
+                                        .items_start()
+                                        .gap_1()
+                                        .child(item.name.clone())
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(format!(
+                                                    "{}{}",
+                                                    if item.builtin {
+                                                        "内置分组"
+                                                    } else {
+                                                        "自定义节点"
+                                                    },
+                                                    if item.enabled { "" } else { " · 已停用" }
+                                                )),
+                                        ),
+                                ),
+                        )
+                        .when(selected, |element| {
+                            element.child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .gap_2()
+                                    .pt_2()
+                                    .border_t_1()
+                                    .border_color(cx.theme().border)
+                                    .child(
+                                        Button::new("outbound-edit")
+                                            .small()
+                                            .icon(IconName::SquarePen)
+                                            .label("编辑")
+                                            .disabled(disabled)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_outbound_editor(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("outbound-toggle")
+                                            .small()
+                                            .ghost()
+                                            .label(if item.enabled { "停用" } else { "启用" })
+                                            .disabled(disabled)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_outbound_enabled(cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("outbound-remove")
+                                            .small()
+                                            .danger()
+                                            .outline()
+                                            .label("删除")
+                                            .disabled(disabled || item.builtin)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.remove_outbound(window, cx)
+                                            })),
+                                    ),
                             )
-                            .children(outbound.builtin.then(|| {
-                                div().text_sm().child("内置分组名称、协议和成员由模板维护")
-                            })),
-                    )
-                    .child(field("名称", &self.inputs.out_name, protocol_locked))
-                    .child(
-                        ButtonGroup::new("outbound-kind")
-                            .small()
-                            .compact()
-                            .outline()
-                            .disabled(protocol_locked)
-                            .children(outbound_kinds().into_iter().map(|(kind, label)| {
-                                Button::new(format!("outbound-kind-{label}"))
-                                    .label(label)
-                                    .selected(selected_kind == Some(kind))
-                            }))
-                            .on_click(cx.listener(|this, indexes: &Vec<usize>, window, cx| {
-                                if let Some((kind, _)) =
-                                    indexes.first().map(|index| outbound_kinds()[*index])
-                                {
-                                    this.set_outbound_kind(kind, window, cx);
-                                }
-                            })),
-                    )
-                    .children((!is_group).then(|| self.render_node_fields(outbound, disabled, cx)))
-                    .children(is_group.then(|| self.render_group_fields(outbound, disabled, cx)))
-            }))
+                        })
+                }),
+            ))
     }
 
-    fn toggle_add_outbound(&mut self, cx: &mut Context<Self>) {
-        self.adding_outbound = !self.adding_outbound;
-        cx.notify();
-    }
-
-    fn add_outbound_kind(
-        &mut self,
-        kind: OutboundKind,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.add_outbound(kind, window, cx);
-        self.adding_outbound = false;
-        cx.notify();
-    }
-
-    fn render_node_fields(
+    pub(super) fn render_node_fields(
         &self,
         outbound: &lanpath_client::config_slices::CustomOutbound,
         disabled: bool,
-        cx: &Context<Self>,
+        window: &mut Window,
+        view: &gpui_kit::Entity<Self>,
     ) -> impl IntoElement {
         let kind = outbound_kind(&outbound.protocol);
         let credential = match kind {
@@ -223,16 +192,16 @@ impl ConfigSlicesView {
                                     .label("启用 TLS")
                                     .checked(tls.enabled)
                                     .disabled(disabled)
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.toggle_outbound_tls(cx)),
-                                    ),
+                                    .on_click(window.listener_for(view, |this, _, _, cx| {
+                                        this.toggle_outbound_tls(cx)
+                                    })),
                             )
                             .child(
                                 Switch::new("outbound-insecure")
                                     .label("跳过证书验证")
                                     .checked(tls.insecure)
                                     .disabled(disabled || !tls.enabled)
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                    .on_click(window.listener_for(view, |this, _, _, cx| {
                                         this.toggle_outbound_insecure(cx)
                                     })),
                             ),
@@ -294,11 +263,12 @@ impl ConfigSlicesView {
             }))
     }
 
-    fn render_group_fields(
+    pub(super) fn render_group_fields(
         &self,
         outbound: &lanpath_client::config_slices::CustomOutbound,
         disabled: bool,
-        cx: &Context<Self>,
+        window: &mut Window,
+        view: &gpui_kit::Entity<Self>,
     ) -> impl IntoElement {
         let member_locked = disabled || outbound.builtin;
         let interrupt = match &outbound.protocol {
@@ -320,7 +290,11 @@ impl ConfigSlicesView {
                     .label("切换时中断已有连接")
                     .checked(interrupt)
                     .disabled(disabled)
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_outbound_interrupt(cx))),
+                    .on_click(
+                        window.listener_for(view, |this, _, _, cx| {
+                            this.toggle_outbound_interrupt(cx)
+                        }),
+                    ),
             )
             .children(
                 matches!(outbound.protocol, OutboundProtocol::Selector(_)).then(|| {
@@ -341,7 +315,7 @@ impl ConfigSlicesView {
     }
 }
 
-fn outbound_kinds() -> [(OutboundKind, &'static str); 7] {
+pub(super) fn outbound_kinds() -> [(OutboundKind, &'static str); 7] {
     [
         (OutboundKind::Vless, "VLESS"),
         (OutboundKind::Vmess, "VMess"),

@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{business::BusinessService, runtime::DesktopRuntime};
 
 mod card;
+mod menu;
 mod render;
 
 pub(crate) struct SubscriptionsChanged;

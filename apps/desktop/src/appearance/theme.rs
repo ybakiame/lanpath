@@ -3,8 +3,6 @@ use gpui_kit::{App, Hsla, WindowAppearance, px, rgb};
 
 use super::{AccentPreference, AppearancePreferences};
 
-const WINDOW_SURFACE_OPACITY: f32 = 0.86;
-
 pub(super) fn apply(
     preferences: AppearancePreferences,
     appearance: WindowAppearance,
@@ -26,44 +24,97 @@ pub(super) fn apply(
         let scale = f32::from(preferences.scale_percent()) / 100.;
         theme.font_size = px(16. * scale);
         theme.mono_font_size = px(13. * scale);
+        apply_surfaces(theme, dark);
         let pure_black = preferences.effective_pure_black(appearance);
         if pure_black {
             apply_pure_black(theme);
         }
         apply_accent(theme, preferences.accent(), dark);
         theme.overlay = theme.background.opacity(0.72);
-        if cfg!(windows) && !pure_black {
+        if preferences.uses_acrylic(appearance) {
             apply_window_material(theme);
         }
     });
 }
 
 fn apply_window_material(theme: &mut Theme) {
-    theme.background = theme.background.opacity(WINDOW_SURFACE_OPACITY);
-    theme.title_bar = theme.title_bar.opacity(WINDOW_SURFACE_OPACITY);
-    theme.sidebar = theme.sidebar.opacity(WINDOW_SURFACE_OPACITY);
+    // Root paints the backdrop once. Chrome is a light tint above it, while
+    // editors, menus and content surfaces stay opaque for stable text contrast.
+    theme.background = theme.background.opacity(0.78);
+    theme.title_bar = theme.title_bar.opacity(0.32);
+    theme.sidebar = theme.sidebar.opacity(0.36);
+}
+
+fn apply_surfaces(theme: &mut Theme, dark: bool) {
+    let color = |light, dark_color| -> Hsla { rgb(if dark { dark_color } else { light }).into() };
+    let background = color(0xf2f4f8, 0x171a21);
+    let surface = color(0xffffff, 0x21252e);
+    let secondary = color(0xe9edf3, 0x2a303b);
+    let hover = color(0xe3e8f0, 0x343c49);
+    let border = color(0xd4dbe5, 0x414b5b);
+    let foreground = color(0x202a3a, 0xe8edf5);
+    let muted_foreground = color(0x566378, 0xa8b5c8);
+    theme.background = background;
+    theme.foreground = foreground;
+    theme.group_box = surface;
+    theme.group_box_foreground = foreground;
+    theme.popover = surface;
+    theme.popover_foreground = foreground;
+    theme.sidebar = background;
+    theme.sidebar_foreground = foreground;
+    theme.title_bar = background;
+    theme.status_bar = background;
+    theme.colors.list = surface;
+    theme.list_even = surface;
+    theme.list_head = secondary;
+    theme.list_hover = secondary;
+    theme.table = surface;
+    theme.table_even = surface;
+    theme.table_head = secondary;
+    theme.table_foot = secondary;
+    theme.table_hover = secondary;
+    theme.tab = background;
+    theme.tab_bar = background;
+    theme.tab_bar_segmented = secondary;
+    theme.tab_active = surface;
+    theme.accordion = surface;
+    theme.secondary = secondary;
+    theme.secondary_foreground = foreground;
+    theme.secondary_hover = hover;
+    theme.secondary_active = hover;
+    theme.button = surface;
+    theme.button_foreground = foreground;
+    theme.button_hover = secondary;
+    theme.button_active = hover;
+    theme.button_secondary = secondary;
+    theme.button_secondary_foreground = foreground;
+    theme.button_secondary_hover = hover;
+    theme.button_secondary_active = hover;
+    theme.muted = secondary;
+    theme.muted_foreground = muted_foreground;
+    theme.description_list_label = secondary;
+    theme.description_list_label_foreground = muted_foreground;
+    theme.skeleton = secondary;
+    theme.switch = border;
+    theme.border = border;
+    theme.input = color(0x8794a8, 0x718198);
+    theme.sidebar_border = border;
+    theme.title_bar_border = border;
+    theme.status_bar_border = border;
+    theme.table_row_border = border;
+    theme.window_border = border;
 }
 
 fn apply_accent(theme: &mut Theme, accent: AccentPreference, dark: bool) {
     // Product palette from packages/ui/src/appearance.css; accents are a separate
     // semantic axis, never replacements for danger/warning/success/info colors.
-    let color: Hsla = rgb(match (accent, dark) {
-        (AccentPreference::Iris, false) => 0x6550c9,
-        (AccentPreference::Teal, false) => 0x087e80,
-        (AccentPreference::Rose, false) => 0xb63d72,
-        (AccentPreference::Blue, false) => 0x2463c4,
-        (AccentPreference::Iris, true) => 0xb5a4ff,
-        (AccentPreference::Teal, true) => 0x79d9cf,
-        (AccentPreference::Rose, true) => 0xf4a0c0,
-        (AccentPreference::Blue, true) => 0x97beff,
-    })
-    .into();
+    let color = accent_color(accent, dark);
     let foreground: Hsla = rgb(if dark { 0x181823 } else { 0xffffff }).into();
     let hover_mix: Hsla = rgb(if dark { 0xffffff } else { 0x000000 }).into();
     let hover = color.blend(hover_mix.opacity(0.1));
     let active = color.blend(hover_mix.opacity(0.16));
     let soft = theme
-        .background
+        .group_box
         .blend(color.opacity(if dark { 0.14 } else { 0.10 }));
     theme.primary = color;
     theme.primary_foreground = foreground;
@@ -97,6 +148,26 @@ fn apply_accent(theme: &mut Theme, accent: AccentPreference, dark: bool) {
     theme.tab_active_foreground = color;
     theme.drag_border = color;
     theme.drop_target = soft;
+}
+
+pub(crate) fn accent_color(accent: AccentPreference, dark: bool) -> Hsla {
+    rgb(match (accent, dark) {
+        (AccentPreference::Iris, false) => 0x6550c9,
+        (AccentPreference::Teal, false) => 0x087e80,
+        (AccentPreference::Rose, false) => 0xb63d72,
+        (AccentPreference::Blue, false) => 0x2463c4,
+        (AccentPreference::Iris, true) => 0xb5a4ff,
+        (AccentPreference::Teal, true) => 0x79d9cf,
+        (AccentPreference::Rose, true) => 0xf4a0c0,
+        (AccentPreference::Blue, true) => 0x97beff,
+    })
+    .into()
+}
+
+pub(crate) fn preview_colors(dark: bool) -> (Hsla, Hsla, Hsla) {
+    let mut theme = Theme::default();
+    apply_surfaces(&mut theme, dark);
+    (theme.background, theme.group_box, theme.border)
 }
 
 fn apply_pure_black(theme: &mut Theme) {
@@ -191,6 +262,29 @@ mod tests {
                     contrast >= 4.5,
                     "accent {accent:?}, dark={dark}: {contrast}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn readable_surfaces_survive_dark_light_and_pure_black_palettes() {
+        for dark in [false, true] {
+            for black in [false, true] {
+                let mut theme = Theme::default();
+                apply_surfaces(&mut theme, dark);
+                if dark && black {
+                    apply_pure_black(&mut theme);
+                }
+                for surface in [theme.group_box, theme.background, theme.popover] {
+                    for text in [theme.foreground, theme.muted_foreground] {
+                        let a = luminance(surface);
+                        let b = luminance(text);
+                        assert!(
+                            (a.max(b) + 0.05) / (a.min(b) + 0.05) >= 4.5,
+                            "dark={dark}, black={black}, surface={surface:?}, text={text:?}"
+                        );
+                    }
+                }
             }
         }
     }

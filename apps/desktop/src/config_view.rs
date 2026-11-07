@@ -151,17 +151,13 @@ impl Render for ConfigView {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .gap_2()
+            .gap_3()
             .key_context("Configuration")
             .on_action(cx.listener(|this, _: &ReloadConfiguration, window, cx| {
                 this.refresh(window, cx)
             }))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child("生成配置预览")
+            .child(crate::design::page_header("sing-box 配置预览", "查看最终合成结果与核心校验信息",
+crate::design::toolbar()
                     .child(
                         Button::new("configuration-reload")
                             .label("重新生成")
@@ -169,8 +165,7 @@ impl Render for ConfigView {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.refresh(window, cx)
                             })),
-                    ),
-            )
+                    ), cx))
             .child(
                 div()
                     .id("configuration-status")
@@ -198,11 +193,9 @@ impl Render for ConfigView {
                     .readonly(true)
                     .size_full(),
             )
-            .child(
-                div()
+            .child(crate::design::help("configuration-help", "配置合成顺序与快捷键", div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("只读结果：订阅节点 → 配置片段 → 远程/本地 YAML → 远程/本地 JS → 固定实验 loopback 入站/API。Ctrl+R 重新生成。"),
-            )
+                    .child("只读结果：订阅节点 → 配置片段 → 远程/本地 YAML → 远程/本地 JS → 固定实验 loopback 入站/API。Ctrl+R 重新生成。")))
     }
 }

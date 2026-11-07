@@ -75,8 +75,7 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_closing(quiescing, cx));
         self.logs
             .update(cx, |view, cx| view.set_closing(quiescing, cx));
-        self.about
-            .update(cx, |view, cx| view.set_closing(quiescing, cx));
+
         self.system
             .update(cx, |view, cx| view.set_closing(quiescing, cx));
         let running = !quiescing && self.core_running;

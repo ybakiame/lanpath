@@ -112,7 +112,7 @@ pub(crate) struct DesktopRuntime {
     #[cfg(windows)]
     proxy_guardian: Mutex<Option<crate::proxy_guardian::Guardian>>,
     binary_override: Option<PathBuf>,
-    selected_core: Mutex<Option<String>>,
+    selected_core: Mutex<Option<(CoreType, String)>>,
     startup: tokio::sync::watch::Sender<StartupProgress>,
     missing_rule_sets: Mutex<RunResources>,
     observations: Option<ObservationService>,
@@ -168,25 +168,35 @@ impl DesktopRuntime {
     }
 
     pub(crate) fn refresh_selected_core(&self) {
-        let name = self.business.as_ref().and_then(|business| {
-            business.client_config().ok().and_then(|config| {
-                config
+        let selection = self.business.as_ref().and_then(|business| {
+            business.client_config().ok().map(|config| {
+                let name = config
                     .core_binary
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .map(str::to_owned)
+                    .unwrap_or_else(|| config.core_type.to_string());
+                (config.core_type, name)
             })
         });
         if let Ok(mut selected) = self.selected_core.lock() {
-            *selected = name;
+            *selected = selection;
         }
+    }
+
+    pub(crate) fn selected_core_type(&self) -> CoreType {
+        self.selected_core
+            .lock()
+            .ok()
+            .and_then(|selected| selected.as_ref().map(|(kind, _)| *kind))
+            .unwrap_or_default()
     }
 
     pub(crate) fn selected_core_name(&self) -> String {
         self.selected_core
             .lock()
             .ok()
-            .and_then(|selected| selected.clone())
+            .and_then(|selected| selected.as_ref().map(|(_, name)| name.clone()))
             .unwrap_or_else(|| "sing-box".into())
     }
 

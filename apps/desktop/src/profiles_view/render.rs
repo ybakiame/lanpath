@@ -280,38 +280,19 @@ impl Render for ProfilesView {
             .min_w_0()
             .min_h_0()
             .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_lg().font_semibold().child("覆写模板"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("共 {} 个模板", self.profiles.len())),
-                            ),
-                    )
-                    .child(
-                        Button::new("profile-new")
-                            .small()
-                            .icon(IconName::Plus)
-                            .label("新建模板")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.request_select(None, window, cx, true)
-                            })),
-                    ),
-            )
+            .child(crate::design::page_header(
+                "覆写模板",
+                format!("{} 个模板", self.profiles.len()),
+                Button::new("profile-new")
+                    .small()
+                    .icon(IconName::Plus)
+                    .label("新建模板…")
+                    .disabled(disabled)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.request_select(None, window, cx, true)
+                    })),
+                cx,
+            ))
             .child(
                 div()
                     .id("profile-status")
@@ -336,7 +317,6 @@ impl Render for ProfilesView {
                     .min_h_0()
                     .gap_4()
                     .overflow_y_scrollbar()
-                    .p_1()
                     .children(
                         self.profiles
                             .iter()
@@ -355,7 +335,8 @@ impl Render for ProfilesView {
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(IconName::Inbox)
-                                .child("暂无覆写模板"),
+                                .child("暂无覆写模板")
+                                .child("新建 YAML 或 JavaScript 模板，再绑定到订阅。"),
                         )
                     }),
             )

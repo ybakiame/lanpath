@@ -8,10 +8,11 @@ use gpui_kit::component::{
     button::Button,
     input::{Editor, EditorState},
     list::{List, ListState},
+    scroll::ScrollableElement as _,
 };
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-    Subscription, Task, Window, div,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, Styled as _, Subscription, Task, Window, div,
 };
 use lanpath_client::connections::{
     ActiveConnections, clash_close_connection, clash_get_connections,
@@ -281,7 +282,7 @@ impl ConnectionsView {
 }
 
 impl Render for ConnectionsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_selection = self.list.read(cx).delegate().selected_id().is_some();
         let count = self.list.read(cx).delegate().len();
         let status = if !self.running {
@@ -305,15 +306,11 @@ impl Render for ConnectionsView {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child("连接")
+            .gap_3()
+            .child(crate::design::page_header(
+                "连接",
+                "当前会话与流量",
+                crate::design::toolbar()
                     .child(
                         Button::new("connections-refresh")
                             .label("刷新连接")
@@ -338,51 +335,106 @@ impl Render for ConnectionsView {
                                 }
                             })),
                     ),
-            )
+                cx,
+            ))
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
+                    .id("connections-metadata")
+                    .h((window.viewport_size().height * 0.30).min(
+                        (window.viewport_size().height - window.rem_size() * 14.0)
+                            .max(window.rem_size() * 4.0)
+                            * 0.5,
+                    ))
+                    .min_h_0()
+                    .min_w_0()
                     .flex_shrink_0()
-                    .gap_2()
+                    .overflow_y_scrollbar()
                     .child(
-                        Button::new("connections-active")
-                            .label("活动连接")
-                            .selected(!self.show_closed)
-                            .on_click(cx.listener(|this, _, _, cx| this.select_kind(false, cx))),
-                    )
-                    .child(
-                        Button::new("connections-closed")
-                            .label("会话已关闭")
-                            .selected(self.show_closed)
-                            .on_click(cx.listener(|this, _, _, cx| this.select_kind(true, cx))),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .gap_3()
+                            .p_1()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .flex_wrap()
+                                    .flex_shrink_0()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("connections-active")
+                                            .label("活动连接")
+                                            .selected(!self.show_closed)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.select_kind(false, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("connections-closed")
+                                            .label("会话已关闭")
+                                            .selected(self.show_closed)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.select_kind(true, cx)
+                                            })),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(status),
+                            )
+                            .children(self.action_error.as_ref().map(|error| {
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().danger)
+                                    .child(format!("关闭失败：{error}"))
+                            }))
+                            .children(self.notice.map(|notice| div().text_sm().child(notice)))
+                            .child(
+                                crate::design::toolbar()
+                                    .child(crate::design::metric(
+                                        if self.show_closed {
+                                            "会话关闭记录"
+                                        } else {
+                                            "活动连接"
+                                        },
+                                        if self.loaded {
+                                            count.to_string()
+                                        } else {
+                                            "—".into()
+                                        },
+                                        cx,
+                                    ))
+                                    .child(crate::design::metric(
+                                        "累计上传",
+                                        if self.loaded {
+                                            crate::design::format_bytes(self.upload_total)
+                                        } else {
+                                            "—".into()
+                                        },
+                                        cx,
+                                    ))
+                                    .child(crate::design::metric(
+                                        "累计下载",
+                                        if self.loaded {
+                                            crate::design::format_bytes(self.download_total)
+                                        } else {
+                                            "—".into()
+                                        },
+                                        cx,
+                                    )),
+                            ),
                     ),
             )
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(status),
+                crate::design::surface(cx)
+                    .flex_1()
+                    .min_h_0()
+                    .child(List::new(&self.list).size_full()),
             )
-            .children(self.action_error.as_ref().map(|error| {
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().danger)
-                    .child(format!("关闭失败：{error}"))
-            }))
-            .children(self.notice.map(|notice| div().text_sm().child(notice)))
-            .child(div().text_sm().child(format!(
-                "{}累计上传 {} B · 累计下载 {} B",
-                if self.show_closed {
-                    "关闭缓冲"
-                } else {
-                    "活动连接"
-                },
-                self.upload_total,
-                self.download_total
-            )))
-            .child(List::new(&self.list).flex_1().min_h_0().min_w_0())
             .children((!self.detail_text.is_empty()).then(|| {
                 div()
                     .flex()

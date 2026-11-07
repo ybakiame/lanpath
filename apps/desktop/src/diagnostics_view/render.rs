@@ -1,4 +1,3 @@
-use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _,
     button::{Button, ButtonVariants as _},
@@ -35,7 +34,6 @@ impl Render for DiagnosticsView {
             .min_w_0()
             .w_full()
             .gap_4()
-            .p_1()
             .max_w(gpui_kit::rems(64.0));
         if let Some(completed) = &self.completed {
             let report = &completed.report;
@@ -105,9 +103,9 @@ impl Render for DiagnosticsView {
             );
         }
         div().flex().flex_col().flex_1().min_h_0().min_w_0().gap_3().overflow_y_scrollbar()
-            .child(div().flex().flex_col().min_w_0().w_full().gap_3().p_1().flex_shrink_0()
+            .child(div().flex().flex_col().min_w_0().w_full().gap_3().flex_shrink_0()
                 .max_w(gpui_kit::rems(64.0))
-                .child(div().text_lg().font_semibold().child("连通性诊断"))
+                .child(crate::design::page_header("诊断", "逐步检查 DNS、直连与核心请求路径", div(), cx))
                 .child(div().text_sm().text_color(cx.theme().muted_foreground)
                     .child("检查显式请求路径，不设置系统代理、不启用 TUN，也不能证明系统隧道正常。诊断使用接受运行时已保存的实验配置；不会显示完整配置或 API 密钥。"))
                 .child(div().flex().flex_col().gap_2()
@@ -128,8 +126,8 @@ impl Render for DiagnosticsView {
                     .aria_label(status.clone()).text_sm()
                     .text_color(if self.error.is_some() { cx.theme().danger } else { cx.theme().muted_foreground })
                     .child(status))
-                .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                    .child("探测逐步执行，系统 DNS、直连和核心 HTTPS 每步最多约 8 秒，各 DNS 服务器分别等待；服务器较多时需要更久。关闭窗口会等待已接受的诊断完成。")))
+                .child(crate::design::help("diagnostics-timeout-help", "探测时间与退出", div().text_sm().text_color(cx.theme().muted_foreground)
+                    .child("探测逐步执行，系统 DNS、直连和核心 HTTPS 每步最多约 8 秒，各 DNS 服务器分别等待；服务器较多时需要更久。关闭窗口会等待已接受的诊断完成。"))))
             .child(div().id("diagnostics-report").role(Role::Group)
                 .accessibility_id("diagnostics-report")
                 .aria_label("连通性诊断报告")

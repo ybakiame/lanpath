@@ -7,11 +7,13 @@ mod business;
 mod config_slices_view;
 mod config_view;
 mod configuration;
+mod configuration_workspace;
 mod connection_list;
 mod connections_view;
 mod core_lifecycle;
 mod core_management_view;
 mod data_root;
+mod design;
 mod diagnostics_view;
 mod disk_log_writer;
 mod distribution;
@@ -54,6 +56,7 @@ mod windows_access;
 mod windows_file;
 #[cfg(windows)]
 mod windows_gui;
+mod workspace;
 
 use about_view::AboutView;
 use appearance_view::AppearanceView;
@@ -114,9 +117,11 @@ enum Page {
 
 struct DesktopView {
     page: Page,
+    configuration_section: configuration_workspace::StructuredSection,
     focus_handle: FocusHandle,
     content_focus: FocusHandle,
     navigation_focus: Rc<[FocusHandle; 19]>,
+    navigation_expanded: [bool; 4],
     _focus_lost_subscription: Subscription,
     configuration: Entity<ConfigView>,
     subscriptions: Entity<SubscriptionsView>,
@@ -235,7 +240,7 @@ impl DesktopView {
         let appearance = cx.new(|cx| AppearanceView::new(window, cx));
         let cores = cx.new(|cx| CoreManagementView::new(core.clone(), window, cx));
         let diagnostics = cx.new(|cx| DiagnosticsView::new(core.clone(), window, cx));
-        let about = cx.new(|cx| AboutView::new(core.clone(), cx));
+        let about = cx.new(|_| AboutView);
         let backups = cx.new(|cx| BackupView::new(core.clone(), window, cx));
         let distribution = cx.new(|cx| DistributionView::new(core.clone(), window, cx));
         _business_subscriptions.push(cx.subscribe_in(
@@ -251,7 +256,6 @@ impl DesktopView {
             |this, _, _: &SystemSettingsChanged, window, cx| {
                 this.configuration
                     .update(cx, |view, cx| view.refresh(window, cx));
-                this.about.update(cx, |view, cx| view.refresh(cx));
                 this.sync_request_lock(cx);
             },
         ));
@@ -271,8 +275,8 @@ impl DesktopView {
             window,
             |this, _, _: &CoreSelectionChanged, window, cx| {
                 this.core.refresh_selected_core();
+                this.reconcile_configuration_page(cx);
                 this.sync_request_lock(cx);
-                this.about.update(cx, |view, cx| view.refresh(cx));
                 this.configuration
                     .update(cx, |view, cx| view.refresh(window, cx));
                 cx.notify();
@@ -328,9 +332,11 @@ impl DesktopView {
         });
         let mut view = Self {
             page: Page::Subscriptions,
+            configuration_section: configuration_workspace::StructuredSection::Dns,
             focus_handle: cx.focus_handle(),
             content_focus: cx.focus_handle().tab_stop(true),
             navigation_focus: Rc::new(std::array::from_fn(|_| cx.focus_handle().tab_stop(true))),
+            navigation_expanded: [true, true, false, false],
             _focus_lost_subscription: focus_lost_subscription,
             configuration,
             subscriptions,
@@ -379,7 +385,9 @@ impl DesktopView {
         if self.closing {
             return;
         }
+        let page = self.available_page(page);
         self.page = page;
+        self.navigation_expanded[page.group_index()] = true;
         self.connections.update(cx, |view, cx| {
             view.set_active(page == Page::Connections, cx)
         });
@@ -393,8 +401,6 @@ impl DesktopView {
             .update(cx, |view, cx| view.set_active(page == Page::Mitm, cx));
         if page == Page::Cores {
             self.cores.update(cx, |view, cx| view.refresh(cx));
-        } else if page == Page::About {
-            self.about.update(cx, |view, cx| view.refresh(cx));
         } else if page == Page::Backup {
             self.backups.update(cx, |view, cx| view.refresh(cx));
         }
@@ -427,7 +433,7 @@ pub fn run() {
     }
     let core = DesktopRuntime::from_env();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
+        .with_assets(product::ProductAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             appearance::initialize(&core, cx);
@@ -438,14 +444,28 @@ pub fn run() {
             tracing::info!("GPUI experimental desktop initialized");
             let (window, _) = gpui_kit::open_window(
                 WindowOptions {
+                    // Native window geometry is in logical pixels, independent of
+                    // the user's rem-based interface zoom.
+                    window_bounds: Some(gpui_kit::WindowBounds::Windowed(
+                        gpui_kit::Bounds::centered(
+                            None,
+                            gpui_kit::size(gpui_kit::px(1180.), gpui_kit::px(800.)),
+                            cx,
+                        ),
+                    )),
+                    window_min_size: Some(gpui_kit::size(gpui_kit::px(960.), gpui_kit::px(640.))),
                     // Windows otherwise exposes the HWND before GPUI installs its
                     // close callbacks. An immediate close can orphan the event loop.
                     show: !cfg!(windows),
                     titlebar: Some(TitlebarOptions {
-                        title: Some(crate::product::DISPLAY_NAME.into()),
+                        title: Some(crate::product::window_title().into()),
                         ..TitleBar::title_bar_options()
                     }),
-                    window_background: if cfg!(windows) {
+                    window_background: if cx
+                        .global::<appearance::AppearanceState>()
+                        .preferences()
+                        .uses_acrylic(cx.window_appearance())
+                    {
                         WindowBackgroundAppearance::Blurred
                     } else {
                         WindowBackgroundAppearance::Opaque

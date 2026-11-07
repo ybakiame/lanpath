@@ -113,9 +113,6 @@ impl DesktopView {
         self.diagnostics.update(cx, |view, cx| {
             view.set_locked(lifecycle || peer_work || core_work, cx)
         });
-        self.about.update(cx, |view, cx| {
-            view.set_locked(lifecycle || peer_work || core_work || diagnosing, cx)
-        });
         self.proxy.update(cx, |view, cx| {
             view.set_locked(lifecycle || core_work || diagnosing || system_work, cx)
         });

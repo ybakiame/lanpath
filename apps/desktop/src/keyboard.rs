@@ -1,9 +1,11 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Collapsible, ThemeStyled as _, WindowExt as _,
+    ActiveTheme as _, Collapsible, Disableable as _, Sizable as _, ThemeStyled as _,
+    WindowExt as _,
+    button::{Button, ButtonVariants as _},
     list::{ListDelegate, ListState},
-    sidebar::{SidebarGroup, SidebarItem, SidebarMenuItem},
+    sidebar::{SidebarItem, SidebarMenuItem},
 };
 use gpui_kit::{
     App, Context, ElementId, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
@@ -13,18 +15,18 @@ use gpui_kit::{
 
 use crate::{DesktopView, Page};
 
-gpui_kit::actions!(desktop, [CycleRegion, SaveCurrentForm]);
+gpui_kit::actions!(desktop, [CycleRegion, SaveCurrentForm, OpenAppearance]);
 gpui_kit::actions!(desktop_navigation, [Next, Previous, First, Last, Activate]);
 
 pub(crate) const PAGES: [Page; 19] = [
     Page::Subscriptions,
-    Page::Profiles,
-    Page::Structured,
-    Page::Rules,
-    Page::Configuration,
     Page::Proxies,
     Page::Connections,
     Page::Stats,
+    Page::Profiles,
+    Page::Rules,
+    Page::Structured,
+    Page::Configuration,
     Page::Logs,
     Page::Diagnostics,
     Page::Scripts,
@@ -43,6 +45,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("f6", CycleRegion, Some("Desktop")),
         KeyBinding::new("shift-f6", CycleRegion, Some("Desktop")),
         KeyBinding::new("ctrl-s", SaveCurrentForm, Some("Desktop")),
+        KeyBinding::new("ctrl-,", OpenAppearance, Some("Desktop")),
         KeyBinding::new("down", Next, Some("DesktopNavigation")),
         KeyBinding::new("up", Previous, Some("DesktopNavigation")),
         KeyBinding::new("home", First, Some("DesktopNavigation")),
@@ -71,6 +74,8 @@ pub(crate) struct NavigationMenu {
     handles: Rc<[FocusHandle; 19]>,
     active: Page,
     disabled: bool,
+    expanded: [bool; 4],
+    core_type: lanpath_common::CoreType,
 }
 
 impl NavigationMenu {
@@ -80,14 +85,17 @@ impl NavigationMenu {
             handles: view.navigation_focus.clone(),
             active: view.page,
             disabled: view.closing,
+            expanded: view.navigation_expanded,
+            core_type: view.core.selected_core_type(),
         }
     }
 
-    fn group(&self, title: &'static str, pages: Range<usize>) -> SidebarGroup<NavigationItems> {
-        SidebarGroup::new(title).child(NavigationItems {
+    fn group(&self, title: &'static str, pages: Range<usize>) -> NavigationItems {
+        NavigationItems {
             menu: self.clone(),
             pages,
-        })
+            title,
+        }
     }
 }
 
@@ -107,23 +115,26 @@ impl SidebarItem for NavigationMenu {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
-        // Keep the small, fixed destination tree mounted together. Sidebar otherwise
-        // virtualizes whole groups, removing offscreen keyboard destinations.
+        // The fixed destination tree uses an ordinary scroll owner. Groups retain
+        // their domain focus handles while collapsed and reveal on keyboard entry.
         div()
             .id(id)
             .flex()
             .flex_col()
             .gap_3()
             .child(
-                self.group("配置", 0..5)
-                    .render("configuration-navigation", window, cx),
+                self.group("工作区", 0..4)
+                    .render("workspace-navigation", window, cx),
             )
             .child(
-                self.group("运行", 5..10)
-                    .render("runtime-navigation", window, cx),
+                self.group(
+                    crate::configuration_workspace::configuration_title(self.core_type),
+                    4..8,
+                )
+                .render("configuration-navigation", window, cx),
             )
             .child(
-                self.group("扩展", 10..12)
+                self.group("工具与扩展", 8..12)
                     .render("extension-navigation", window, cx),
             )
             .child(
@@ -137,6 +148,7 @@ impl SidebarItem for NavigationMenu {
 struct NavigationItems {
     menu: NavigationMenu,
     pages: Range<usize>,
+    title: &'static str,
 }
 
 impl Collapsible for NavigationItems {
@@ -155,23 +167,67 @@ impl SidebarItem for NavigationItems {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
+        let group = self.pages.start / 4;
+        let expanded = self.menu.expanded[group];
+        let view = self.menu.view.clone();
         div()
             .id(id)
             .flex()
             .flex_col()
             .gap_1()
-            .children(self.pages.map(|index| {
-                let page = PAGES[index];
-                NavigationItem {
-                    view: self.menu.view.clone(),
-                    handle: self.menu.handles[index].clone(),
-                    page,
-                    active: self.menu.active == page,
-                    disabled: self.menu.disabled,
-                }
-                .render(("navigation-page", page as usize), window, cx)
-                .into_any_element()
-            }))
+            .child(
+                Button::new(("navigation-group", group))
+                    .ghost()
+                    .small()
+                    .w_full()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .w_full()
+                            .gap_2()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                gpui_kit::component::Icon::new(if expanded {
+                                    gpui_kit::assets::IconName::ChevronDown
+                                } else {
+                                    gpui_kit::assets::IconName::ChevronRight
+                                })
+                                .xsmall(),
+                            )
+                            .child(self.title),
+                    )
+                    .accessibility_label(format!(
+                        "{}{}",
+                        if expanded { "收起" } else { "展开" },
+                        self.title
+                    ))
+                    .disabled(self.menu.disabled)
+                    .on_click(move |_, _, cx| {
+                        let _ = view.update(cx, |view, cx| {
+                            if !view.closing {
+                                view.navigation_expanded[group] = !view.navigation_expanded[group];
+                                cx.notify();
+                            }
+                        });
+                    }),
+            )
+            .children(
+                self.pages
+                    .filter(|index| expanded && PAGES[*index].visible_for(self.menu.core_type))
+                    .map(|index| {
+                        let page = PAGES[index];
+                        NavigationItem {
+                            view: self.menu.view.clone(),
+                            handle: self.menu.handles[index].clone(),
+                            page,
+                            active: self.menu.active == page,
+                            disabled: self.menu.disabled,
+                        }
+                        .render(("navigation-page", page as usize), window, cx)
+                        .into_any_element()
+                    }),
+            )
     }
 }
 
@@ -270,31 +326,42 @@ impl SidebarItem for NavigationItem {
 }
 
 impl DesktopView {
-    pub(crate) fn focus_navigation(&self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn focus_navigation(
+        &mut self,
+        page: Page,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.closing {
+            let page = self.available_page(page);
             let Some(index) = PAGES.iter().position(|&candidate| candidate == page) else {
                 return;
             };
+            self.navigation_expanded[page.group_index()] = true;
             self.navigation_focus[index].focus(window, cx);
             cx.notify();
         }
     }
 
     fn move_navigation(
-        &self,
+        &mut self,
         page: Page,
         offset: isize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = PAGES.iter().position(|&candidate| candidate == page) else {
+        let pages: Vec<_> = PAGES
+            .into_iter()
+            .filter(|page| page.visible_for(self.core.selected_core_type()))
+            .collect();
+        let Some(index) = pages.iter().position(|&candidate| candidate == page) else {
             return;
         };
-        let next = (index as isize + offset).rem_euclid(PAGES.len() as isize) as usize;
-        self.focus_navigation(PAGES[next], window, cx);
+        let next = (index as isize + offset).rem_euclid(pages.len() as isize) as usize;
+        self.focus_navigation(pages[next], window, cx);
     }
 
-    pub(crate) fn cycle_region(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn cycle_region(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.closing || window.has_active_dialog(cx) || window.has_active_sheet(cx) {
             return;
         }
@@ -321,7 +388,7 @@ impl DesktopView {
             Page::Subscriptions => self
                 .subscriptions
                 .update(cx, |view, cx| view.save_from_shortcut(window, cx)),
-            Page::Structured => self.structured.update(cx, |view, cx| view.save(window, cx)),
+            Page::Structured => self.save_structured_section(window, cx),
             Page::Rules => self.rules.update(cx, |view, cx| view.save(window, cx)),
             Page::Scripts => self
                 .scripts

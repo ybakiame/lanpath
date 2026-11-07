@@ -1,5 +1,4 @@
 use gpui_kit::assets::IconName;
-use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
@@ -257,7 +256,15 @@ impl Render for SubscriptionsView {
             .map(str::to_string)
             .or_else(|| self.error.clone())
             .or_else(|| self.notice.clone())
-            .unwrap_or_else(|| "刷新失败保留上次成功缓存".into());
+            .unwrap_or_else(|| {
+                if self.subscriptions.is_empty() {
+                    "支持订阅链接、Clash 与 sing-box 配置".into()
+                } else if self.active.is_none() {
+                    "选择订阅并设为当前，再启动核心".into()
+                } else {
+                    "选择订阅以查看详情与操作".into()
+                }
+            });
 
         div()
             .id("subscriptions-page")
@@ -267,38 +274,19 @@ impl Render for SubscriptionsView {
             .min_w_0()
             .min_h_0()
             .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(div().text_lg().font_semibold().child("订阅管理"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("共 {} 个订阅源", self.subscriptions.len())),
-                            ),
-                    )
-                    .child(
-                        Button::new("subscription-new")
-                            .small()
-                            .icon(IconName::Plus)
-                            .label("添加订阅")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.request_select(None, window, cx, true)
-                            })),
-                    ),
-            )
+            .child(crate::design::page_header(
+                "订阅",
+                format!("{} 个订阅源", self.subscriptions.len()),
+                Button::new("subscription-new")
+                    .small()
+                    .icon(IconName::Plus)
+                    .label("添加订阅…")
+                    .disabled(disabled)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.request_select(None, window, cx, true)
+                    })),
+                cx,
+            ))
             .child(
                 div()
                     .id("subscription-status")
@@ -323,7 +311,6 @@ impl Render for SubscriptionsView {
                     .min_h_0()
                     .gap_4()
                     .overflow_y_scrollbar()
-                    .p_1()
                     .children(
                         self.subscriptions
                             .iter()
@@ -342,7 +329,8 @@ impl Render for SubscriptionsView {
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(IconName::Inbox)
-                                .child("暂无订阅"),
+                                .child("暂无订阅")
+                                .child("添加订阅链接，获取可用节点。"),
                         )
                     }),
             )

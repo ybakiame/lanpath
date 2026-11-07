@@ -27,6 +27,12 @@
 首帧脚本与 React Provider 使用相同值域及平台默认值，非法值回落默认；存储不可用时支持会话内切换。
 颜色在 `packages/ui/src/appearance.css` 中集中定义，组件使用语义令牌，外观偏好不写入核心配置。
 
+## GPUI 实验桌面
+
+独立桌面遵循 [桌面设计说明](desktop-design.md)：雾灰／炭灰背景、清晰的不透明内容层、
+Windows 可选亚克力材质、紧凑导航和统一表单。品牌标识直接嵌入现有 SVG，保持原有颜色；
+界面图标使用 GPUI Kit 的 Lucide 图标族。外观写入本机 `app.toml`，不读取 WebView 存储键。
+
 ## 图标
 
 界面图标统一使用 `lucide-react` 具名导入，保留默认线性描边和语义尺寸。

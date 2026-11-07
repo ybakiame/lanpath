@@ -38,15 +38,11 @@ impl Render for ScriptsView {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child("脚本与片段")
+            .gap_3()
+            .child(crate::design::page_header(
+                "脚本与片段",
+                "导入、更新与调试订阅脚本",
+                crate::design::toolbar()
                     .child(
                         Button::new("scripts-reload")
                             .label("重新载入")
@@ -65,7 +61,8 @@ impl Render for ScriptsView {
                                 cx.listener(|this, _, window, cx| this.fetch_resources(window, cx)),
                             ),
                     ),
-            )
+                cx,
+            ))
             .child(
                 div()
                     .id("scripts-status")
@@ -75,7 +72,7 @@ impl Render for ScriptsView {
                     .flex_shrink_0()
                     .min_w_0()
                     .max_h_16()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
                     .text_color(if self.error.is_some() {
                         cx.theme().danger
                     } else {

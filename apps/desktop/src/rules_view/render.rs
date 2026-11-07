@@ -1,20 +1,26 @@
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
-    button::{Button, ButtonGroup, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _,
+    button::{Button, ButtonVariants as _},
     input::{Input, InputState},
-    scroll::ScrollableElement as _,
 };
 use gpui_kit::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 
+use crate::workspace::workspace_tabs;
+
 use super::{Operation, RulesView, Section};
 
 impl Render for RulesView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let disabled = self.locked || self.busy();
+        let selected_index = match self.section {
+            Section::Rules => 0,
+            Section::RuleSets => 1,
+            Section::Market => 2,
+        };
         let status = self
             .error
             .clone()
@@ -25,7 +31,7 @@ impl Render for RulesView {
                 } else if self.dirty {
                     "有未保存修改；保存后配置预览自动重新生成".into()
                 } else {
-                    "规则按顺序注入；规则集仅在被规则或 DNS 引用时进入运行配置".into()
+                    "当前规则与规则集已载入".into()
                 }
             });
         div()
@@ -34,50 +40,10 @@ impl Render for RulesView {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_2()
+            .gap_3()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .child("规则与规则集")
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("路由、资源与市场"),
-                    )
+                crate::design::toolbar()
                     .child(div().flex_1())
-                    .child(
-                        ButtonGroup::new("rules-sections")
-                            .small()
-                            .compact()
-                            .outline()
-                            .children([
-                                Button::new("rules-section-rules")
-                                    .label("路由规则")
-                                    .selected(self.section == Section::Rules),
-                                Button::new("rules-section-sets")
-                                    .label("规则集")
-                                    .selected(self.section == Section::RuleSets),
-                                Button::new("rules-section-market")
-                                    .label("市场")
-                                    .selected(self.section == Section::Market),
-                            ])
-                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
-                                let section = match indexes.first() {
-                                    Some(0) => Some(Section::Rules),
-                                    Some(1) => Some(Section::RuleSets),
-                                    Some(2) => Some(Section::Market),
-                                    _ => None,
-                                };
-                                if let Some(section) = section {
-                                    this.set_section(section, cx);
-                                }
-                            })),
-                    )
                     .child(
                         Button::new("rules-save")
                             .label(match self.operation {
@@ -110,7 +76,7 @@ impl Render for RulesView {
                     .flex_shrink_0()
                     .min_w_0()
                     .max_h_16()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
                     .text_color(if self.error.is_some() {
                         cx.theme().danger
                     } else {
@@ -118,18 +84,28 @@ impl Render for RulesView {
                     })
                     .child(status),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .overflow_y_scrollbar()
-                    .child(match self.section {
-                        Section::Rules => self.render_rules(disabled, cx).into_any_element(),
-                        Section::RuleSets => self.render_sets(disabled, cx).into_any_element(),
-                        Section::Market => self.render_market(disabled, cx).into_any_element(),
-                    }),
-            )
+            .child(workspace_tabs(
+                "rules-sections",
+                ["路由规则", "规则集", "市场"],
+                selected_index,
+                cx.listener(|this, index: &usize, _, cx| {
+                    let section = match index {
+                        0 => Some(Section::Rules),
+                        1 => Some(Section::RuleSets),
+                        2 => Some(Section::Market),
+                        _ => None,
+                    };
+                    if let Some(section) = section {
+                        this.set_section(section, cx);
+                    }
+                }),
+                match self.section {
+                    Section::Rules => self.render_rules(disabled, cx).into_any_element(),
+                    Section::RuleSets => self.render_sets(disabled, cx).into_any_element(),
+                    Section::Market => self.render_market(disabled, cx).into_any_element(),
+                },
+                cx,
+            ))
     }
 }
 

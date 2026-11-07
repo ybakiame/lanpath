@@ -1,18 +1,37 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::base::StyledExt as _;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, ThemeStyled as _, TitleBar,
-    button::{Button, ButtonVariants as _},
-    sidebar::{Sidebar, SidebarFooter, SidebarHeader},
-};
+use gpui_kit::component::{ActiveTheme as _, ThemeStyled as _, TitleBar, WindowExt as _};
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
-use crate::{CoreOperationKind, DesktopView, Page};
+use crate::{DesktopView, Page};
+
+mod chrome;
 
 impl Page {
+    pub(crate) fn group_index(self) -> usize {
+        match self {
+            Self::Subscriptions | Self::Proxies | Self::Connections | Self::Stats => 0,
+            Self::Profiles
+            | Self::Rules
+            | Self::Structured
+            | Self::Configuration
+            | Self::System => 1,
+            Self::Logs | Self::Diagnostics | Self::Scripts | Self::Mitm => 2,
+            _ => 3,
+        }
+    }
+
+    fn group_title(self, kind: lanpath_common::CoreType) -> &'static str {
+        if self.group_index() == 1 {
+            crate::configuration_workspace::configuration_title(kind)
+        } else {
+            ["工作区", "", "工具与扩展", "设置"][self.group_index()]
+        }
+    }
+
     pub(crate) fn presentation(self) -> (&'static str, IconName) {
         match self {
             Self::Subscriptions => ("订阅", IconName::Rss),
@@ -64,14 +83,19 @@ impl Render for DesktopView {
             || self.requests.read(cx).dirty()
             || self.system.read(cx).dirty()
             || self.distribution.read(cx).dirty();
-        let core_status: gpui_kit::SharedString =
-            format!("{} · {}", self.core.selected_core_name(), self.core.port()).into();
         let (page_title, _) = self.page.presentation();
         let content = match self.page {
             Page::Subscriptions => self.subscriptions.clone().into_any_element(),
             Page::Profiles => self.profiles.clone().into_any_element(),
-            Page::Structured => self.structured.clone().into_any_element(),
+            Page::Structured => self
+                .render_structured_workspace(window, cx)
+                .into_any_element(),
             Page::Rules => self.rules.clone().into_any_element(),
+            Page::Configuration
+                if self.core.selected_core_type() == lanpath_common::CoreType::Mihomo =>
+            {
+                self.render_mihomo_placeholder(cx).into_any_element()
+            }
             Page::Configuration => self.configuration.clone().into_any_element(),
             Page::Proxies => self.proxy.clone().into_any_element(),
             Page::Connections => self.connections.clone().into_any_element(),
@@ -88,47 +112,7 @@ impl Render for DesktopView {
             Page::Distribution => self.distribution.clone().into_any_element(),
             Page::About => self.about.clone().into_any_element(),
         };
-        let sidebar = Sidebar::new("desktop-navigation")
-            .collapsible(false)
-            .h_full()
-            .min_h_0()
-            .flex_shrink_0()
-            .w(gpui_kit::rems(14.0))
-            .min_w(gpui_kit::rems(14.0))
-            .max_w(gpui_kit::rems(14.0))
-            .header(
-                SidebarHeader::new().child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .min_w_0()
-                        .gap_1()
-                        .child(div().font_semibold().child(crate::product::DISPLAY_NAME))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("独立桌面客户端"),
-                        ),
-                ),
-            )
-            .footer(
-                SidebarFooter::new().child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .text_xs()
-                        .whitespace_normal()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(concat!("版本 ", env!("CARGO_PKG_VERSION")))
-                        .child("独立数据 · 与 Tauri 并行")
-                        .child("F6 / Shift+F6 切换区域")
-                        .child("导航 ↑↓ · Enter 打开")
-                        .child("Ctrl+S 保存当前表单"),
-                ),
-            )
-            .child(crate::keyboard::NavigationMenu::new(self, cx));
+        let sidebar = self.render_sidebar(window, cx);
 
         div()
             .id("desktop-workspace")
@@ -140,6 +124,14 @@ impl Render for DesktopView {
                 }),
             )
             .on_action(
+                cx.listener(|this, _: &crate::keyboard::OpenAppearance, window, cx| {
+                    if !window.has_active_dialog(cx) && !window.has_active_sheet(cx) {
+                        this.set_page(Page::Appearance, cx);
+                        this.content_focus.focus(window, cx);
+                    }
+                }),
+            )
+            .on_action(
                 cx.listener(|this, _: &crate::keyboard::SaveCurrentForm, window, cx| {
                     this.save_current_form(window, cx)
                 }),
@@ -147,7 +139,6 @@ impl Render for DesktopView {
             .flex()
             .flex_col()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
                 TitleBar::new().child(
@@ -155,7 +146,7 @@ impl Render for DesktopView {
                         .flex_shrink_0()
                         .text_sm()
                         .font_semibold()
-                        .child(crate::product::DISPLAY_NAME),
+                        .child(crate::product::window_title()),
                 ),
             )
             .child(
@@ -165,12 +156,7 @@ impl Render for DesktopView {
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
-                    // A hidden Windows HWND can initially report non-positive geometry.
-                    // Sidebar caches its virtual-list overdraw from the first viewport;
-                    // mount it only after the native size notification supplies real bounds.
-                    .children(
-                        (window.viewport_size().height > gpui_kit::px(0.0)).then_some(sidebar),
-                    )
+                    .child(sidebar)
                     .child(
                         div()
                             .flex()
@@ -178,120 +164,15 @@ impl Render for DesktopView {
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .flex_wrap()
-                                    .flex_shrink_0()
-                                    .gap_2()
-                                    .px_4()
-                                    .py_3()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .gap_1()
-                                            .child(
-                                                div()
-                                                    .id("core-status")
-                                                    .accessibility_id("core-status")
-                                                    .role(Role::Status)
-                                                    .aria_label(core_status.clone())
-                                                    .text_sm()
-                                                    .min_w_0()
-                                                    .whitespace_normal()
-                                                    .text_color(if self.core_error.is_some() {
-                                                        cx.theme().danger
-                                                    } else {
-                                                        cx.theme().muted_foreground
-                                                    })
-                                                    .child(core_status),
-                                            )
-                                            .children((dirty && !self.core_running).then(|| {
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("有未保存修改；保存或放弃后才能启动核心")
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_wrap()
-                                            .flex_shrink_0()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                Button::new("core-start")
-                                                    .accessibility_id("core-start")
-                                                    .small()
-                                                    .icon(IconName::Play)
-                                                    .label("启动核心")
-                                                    .disabled(
-                                                        operation_busy
-                                                            || self.core_running
-                                                            || self.core_recovery_needed
-                                                            || self
-                                                                .distribution
-                                                                .read(cx)
-                                                                .is_pending()
-                                                            || !self.core.is_configured()
-                                                            || !self
-                                                                .configuration
-                                                                .read(cx)
-                                                                .ready_for_start()
-                                                            || dirty,
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.run_core_operation(
-                                                                CoreOperationKind::Start,
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        },
-                                                    )),
-                                            )
-                                            .child(
-                                                Button::new("core-stop")
-                                                    .accessibility_id("core-stop")
-                                                    .small()
-                                                    .ghost()
-                                                    .icon(IconName::Square)
-                                                    .label(
-                                                        if self.core_recovery_needed
-                                                            && !self.core_running
-                                                        {
-                                                            "恢复自有控制"
-                                                        } else {
-                                                            "停止核心"
-                                                        },
-                                                    )
-                                                    .disabled(
-                                                        operation_busy
-                                                            || (!self.core_running
-                                                                && !self.core_recovery_needed),
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.run_core_operation(
-                                                                CoreOperationKind::Stop,
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        },
-                                                    )),
-                                            ),
-                                    ),
-                            )
+                            // Keep text contrast independent of the desktop
+                            // behind the acrylic navigation and title bar.
+                            .bg(cx.theme().background.opacity(1.0))
+                            .child(self.render_session_bar(operation_busy, dirty, window, cx))
                             .child(
                                 div()
                                     .id("desktop-content")
+                                    .accessibility_id("desktop-content")
+                                    .role(Role::Group)
                                     .track_focus(&self.content_focus)
                                     .aria_label(page_title)
                                     .when(self.content_focus.is_focused(window), |element| {
@@ -302,7 +183,8 @@ impl Render for DesktopView {
                                     .flex_1()
                                     .min_w_0()
                                     .min_h_0()
-                                    .p_4()
+                                    .p_5()
+                                    .text_sm()
                                     .child(content),
                             ),
                     ),
