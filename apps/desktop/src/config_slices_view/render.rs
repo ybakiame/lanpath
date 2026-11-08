@@ -5,8 +5,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Window, div,
+    Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window, div,
 };
 
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -22,11 +21,11 @@ impl Render for ConfigSlicesView {
             .or_else(|| self.notice.clone())
             .unwrap_or_else(|| {
                 if self.locked {
-                    "实验核心运行时结构化配置锁定；停止核心后编辑".into()
+                    "核心运行中，停止后可编辑".into()
                 } else if self.dirty {
-                    "有未保存修改；保存后配置预览自动重新生成".into()
+                    "有未保存修改".into()
                 } else {
-                    "结构化配置独立持久化；保存前执行完整跨切片校验".into()
+                    "配置已载入".into()
                 }
             });
         div()
@@ -36,43 +35,6 @@ impl Render for ConfigSlicesView {
             .min_h_0()
             .min_w_0()
             .gap_3()
-            .child(
-                crate::design::toolbar()
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("slices-save")
-                            .label(match self.operation {
-                                Some(Operation::Save) => "保存中…",
-                                _ => "保存",
-                            })
-                            .primary()
-                            .disabled(disabled || !self.dirty || !self.input_errors.is_empty())
-                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-                    )
-                    .child(
-                        Button::new("slices-reload")
-                            .label("重新载入")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .id("slices-status")
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .flex_shrink_0()
-                    .min_w_0()
-                    .max_h_16()
-                    .overflow_y_scroll()
-                    .text_color(if self.error.is_some() {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(status),
-            )
             .child(
                 div()
                     .flex_1()
@@ -89,6 +51,29 @@ impl Render for ConfigSlicesView {
                         }
                     })),
             )
+            .child(crate::design::form_footer(
+                "slices-status",
+                status,
+                self.error.is_some(),
+                crate::design::toolbar()
+                    .child(
+                        Button::new("slices-save")
+                            .label(match self.operation {
+                                Some(Operation::Save) => "保存中…",
+                                _ => "保存配置",
+                            })
+                            .primary()
+                            .disabled(disabled || !self.dirty || !self.input_errors.is_empty())
+                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
+                    )
+                    .child(
+                        Button::new("slices-reload")
+                            .label("重新载入")
+                            .disabled(disabled)
+                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
+                    ),
+                cx,
+            ))
     }
 }
 

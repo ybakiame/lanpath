@@ -50,15 +50,13 @@ impl Render for SystemSettingsView {
         } else if self.closing {
             "正在关闭；未保存修改会在关闭流程中确认。".into()
         } else if self.running {
-            "核心运行中，网络设置已锁定。停止核心后再修改。".into()
+            "核心运行中，停止后可编辑".into()
         } else if self.locked {
-            "其他操作进行中，暂时不可修改网络设置。".into()
+            "其他操作进行中，暂不可编辑".into()
         } else if self.dirty {
-            "有未保存的网络设置；保存后下次启动核心生效。".into()
+            "有未保存修改".into()
         } else {
-            self.notice
-                .clone()
-                .unwrap_or_else(|| "网络设置与保存值一致。".into())
+            self.notice.clone().unwrap_or_else(|| "配置已载入".into())
         };
         let stack = self.draft.as_ref().map(|draft| draft.tun_stack.as_str());
         let stack_ix = ["system", "gvisor", "mixed"]
@@ -113,18 +111,13 @@ impl Render for SystemSettingsView {
                     .child(Input::new(&self.api_ui).id("system-api-ui").aria_label("Clash API 面板").disabled(disabled))
                     .child(div().text_sm().text_color(cx.theme().muted_foreground)
                         .child("支持 metacubexd、zashboard。混合代理端口及启用的 API 端口必须为 1–65535，且不能与其他监听或已启用的 MITM 返回端口冲突；API 关闭时可保留端口 0，重新启用前需设置有效端口。"))))))
-            .child(div().flex().flex_col().flex_shrink_0().min_w_0().gap_2()
-                .border_t_1().border_color(cx.theme().border).pt_3().px_1().pb_1()
-                .child(div().flex().items_center().flex_wrap().gap_2()
-                    .child(Button::new("system-save").primary().label("保存网络设置").disabled(disabled || !self.dirty)
+            .child(crate::design::form_footer("system-settings-status", status, self.error.is_some(),
+div().flex().items_center().flex_wrap().gap_2()
+                    .child(Button::new("system-save").primary().label("保存配置").disabled(disabled || !self.dirty)
                         .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))))
                     .child(Button::new("system-discard").label("放弃修改…").disabled(disabled || !self.dirty)
                         .on_click(cx.listener(|this, _, window, cx| this.discard(window, cx))))
                     .child(Button::new("system-reload").label("重新载入").disabled(self.unavailable() || self.dirty)
-                        .on_click(cx.listener(|this, _, window, cx| this.load(window, cx)))))
-                .child(div().id("system-settings-status").role(Role::Status).aria_label(status.clone()).text_sm()
-                    .min_w_0().max_h_16().overflow_y_scrollbar()
-                    .text_color(if self.error.is_some() { cx.theme().danger } else { cx.theme().muted_foreground })
-                    .child(status)))
+                        .on_click(cx.listener(|this, _, window, cx| this.load(window, cx)))), cx))
     }
 }

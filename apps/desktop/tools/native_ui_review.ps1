@@ -9,6 +9,8 @@ param(
  [string]$MihomoFixture,
  [string]$SingBoxFixture,
  [switch]$ConfigurationOnly,
+ [switch]$AppearanceOnly,
+ [switch]$ForceStopAfterReview,
  [switch]$LayoutOnly
 )
 $ErrorActionPreference='Stop'
@@ -44,6 +46,10 @@ function Shot([string]$Name) {
  Save-DesktopWindowScreenshot $window (Join-Path $run "$Name.png")
  Get-DesktopElements $window | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $run "$Name.json")
 }
+function Focus-Navigation {
+ (Wait-DesktopElement $window 'desktop-content' -ById).SetFocus()
+ Send-DesktopKeys $window '+{F6}'
+}
 try {
  $env:LANPATH_DESKTOP_DATA_DIR=Join-Path $run 'userdata'
  $env:RUST_BACKTRACE='1'
@@ -63,6 +69,8 @@ try {
  if (-not $LayoutOnly) {
  if (-not $ConfigurationOnly) {
  Invoke-DesktopElement $window '外观'
+ Check ($null -eq (Find-DesktopElement $window 'appearance-reload' -ById)) 'Appearance omits reload action'
+ Check ($null -eq (Find-DesktopElement $window 'appearance-status' -ById)) 'Appearance omits persistent saved status'
  Invoke-DesktopElement $window '浅色主题'
  Wait-Setting 'theme = "light"'
  Shot '02-appearance-light'
@@ -81,10 +89,28 @@ try {
  Invoke-DesktopElement $window '纯黑背景'
  Wait-Setting 'pure_black = false'
  Shot '05-appearance-acrylic'
- Send-DesktopKeys $window '{F6}'
+ Invoke-DesktopElement $window '背景不透明度百分比'
+ Send-DesktopKeys $window '{UP 10}'
+ Send-DesktopKeys $window '{ENTER}'
+ Wait-Setting 'acrylic_opacity_percent = 50'
+ Shot '06-appearance-opacity-50'
+ if ($AppearanceOnly) {
+  if ($ForceStopAfterReview) {
+   Stop-Process -Id $process.Id -Force
+   Check ($process.WaitForExit(15000)) 'appearance review process stops without proxy recovery'
+  } else {
+   $closed=$process.CloseMainWindow()
+   Check ($closed -and $process.WaitForExit(15000)) 'appearance review graceful close completes'
+   Check ($process.ExitCode -eq 0) 'appearance review normal exit code'
+  }
+  $checks | ConvertTo-Json | Set-Content (Join-Path $run 'checks.json')
+  Write-Output "ARTIFACTS=$run"
+  return
+ }
+ Focus-Navigation
  Send-DesktopKeys $window '{END}'
  Send-DesktopKeys $window '{ENTER}'
- Check ($null -ne (Wait-DesktopElement $window 'about-app-version' -ById)) 'F6 End Enter opens About through collapsed navigation'
+ Check ($null -ne (Wait-DesktopElement $window 'about-app-version' -ById)) 'Shift+F6 End Enter opens About through collapsed navigation'
  Check ($null -eq (Find-DesktopElement $window 'about-data-directory' -ById)) 'About omits data directory card'
  Check ($null -eq (Find-DesktopElement $window 'about-selected-core' -ById)) 'About omits selected core card'
  Send-DesktopKeys $window '{HOME}'
@@ -153,7 +179,7 @@ try {
   Invoke-DesktopElement $window '预览'
   Check ($null -ne (Wait-DesktopElement $window 'mihomo-configuration-placeholder' -ById)) 'Mihomo preview is an explicit placeholder'
   Shot 'mihomo-preview'
-  Send-DesktopKeys $window '{F6}'
+  Focus-Navigation
   Send-DesktopKeys $window '{HOME}'
   Send-DesktopKeys $window '{DOWN 4}'
   Send-DesktopKeys $window '{ENTER}'
@@ -250,7 +276,13 @@ try {
  throw
 } finally {
  if ($server) { $server | Stop-Job; $server | Remove-Job -Force }
- if ($process -and -not $process.HasExited) { $process.CloseMainWindow() | Out-Null; $process.WaitForExit(10000) | Out-Null }
+ if ($process -and -not $process.HasExited -and $ForceStopAfterReview) {
+  Stop-Process -Id $process.Id -Force
+  $process.WaitForExit(10000) | Out-Null
+ } elseif ($process -and -not $process.HasExited) {
+  $process.CloseMainWindow() | Out-Null
+  $process.WaitForExit(10000) | Out-Null
+ }
  $env:LANPATH_DESKTOP_DATA_DIR=$oldData
  $env:LANPATH_DESKTOP_CORE_BINARY=$oldCore
  $env:RUST_BACKTRACE=$oldBacktrace

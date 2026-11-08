@@ -9,6 +9,8 @@ use gpui_kit::{
 use crate::{DesktopView, Page};
 
 mod chrome;
+mod shortcuts;
+mod status_bar;
 
 impl Page {
     pub(crate) fn group_index(self) -> usize {
@@ -21,14 +23,6 @@ impl Page {
             | Self::System => 1,
             Self::Logs | Self::Diagnostics | Self::Scripts | Self::Mitm => 2,
             _ => 3,
-        }
-    }
-
-    fn group_title(self, kind: lanpath_common::CoreType) -> &'static str {
-        if self.group_index() == 1 {
-            crate::configuration_workspace::configuration_title(kind)
-        } else {
-            ["工作区", "", "工具与扩展", "设置"][self.group_index()]
         }
     }
 
@@ -120,7 +114,12 @@ impl Render for DesktopView {
             .key_context("Desktop")
             .on_action(
                 cx.listener(|this, _: &crate::keyboard::CycleRegion, window, cx| {
-                    this.cycle_region(window, cx)
+                    this.cycle_region(false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::keyboard::PreviousRegion, window, cx| {
+                    this.cycle_region(true, window, cx)
                 }),
             )
             .on_action(
@@ -167,7 +166,6 @@ impl Render for DesktopView {
                             // Keep text contrast independent of the desktop
                             // behind the acrylic navigation and title bar.
                             .bg(cx.theme().background.opacity(1.0))
-                            .child(self.render_session_bar(operation_busy, dirty, window, cx))
                             .child(
                                 div()
                                     .id("desktop-content")
@@ -189,5 +187,6 @@ impl Render for DesktopView {
                             ),
                     ),
             )
+            .child(self.render_status_bar(operation_busy, dirty, window, cx))
     }
 }

@@ -1,8 +1,13 @@
+mod refresh;
 mod render;
+mod selection;
 
 use std::sync::Arc;
 
-use gpui_kit::component::list::{ListEvent, ListState};
+use gpui_kit::component::{
+    input::{InputEvent, InputState},
+    list::{ListEvent, ListState},
+};
 use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task, Window};
 use lanpath_client::proxies::{GroupView, ProxyList};
 
@@ -27,10 +32,15 @@ pub(crate) struct ProxyView {
     core: Arc<DesktopRuntime>,
     service: ProxyService,
     list: Entity<ListState<ProxyListDelegate>>,
+    search: Entity<InputState>,
+    _search_subscription: Subscription,
+    _selection_observer: Subscription,
     groups: Vec<GroupView>,
     active_group: Option<String>,
     mode: String,
     running: bool,
+    active: bool,
+    _poll_task: Task<()>,
     closing: bool,
     locked: bool,
     loaded: bool,
@@ -40,6 +50,7 @@ pub(crate) struct ProxyView {
     action_error: Option<String>,
     notice: Option<String>,
     task: Option<Task<()>>,
+    snapshot_task: Option<Task<()>>,
     _list_subscription: Subscription,
 }
 
@@ -55,6 +66,17 @@ impl ProxyView {
         let mode = service.rule_mode().unwrap_or_else(|_| "rule".into());
         let list =
             cx.new(|cx| crate::keyboard::list_state(ProxyListDelegate::default(), window, cx));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索当前组节点"));
+        let search_subscription = cx.subscribe(&search, |this, search, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let query = search.read(cx).value().to_string();
+                this.list.update(cx, |state, cx| {
+                    state.delegate_mut().filter(query);
+                    cx.notify();
+                });
+                cx.notify();
+            }
+        });
         let subscription =
             cx.subscribe_in(&list, window, |this, state, event: &ListEvent, _, cx| {
                 if let ListEvent::Confirm(ix) = event {
@@ -64,14 +86,47 @@ impl ProxyView {
                     this.select_proxy(name, cx);
                 }
             });
+        let selection_observer = cx.observe_in(&list, window, |_, list, window, cx| {
+            let selected = list.read(cx).delegate().selected_index();
+            if list.read(cx).selected_index() != selected {
+                list.update(cx, |state, cx| {
+                    state.set_selected_index(selected, window, cx);
+                    cx.notify();
+                });
+            }
+            cx.notify();
+        });
+        let poll_task = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(5))
+                    .await;
+                let Ok(closing) = this.update(cx, |this, cx| {
+                    if this.running && !this.locked && !this.busy() && !this.closing {
+                        this.poll_snapshot(cx);
+                    }
+                    this.closing
+                }) else {
+                    break;
+                };
+                if closing {
+                    break;
+                }
+            }
+        });
         Self {
             core,
             service,
             list,
+            search,
+            _search_subscription: search_subscription,
+            _selection_observer: selection_observer,
             groups: Vec::new(),
             active_group: None,
             mode,
             running: false,
+            active: false,
+            _poll_task: poll_task,
             closing: false,
             locked: false,
             loaded: false,
@@ -81,7 +136,16 @@ impl ProxyView {
             action_error: None,
             notice: None,
             task: None,
+            snapshot_task: None,
             _list_subscription: subscription,
+        }
+    }
+
+    pub(crate) fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        let entering = active && !self.active;
+        self.active = active;
+        if entering && !self.locked {
+            self.refresh(cx);
         }
     }
 
@@ -102,6 +166,7 @@ impl ProxyView {
     }
 
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        self.snapshot_task = None;
         self.generation += 1;
         self.running = running;
         self.loaded = false;
@@ -140,8 +205,7 @@ impl ProxyView {
         self.active_group = active_group;
         self.groups = list.groups;
         self.list.update(cx, |state, cx| {
-            state.delegate_mut().set_nodes(list.nodes);
-            state.delegate_mut().set_group(selected);
+            state.delegate_mut().refresh_snapshot(list.nodes, selected);
             cx.notify();
         });
         self.loaded = true;
@@ -166,37 +230,6 @@ impl ProxyView {
         cx.notify();
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        if !self.running || self.closing || self.operation.is_some() {
-            return;
-        }
-        self.operation = Some(Operation::Refresh);
-        self.load_error = None;
-        self.task = None;
-        let generation = self.generation;
-        let core = self.core.clone();
-        let service = self.service.clone();
-        self.task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    core.block_on(async { service.list().await })
-                        .and_then(|result| result)
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                this.operation = None;
-                if generation == this.generation && this.running {
-                    match result {
-                        Ok(list) => this.apply_list(list, cx),
-                        Err(error) => this.load_error = Some(error),
-                    }
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-
     fn select_proxy(&mut self, name: String, cx: &mut Context<Self>) {
         if !self.running || self.closing || self.locked || self.operation.is_some() {
             self.reset_list_selection(cx);
@@ -212,6 +245,7 @@ impl ProxyView {
         let Some(group) = group.filter(|_| is_selector) else {
             return;
         };
+        self.snapshot_task = None;
         self.operation = Some(Operation::Select);
         self.action_error = None;
         self.notice = None;
@@ -351,6 +385,7 @@ impl ProxyView {
         if self.closing || self.locked || self.operation.is_some() || self.mode == mode {
             return;
         }
+        self.snapshot_task = None;
         self.operation = Some(Operation::SetMode);
         self.action_error = None;
         self.notice = None;
@@ -384,6 +419,9 @@ impl ProxyView {
             None => "模式已保存，将在下次启动时生效".into(),
         });
         cx.emit(ProxyConfigurationChanged);
+        if self.running {
+            self.refresh(cx);
+        }
     }
 
     fn reset_list_selection(&mut self, cx: &mut Context<Self>) {

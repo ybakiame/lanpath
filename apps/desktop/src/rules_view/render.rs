@@ -5,8 +5,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
 };
 use gpui_kit::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Window, div,
+    Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window, div,
 };
 
 use crate::workspace::workspace_tabs;
@@ -27,9 +26,9 @@ impl Render for RulesView {
             .or_else(|| self.notice.clone())
             .unwrap_or_else(|| {
                 if self.locked {
-                    "实验核心运行时规则配置锁定；停止核心后编辑".into()
+                    "核心运行中，停止后可编辑".into()
                 } else if self.dirty {
-                    "有未保存修改；保存后配置预览自动重新生成".into()
+                    "有未保存修改".into()
                 } else {
                     "当前规则与规则集已载入".into()
                 }
@@ -41,49 +40,6 @@ impl Render for RulesView {
             .min_h_0()
             .min_w_0()
             .gap_3()
-            .child(
-                crate::design::toolbar()
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("rules-save")
-                            .label(match self.operation {
-                                Some(Operation::Save) => "保存中…",
-                                _ => "保存",
-                            })
-                            .primary()
-                            .disabled(disabled || !self.dirty)
-                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-                    )
-                    .child(
-                        Button::new("rules-reload")
-                            .label("重新载入")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
-                    )
-                    .child(
-                        Button::new("rules-restore-builtins")
-                            .label("恢复默认")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, _, cx| this.restore_builtins(cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .id("rules-status")
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .flex_shrink_0()
-                    .min_w_0()
-                    .max_h_16()
-                    .overflow_y_scroll()
-                    .text_color(if self.error.is_some() {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(status),
-            )
             .child(workspace_tabs(
                 "rules-sections",
                 ["路由规则", "规则集", "市场"],
@@ -104,6 +60,35 @@ impl Render for RulesView {
                     Section::RuleSets => self.render_sets(disabled, cx).into_any_element(),
                     Section::Market => self.render_market(disabled, cx).into_any_element(),
                 },
+                cx,
+            ))
+            .child(crate::design::form_footer(
+                "rules-status",
+                status,
+                self.error.is_some(),
+                crate::design::toolbar()
+                    .child(
+                        Button::new("rules-save")
+                            .label(match self.operation {
+                                Some(Operation::Save) => "保存中…",
+                                _ => "保存配置",
+                            })
+                            .primary()
+                            .disabled(disabled || !self.dirty)
+                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
+                    )
+                    .child(
+                        Button::new("rules-reload")
+                            .label("重新载入")
+                            .disabled(disabled)
+                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
+                    )
+                    .child(
+                        Button::new("rules-restore-builtins")
+                            .label("恢复默认")
+                            .disabled(disabled)
+                            .on_click(cx.listener(|this, _, _, cx| this.restore_builtins(cx))),
+                    ),
                 cx,
             ))
     }

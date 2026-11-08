@@ -192,14 +192,6 @@ impl DesktopRuntime {
             .unwrap_or_default()
     }
 
-    pub(crate) fn selected_core_name(&self) -> String {
-        self.selected_core
-            .lock()
-            .ok()
-            .and_then(|selected| selected.as_ref().map(|(_, name)| name.clone()))
-            .unwrap_or_else(|| "sing-box".into())
-    }
-
     pub(crate) fn backup_restore_pending(&self) -> bool {
         self.backup
             .as_ref()

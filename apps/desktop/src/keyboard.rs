@@ -15,7 +15,10 @@ use gpui_kit::{
 
 use crate::{DesktopView, Page};
 
-gpui_kit::actions!(desktop, [CycleRegion, SaveCurrentForm, OpenAppearance]);
+gpui_kit::actions!(
+    desktop,
+    [CycleRegion, PreviousRegion, SaveCurrentForm, OpenAppearance]
+);
 gpui_kit::actions!(desktop_navigation, [Next, Previous, First, Last, Activate]);
 
 pub(crate) const PAGES: [Page; 19] = [
@@ -43,7 +46,7 @@ pub(crate) const PAGES: [Page; 19] = [
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("f6", CycleRegion, Some("Desktop")),
-        KeyBinding::new("shift-f6", CycleRegion, Some("Desktop")),
+        KeyBinding::new("shift-f6", PreviousRegion, Some("Desktop")),
         KeyBinding::new("ctrl-s", SaveCurrentForm, Some("Desktop")),
         KeyBinding::new("ctrl-,", OpenAppearance, Some("Desktop")),
         KeyBinding::new("down", Next, Some("DesktopNavigation")),
@@ -361,20 +364,28 @@ impl DesktopView {
         self.focus_navigation(pages[next], window, cx);
     }
 
-    pub(crate) fn cycle_region(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn cycle_region(
+        &mut self,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.closing || window.has_active_dialog(cx) || window.has_active_sheet(cx) {
             return;
         }
-        if self
-            .navigation_focus
-            .iter()
-            .any(|handle| handle.is_focused(window))
-        {
-            self.content_focus.focus(window, cx);
-            cx.notify();
+        let current: i32 = if self.status_focus.contains_focused(window, cx) {
+            2
+        } else if self.content_focus.contains_focused(window, cx) {
+            1
         } else {
-            self.focus_navigation(self.page, window, cx);
+            0
+        };
+        match (current + if reverse { -1 } else { 1 }).rem_euclid(3) {
+            0 => self.focus_navigation(self.page, window, cx),
+            1 => self.content_focus.focus(window, cx),
+            _ => self.status_focus.focus(window, cx),
         }
+        cx.notify();
     }
 
     pub(crate) fn save_current_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {

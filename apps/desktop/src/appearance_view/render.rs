@@ -9,7 +9,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Window, div,
+    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
 use super::{ACCENTS, AppearanceView, THEMES};
@@ -100,13 +100,6 @@ impl Render for AppearanceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let disabled = self.closing || cx.global::<AppearanceState>().load_error().is_some();
         let dark = self.preferences.is_dark(window.appearance());
-        let status = self.error.clone().unwrap_or_else(|| {
-            format!(
-                "已保存 · 当前为{}主题 · {}%",
-                if dark { "深色" } else { "浅色" },
-                self.preferences.scale_percent()
-            )
-        });
         let material_description = if !cfg!(windows) {
             "此平台使用实色背景；材质偏好会保留。"
         } else if self.preferences.effective_pure_black(window.appearance()) {
@@ -140,15 +133,7 @@ impl Render for AppearanceView {
                             .child(design::page_header(
                                 "外观",
                                 "让岚径适合你的工作环境",
-                                Button::new("appearance-reload")
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::RefreshCw)
-                                    .label("重新载入")
-                                    .disabled(self.closing)
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.reload(window, cx)),
-                                    ),
+                                div(),
                                 cx,
                             ))
                             .child(design::settings_section(
@@ -251,6 +236,40 @@ impl Render for AppearanceView {
                                                     .flex()
                                                     .flex_col()
                                                     .gap_1()
+                                                    .child("背景不透明度")
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child("数值越低越透明；仅亚克力模式生效。"),
+                                                    ),
+                                            )
+                                            .child(
+                                                div().w_40().flex_shrink_0().child(
+                                                    Select::new(&self.acrylic_opacity)
+                                                        .id("appearance-acrylic-opacity")
+                                                        .accessibility_label("背景不透明度百分比")
+                                                        .disabled(
+                                                            disabled
+                                                                || !cfg!(windows)
+                                                                || self.preferences.material()
+                                                                    != MaterialPreference::Acrylic,
+                                                        )
+                                                        .w_full(),
+                                                ),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_4()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_1()
                                                     .child("纯黑背景")
                                                     .child(
                                                     div()
@@ -321,19 +340,17 @@ impl Render for AppearanceView {
                                     ),
                                 cx,
                             ))
-                            .child(
-                                div()
-                                    .id("appearance-status")
-                                    .role(Role::Status)
-                                    .aria_label(status.clone())
-                                    .text_sm()
-                                    .text_color(if self.error.is_some() {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(status),
-                            ),
+                            .when_some(self.error.clone(), |this, status| {
+                                this.child(
+                                    div()
+                                        .id("appearance-status")
+                                        .role(Role::Status)
+                                        .aria_label(status.clone())
+                                        .text_sm()
+                                        .text_color(cx.theme().danger)
+                                        .child(status),
+                                )
+                            }),
                     ),
             )
     }

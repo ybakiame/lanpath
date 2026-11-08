@@ -3,8 +3,8 @@ mod file_list;
 use crate::runtime::DesktopRuntime;
 use file_list::DiskFileList;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _,
-    button::Button,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     input::{Editor, EditorState},
     list::{List, ListState},
 };
@@ -255,26 +255,22 @@ impl Render for DiskLogsView {
             )
         };
         div().flex().flex_col().flex_1().min_h_0().min_w_0().gap_2()
-            .child(div().flex().items_center().flex_wrap().gap_2()
-                .child(Button::new("disk-logs-refresh").label("刷新磁盘日志").disabled(self.closing || self.busy || self.service.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| this.refresh(window, cx))))
-                .child(Button::new("disk-logs-export").label("导出全部磁盘日志").disabled(self.closing || self.busy || self.service.is_none() || self.names.is_empty())
-                    .on_click(cx.listener(|this, _, _, cx| this.export(cx)))))
-            .child(div().flex().items_center().flex_wrap().gap_2().children(
-                ["全部类型", "应用", "核心", "libbox", "启动配置"].into_iter().enumerate().map(|(kind, label)| {
-                    Button::new(("disk-logs-kind", kind)).label(label).selected(self.kind == kind)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.kind = kind;
-                            this.filter(window, cx);
-                            cx.notify();
-                        }))
-                })))
-            .child(div().id("disk-logs-status").role(Role::Status).aria_label(status.clone()).text_sm()
-                .text_color(cx.theme().muted_foreground).child(status))
+            .child(crate::design::surface(cx).p_3().flex().items_center().flex_wrap().gap_2()
+                .child(ButtonGroup::new("disk-log-kinds").small().compact().outline()
+                    .children(["全部", "应用", "核心", "libbox", "启动配置"].into_iter().enumerate().map(|(kind,label)| {
+                        Button::new(("disk-logs-kind",kind)).label(label).selected(self.kind == kind)
+                    })).on_click(cx.listener(|this,indices: &Vec<usize>,window,cx| {
+                        if let Some(kind) = indices.first() { this.kind = *kind; this.filter(window,cx); cx.notify(); }
+                    })))
+                .child(div().flex_1())
+                .child(Button::new("disk-logs-refresh").ghost().icon(gpui_kit::assets::IconName::RefreshCw)
+                    .accessibility_label("刷新磁盘日志").tooltip("刷新磁盘日志")
+                    .disabled(self.closing || self.busy || self.service.is_none())
+                    .on_click(cx.listener(|this,_,window,cx| this.refresh(window,cx)))))
             .children(self.error.as_ref().map(|error| div().id("disk-logs-error").role(Role::Status)
                 .aria_label(error.clone()).text_sm().text_color(cx.theme().danger).child(error.clone())))
             .child(div().flex().items_stretch().flex_1().min_h_0().min_w_0().gap_2()
-                .child(div().w_64().min_w_0().flex_shrink_0().flex().flex_col().child(List::new(&self.files).flex_1().min_h_0()))
+                .child(div().w(gpui_kit::relative(0.28)).min_w(gpui_kit::rems(7.)).flex_shrink_0().flex().flex_col().child(List::new(&self.files).flex_1().min_h_0()))
                 .child(div().id("disk-log-tail").role(Role::Group).aria_label("磁盘日志尾部，只读，可选择和复制")
                     .flex().flex_col().flex_1().min_w_0().min_h_0()
                     .child(Editor::new(&self.tail).readonly(true).size_full())))
@@ -289,9 +285,13 @@ impl Render for DiskLogsView {
                             cx.notify();
                         })))
             }))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                .child("仅实验数据目录。尾部最多 1000 行 / 2 MiB，可选择复制；刷新读取当前文件，不自动回放。"))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground)
-                .child("导出为未加密的真实日志原文，包含所有日志类型（不含启动配置），写入实验目录 exports/；不会清空或删除磁盘文件。"))
+            .child(crate::design::toolbar()
+                .child(div().id("disk-logs-status").accessibility_id("disk-logs-status").role(Role::Status).aria_label(status.clone())
+                    .flex_1().text_xs().text_color(cx.theme().muted_foreground).child(status))
+                .child(Button::new("disk-logs-export").small().label("导出磁盘日志")
+                    .disabled(self.closing || self.busy || self.service.is_none() || self.names.is_empty())
+                    .on_click(cx.listener(|this,_,_,cx| this.export(cx)))))
+            .child(crate::design::help("disk-logs-help","文件与导出说明",div().text_sm().child(
+                "仅读取实验目录的日志尾部，最多 1000 行 / 2 MiB。导出包含各类型日志原文（不含启动配置），未加密，写入 exports/；不会删除文件。")))
     }
 }

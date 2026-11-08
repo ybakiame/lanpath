@@ -48,6 +48,12 @@ pub(crate) struct AppearancePreferences {
     scale_percent: u16,
     #[serde(default)]
     material: MaterialPreference,
+    #[serde(default = "default_acrylic_opacity")]
+    acrylic_opacity_percent: u16,
+}
+
+const fn default_acrylic_opacity() -> u16 {
+    85
 }
 
 impl Default for AppearancePreferences {
@@ -58,6 +64,7 @@ impl Default for AppearancePreferences {
             pure_black: false,
             scale_percent: 100,
             material: MaterialPreference::Acrylic,
+            acrylic_opacity_percent: default_acrylic_opacity(),
         }
     }
 }
@@ -80,8 +87,17 @@ impl AppearancePreferences {
         self.material
     }
 
+    pub(crate) fn acrylic_opacity_percent(self) -> u16 {
+        self.acrylic_opacity_percent
+    }
+
     pub(crate) fn with_material(mut self, material: MaterialPreference) -> Self {
         self.material = material;
+        self
+    }
+
+    pub(crate) fn with_acrylic_opacity_percent(mut self, percent: u16) -> Self {
+        self.acrylic_opacity_percent = percent;
         self
     }
 
@@ -115,6 +131,11 @@ impl AppearancePreferences {
         if !(75..=150).contains(&self.scale_percent) {
             return Err(LanpathError::Config(
                 "appearance.json: scale_percent 必须是 75 到 150 之间的整数".into(),
+            ));
+        }
+        if !(20..=100).contains(&self.acrylic_opacity_percent) {
+            return Err(LanpathError::Config(
+                "appearance.json: acrylic_opacity_percent 必须是 20 到 100 之间的整数".into(),
             ));
         }
         Ok(self)
@@ -201,7 +222,9 @@ impl AppearanceState {
 
     pub(crate) fn save(&mut self, preferences: AppearancePreferences) -> LanpathResult<()> {
         if self.load_error.is_some() {
-            return Err(LanpathError::Config("请先重新载入有效的外观偏好".into()));
+            return Err(LanpathError::Config(
+                "外观偏好读取失败，请修复配置后重启应用".into(),
+            ));
         }
         self.store
             .as_ref()
@@ -232,8 +255,8 @@ impl AppearanceState {
 }
 
 /// Call after GPUI Kit initialization and before opening the first window.
-/// On a load error the default is display-only: writes remain blocked until a
-/// successful explicit reload, and the error is presented by AppearanceView.
+/// On a load error the default is display-only: writes remain blocked for this
+/// session, and the error is presented by AppearanceView.
 pub(crate) fn initialize(core: &DesktopRuntime, cx: &mut App) {
     let store = core
         .business()
@@ -276,9 +299,44 @@ pub(crate) fn apply_to_window(
     cx: &mut App,
 ) {
     apply(preferences, window.appearance(), cx);
-    window.set_background_appearance(if preferences.uses_acrylic(window.appearance()) {
+    let acrylic = preferences.uses_acrylic(window.appearance());
+    window.set_background_appearance(if acrylic {
         gpui_kit::WindowBackgroundAppearance::Blurred
     } else {
         gpui_kit::WindowBackgroundAppearance::Opaque
     });
+    #[cfg(windows)]
+    windows_material::apply(window, acrylic);
+}
+
+#[cfg(windows)]
+mod windows_material {
+    use gpui_kit::Window;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DwmSetWindowAttribute,
+    };
+
+    pub(super) fn apply(window: &Window, acrylic: bool) {
+        let Ok(handle) = HasWindowHandle::window_handle(window) else {
+            return;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return;
+        };
+        let backdrop = if acrylic {
+            DWMSBT_TRANSIENTWINDOW
+        } else {
+            DWMSBT_NONE
+        };
+        // GPUI's legacy acrylic remains the fallback when DWM backdrop types are unavailable.
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                handle.hwnd.get() as *mut core::ffi::c_void,
+                DWMWA_SYSTEMBACKDROP_TYPE as u32,
+                (&raw const backdrop).cast(),
+                size_of_val(&backdrop) as u32,
+            )
+        };
+    }
 }

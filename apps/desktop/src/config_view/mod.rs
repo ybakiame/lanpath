@@ -1,3 +1,6 @@
+mod status;
+
+use status::PreviewStatus;
 use std::sync::Arc;
 
 use gpui_kit::component::{
@@ -29,11 +32,9 @@ pub(crate) struct ConfigView {
     core: Arc<DesktopRuntime>,
     editor: Entity<EditorState>,
     diagnostic: Entity<EditorState>,
-    loaded: bool,
+    status: PreviewStatus,
     locked: bool,
-    busy: bool,
     refresh_pending: bool,
-    error: bool,
     notice: String,
     task: Option<Task<()>>,
 }
@@ -59,11 +60,9 @@ impl ConfigView {
             core,
             editor,
             diagnostic,
-            loaded: false,
+            status: PreviewStatus::Idle,
             locked: false,
-            busy: false,
             refresh_pending: false,
-            error: false,
             notice: "尚未生成配置预览".into(),
             task: None,
         };
@@ -72,11 +71,15 @@ impl ConfigView {
     }
 
     pub(crate) fn ready_for_start(&self) -> bool {
-        self.loaded && !self.busy && !self.error
+        self.status == PreviewStatus::Ready
+    }
+
+    pub(crate) fn start_block_reason(&self) -> Option<&'static str> {
+        self.status.start_block_reason()
     }
 
     pub(crate) fn busy(&self) -> bool {
-        self.busy
+        self.status == PreviewStatus::Generating
     }
 
     pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
@@ -91,13 +94,11 @@ impl ConfigView {
         if self.locked {
             return;
         }
-        if self.busy {
+        if self.busy() {
             self.refresh_pending = true;
             return;
         }
-        self.busy = true;
-        self.error = false;
-        self.loaded = false;
+        self.status = PreviewStatus::Generating;
         self.notice = "正在从当前订阅、配置片段与覆写模板生成预览…".into();
         cx.emit(ConfigEvent);
         cx.notify();
@@ -112,19 +113,17 @@ impl ConfigView {
                 .await;
             let _ = cx.update(|window, cx| {
                 this.update(cx, |this, cx| {
-                    this.busy = false;
                     match result {
                         Ok(text) => {
                             this.editor
                                 .update(cx, |state, cx| state.set_value(text, window, cx));
-                            this.loaded = true;
-                            this.error = false;
+                            this.status = PreviewStatus::Ready;
                             this.notice =
                                 "生成配置已通过实验能力边界和真实核心校验；启动时会重新生成并校验"
                                     .into();
                         }
                         Err(error) => {
-                            this.error = true;
+                            this.status = PreviewStatus::Failed;
                             this.diagnostic
                                 .update(cx, |state, cx| state.set_value(error, window, cx));
                             this.notice = "配置预览失败；修复订阅或覆写后重新生成".into();
@@ -161,7 +160,7 @@ crate::design::toolbar()
                     .child(
                         Button::new("configuration-reload")
                             .label("重新生成")
-                            .disabled(self.locked || self.busy)
+                            .disabled(self.locked || self.busy())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.refresh(window, cx)
                             })),
@@ -172,14 +171,14 @@ crate::design::toolbar()
                     .role(Role::Status)
                     .aria_label(status.clone())
                     .text_sm()
-                    .text_color(if self.error {
+                    .text_color(if self.status == PreviewStatus::Failed {
                         cx.theme().danger
                     } else {
                         cx.theme().muted_foreground
                     })
                     .child(status),
             )
-            .children(self.error.then(|| {
+            .children((self.status == PreviewStatus::Failed).then(|| {
                 div().h_24().flex_shrink_0().child(
                     Editor::new(&self.diagnostic)
                         .aria_label("配置生成错误")

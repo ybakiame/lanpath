@@ -176,12 +176,9 @@ impl DesktopRuntime {
 
     pub(crate) fn network_recovery_required(&self) -> Result<bool, String> {
         self.executor()?.block_on(async {
-            // Prepared/partial helper sessions remain owned until a proven stop.
+            let _lease = self.lifecycle_gate.lock().await;
             let running = self.running_async().await?;
-            Ok(self.proxy_recovery_pending()?
-                || (!running && self.manager.lock().await.is_some())
-                || self.broker.lock().await.is_some()
-                || self.mitm.lock().await.is_some())
+            self.recovery_required_async(running).await
         })
     }
 }

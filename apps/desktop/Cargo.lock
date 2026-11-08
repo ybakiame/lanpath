@@ -4451,6 +4451,7 @@ dependencies = [
  "lanpath-engine",
  "lanpath-mitm",
  "lanpath-script",
+ "raw-window-handle",
  "reqwest",
  "rusqlite",
  "semver",

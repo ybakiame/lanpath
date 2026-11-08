@@ -32,28 +32,29 @@ pub(super) fn apply(
         apply_accent(theme, preferences.accent(), dark);
         theme.overlay = theme.background.opacity(0.72);
         if preferences.uses_acrylic(appearance) {
-            apply_window_material(theme);
+            apply_window_material(theme, preferences.acrylic_opacity_percent());
         }
     });
 }
 
-fn apply_window_material(theme: &mut Theme) {
-    // Root paints the backdrop once. Chrome is a light tint above it, while
-    // editors, menus and content surfaces stay opaque for stable text contrast.
-    theme.background = theme.background.opacity(0.78);
-    theme.title_bar = theme.title_bar.opacity(0.32);
-    theme.sidebar = theme.sidebar.opacity(0.36);
+fn apply_window_material(theme: &mut Theme, opacity_percent: u16) {
+    // Root paints the backdrop once. Editors, menus and content surfaces stay
+    // opaque for stable text contrast.
+    let opacity = f32::from(opacity_percent) / 100.;
+    theme.background = theme.background.opacity(opacity);
+    theme.title_bar = theme.title_bar.opacity(opacity);
+    theme.sidebar = theme.sidebar.opacity(opacity);
 }
 
 fn apply_surfaces(theme: &mut Theme, dark: bool) {
     let color = |light, dark_color| -> Hsla { rgb(if dark { dark_color } else { light }).into() };
-    let background = color(0xf2f4f8, 0x171a21);
-    let surface = color(0xffffff, 0x21252e);
-    let secondary = color(0xe9edf3, 0x2a303b);
-    let hover = color(0xe3e8f0, 0x343c49);
-    let border = color(0xd4dbe5, 0x414b5b);
-    let foreground = color(0x202a3a, 0xe8edf5);
-    let muted_foreground = color(0x566378, 0xa8b5c8);
+    let background = color(0xf0f1f8, 0x2c2c3e);
+    let surface = color(0xfafaff, 0x242434);
+    let secondary = color(0xe7e9f3, 0x373748);
+    let hover = color(0xdde0ee, 0x404052);
+    let border = color(0xd3d6e5, 0x4c4c60);
+    let foreground = color(0x29283a, 0xeeeef5);
+    let muted_foreground = color(0x65647a, 0xaaaabd);
     theme.background = background;
     theme.foreground = foreground;
     theme.group_box = surface;
@@ -97,7 +98,7 @@ fn apply_surfaces(theme: &mut Theme, dark: bool) {
     theme.skeleton = secondary;
     theme.switch = border;
     theme.border = border;
-    theme.input = color(0x8794a8, 0x718198);
+    theme.input = color(0x85859a, 0x8a8a9e);
     theme.sidebar_border = border;
     theme.title_bar_border = border;
     theme.status_bar_border = border;

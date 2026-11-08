@@ -1,5 +1,7 @@
+mod header;
 mod operations;
 mod render;
+mod selection_card;
 
 use std::sync::Arc;
 
@@ -10,7 +12,7 @@ use lanpath_client::{
 };
 use lanpath_common::CoreType;
 
-use crate::{runtime::DesktopRuntime, startup::StartupProgress};
+use crate::runtime::DesktopRuntime;
 
 pub(crate) struct CoreSelectionChanged;
 
@@ -29,7 +31,6 @@ pub(crate) struct CoreManagementView {
     working: bool,
     stage: Option<String>,
     error: Option<String>,
-    startup: StartupProgress,
     task: Option<Task<()>>,
 }
 
@@ -86,7 +87,6 @@ impl CoreManagementView {
             working: false,
             stage: None,
             error,
-            startup: StartupProgress::default(),
             task: None,
         }
     }
@@ -115,11 +115,6 @@ impl CoreManagementView {
             self.closing = closing;
             cx.notify();
         }
-    }
-
-    pub(crate) fn set_startup(&mut self, startup: StartupProgress, cx: &mut Context<Self>) {
-        self.startup = startup;
-        cx.notify();
     }
 
     fn actions_disabled(&self) -> bool {

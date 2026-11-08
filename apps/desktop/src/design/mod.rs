@@ -143,3 +143,43 @@ pub(crate) fn format_bytes(bytes: impl Into<i128>) -> String {
     }
     format!("{bytes:.0} B")
 }
+
+pub(crate) fn form_footer(
+    id: &'static str,
+    status: impl Into<SharedString>,
+    error: bool,
+    actions: impl IntoElement,
+    cx: &App,
+) -> Div {
+    use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
+    let status = status.into();
+    div()
+        .flex()
+        .flex_col()
+        .flex_shrink_0()
+        .min_w_0()
+        .gap_2()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .pt_3()
+        .px_1()
+        .pb_1()
+        .child(actions)
+        .child(
+            div()
+                .id(id)
+                .accessibility_id(id)
+                .role(gpui_kit::Role::Status)
+                .aria_label(status.clone())
+                .text_sm()
+                .min_w_0()
+                .max_h_16()
+                .overflow_y_scroll()
+                .text_color(if error {
+                    cx.theme().danger
+                } else {
+                    cx.theme().muted_foreground
+                })
+                .child(status),
+        )
+}

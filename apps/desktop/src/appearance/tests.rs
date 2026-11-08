@@ -18,7 +18,8 @@ fn bounded_custom_scale_and_black_preference_round_trip_exactly() {
             .with_theme(ThemePreference::Light)
             .with_accent(AccentPreference::Rose)
             .with_pure_black(true)
-            .with_scale_percent(percent);
+            .with_scale_percent(percent)
+            .with_acrylic_opacity_percent(37);
         store.save(preferences).unwrap();
         assert_eq!(store.load().unwrap(), preferences);
     }
@@ -32,6 +33,7 @@ fn material_is_backward_compatible_and_persists_without_changing_client_settings
     std::fs::write(root.path().join("appearance.json"), legacy).unwrap();
     let previous = store.load().unwrap();
     assert_eq!(previous.material(), MaterialPreference::Acrylic);
+    assert_eq!(previous.acrylic_opacity_percent(), 85);
     store.save(previous).unwrap();
     lanpath_client::settings::persist_app_section(
         root.path(),
@@ -66,7 +68,7 @@ fn material_is_backward_compatible_and_persists_without_changing_client_settings
 }
 
 #[test]
-fn invalid_scale_save_leaves_valid_file_and_live_preferences_unchanged() {
+fn invalid_percentages_leave_valid_file_and_live_preferences_unchanged() {
     let root = tempfile::tempdir().unwrap();
     let store = AppearanceStore::new(root.path());
     let previous = AppearancePreferences::default().with_scale_percent(117);
@@ -81,6 +83,16 @@ fn invalid_scale_save_leaves_valid_file_and_live_preferences_unchanged() {
     };
     for percent in [0, 74, 151, u16::MAX] {
         assert!(state.save(previous.with_scale_percent(percent)).is_err());
+        assert_eq!(state.preferences(), previous);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(store.load().unwrap(), previous);
+    }
+    for percent in [0, 19, 101, u16::MAX] {
+        assert!(
+            state
+                .save(previous.with_acrylic_opacity_percent(percent))
+                .is_err()
+        );
         assert_eq!(state.preferences(), previous);
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert_eq!(store.load().unwrap(), previous);
@@ -103,6 +115,8 @@ fn malformed_preferences_are_never_silently_replaced_by_save() {
         ("scale_percent", serde_json::json!(151)),
         ("scale_percent", serde_json::json!(-1)),
         ("scale_percent", serde_json::json!(99.5)),
+        ("acrylic_opacity_percent", serde_json::json!(19)),
+        ("acrylic_opacity_percent", serde_json::json!(101)),
         ("unknown", serde_json::json!(true)),
     ] {
         let mut document = valid.clone();

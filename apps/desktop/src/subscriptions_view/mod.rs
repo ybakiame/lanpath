@@ -124,6 +124,12 @@ impl SubscriptionsView {
         self.busy.is_some()
     }
 
+    /// Saved active source, independent of the row or unsaved form being edited.
+    pub(crate) fn active_subscription(&self) -> Option<&Subscription> {
+        self.active
+            .and_then(|id| self.subscriptions.iter().find(|item| item.id == id))
+    }
+
     pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
         self.locked = locked;
         for input in [&self.name, &self.url, &self.user_agent] {

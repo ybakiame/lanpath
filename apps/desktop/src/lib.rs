@@ -120,6 +120,7 @@ struct DesktopView {
     configuration_section: configuration_workspace::StructuredSection,
     focus_handle: FocusHandle,
     content_focus: FocusHandle,
+    status_focus: FocusHandle,
     navigation_focus: Rc<[FocusHandle; 19]>,
     navigation_expanded: [bool; 4],
     _focus_lost_subscription: Subscription,
@@ -289,8 +290,6 @@ impl DesktopView {
                 if this
                     .update(cx, |this, cx| {
                         this.startup_status = progress.summary();
-                        this.cores
-                            .update(cx, |view, cx| view.set_startup(progress, cx));
                         cx.notify();
                     })
                     .is_err()
@@ -335,6 +334,7 @@ impl DesktopView {
             configuration_section: configuration_workspace::StructuredSection::Dns,
             focus_handle: cx.focus_handle(),
             content_focus: cx.focus_handle().tab_stop(true),
+            status_focus: cx.focus_handle().tab_stop(true),
             navigation_focus: Rc::new(std::array::from_fn(|_| cx.focus_handle().tab_stop(true))),
             navigation_expanded: [true, true, false, false],
             _focus_lost_subscription: focus_lost_subscription,
@@ -387,6 +387,8 @@ impl DesktopView {
         }
         let page = self.available_page(page);
         self.page = page;
+        self.proxy
+            .update(cx, |view, cx| view.set_active(page == Page::Proxies, cx));
         self.navigation_expanded[page.group_index()] = true;
         self.connections.update(cx, |view, cx| {
             view.set_active(page == Page::Connections, cx)

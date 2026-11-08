@@ -14,16 +14,9 @@ use lanpath_client::{
     core_management::ManagedCore,
     cores::{CoreChannel, channel_of_version},
 };
-use lanpath_common::CoreType;
-
-use crate::startup::StartupStageStatus;
 
 use super::{CoreManagementView, supported_channel};
 
-const CORE_TYPES: [(CoreType, &str); 2] = [
-    (CoreType::SingBox, "sing-box"),
-    (CoreType::Mihomo, "Mihomo"),
-];
 const CHANNELS: [(CoreChannel, &str); 2] = [
     (CoreChannel::Stable, "稳定版"),
     (CoreChannel::Prerelease, "预发布版"),
@@ -74,70 +67,13 @@ impl CoreManagementView {
             )
             .into_any_element()
     }
-
-    fn startup_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let startup_summary = gpui_kit::SharedString::from(self.startup.summary());
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_4()
-            .border_1()
-            .rounded_lg()
-            .border_color(cx.theme().border)
-            .child(div().font_semibold().child("最近启动记录"))
-            .child(
-                div()
-                    .id("core-startup-summary")
-                    .accessibility_id("core-startup-summary")
-                    .role(Role::Status)
-                    .aria_label(startup_summary.clone())
-                    .text_sm()
-                    .child(startup_summary),
-            )
-            .children(self.startup.steps().iter().map(|step| {
-                let status = match step.status() {
-                    StartupStageStatus::Running => "进行中",
-                    StartupStageStatus::Complete => "完成",
-                    StartupStageStatus::Failed => "失败",
-                    StartupStageStatus::Warning => "警告",
-                };
-                let id = format!("core-startup-step-{}", step.id());
-                let summary = format!("{} · {status} · {} ms", step.label(), step.duration_ms());
-                let accessible = step
-                    .detail()
-                    .map_or_else(|| summary.clone(), |detail| format!("{summary} · {detail}"));
-                div()
-                    .id(gpui_kit::SharedString::from(id.clone()))
-                    .accessibility_id(id)
-                    .role(Role::Status)
-                    .aria_label(accessible)
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .text_sm()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .child(summary)
-                    .children(step.detail().map(|detail| {
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(detail.to_string())
-                    }))
-            }))
-            .into_any_element()
-    }
 }
 
 impl Render for CoreManagementView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let disabled = self.actions_disabled();
         let selection_disabled = self.selection_disabled();
-        let status = self
-            .error
-            .clone()
-            .or_else(|| self.stage.clone())
-            .unwrap_or_else(|| "选择核心类型与发布通道，再管理本地版本或检查更新".into());
+        let status = self.error.clone().or_else(|| self.stage.clone());
         let selected_channel = self.selected_channel;
         let remote = self
             .remote
@@ -168,73 +104,7 @@ impl Render for CoreManagementView {
             .min_w_0()
             .min_h_0()
             .gap_4()
-            .child(crate::design::page_header("核心", "选择核心类型，管理本地版本与更新",
-crate::design::toolbar()
-                    .child(
-                        ButtonGroup::new("core-type-switcher")
-                            .small()
-                            .compact()
-                            .outline()
-                            .disabled(disabled)
-                            .children(CORE_TYPES.iter().map(|(kind, label)| {
-                                Button::new(format!("core-type-{}", kind.as_str()))
-                                    .accessibility_id(format!("core-type-{}", kind.as_str()))
-                                    .label(*label)
-                                    .selected(*kind == self.selected_core)
-                            }))
-                            .on_click(cx.listener(|this, indexes: &Vec<usize>, _, cx| {
-                                if let Some((kind, _)) = indexes
-                                    .first()
-                                    .and_then(|index| CORE_TYPES.get(*index))
-                                {
-                                    this.select_core_type(*kind, cx);
-                                }
-                            })),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("core-refresh")
-                            .accessibility_id("core-refresh")
-                            .small()
-                            .icon(IconName::RefreshCw)
-                            .label("刷新")
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    ), cx))
-            .child(div().flex().items_center().flex_wrap().gap_3().children(
-                self.core.core_override().map(|path| {
-                    div()
-                        .id("core-test-override")
-                        .accessibility_id("core-test-override")
-                        .role(Role::Status)
-                        .text_sm()
-                        .text_color(cx.theme().warning)
-                        .min_w_0()
-                        .whitespace_normal()
-                        .child(format!(
-                            "测试覆盖正在生效：{}。覆盖期间不可下载、选中或删除核心。",
-                            path.display()
-                        ))
-                }),
-            ))
-            .child(
-                div()
-                    .id("core-management-status")
-                    .accessibility_id("core-management-status")
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .flex_shrink_0()
-                    .text_color(if self.error.is_some() {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .min_w_0()
-                    .max_h_16()
-                    .overflow_y_scrollbar()
-                    .child(status),
-            )
+            .child(self.render_header(disabled, cx))
             .child(
                 div()
                     .flex()
@@ -245,87 +115,39 @@ crate::design::toolbar()
                     .gap_4()
                     .overflow_y_scrollbar()
                     .p_1()
-                    .child(
+                    .children(self.core.core_override().map(|path| {
+                        let warning = format!(
+                            "测试覆盖正在生效：{}。覆盖期间不可下载、选中或删除核心。",
+                            path.display()
+                        );
                         div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(div().font_semibold().child("当前核心"))
-                            .children(self.active_core.as_ref().map(|core| {
-                                let mut card = div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_3()
-                                    .p_4()
-                                    .border_1()
-                                    .rounded_lg()
-                                    .border_color(cx.theme().primary)
-                                    .bg(cx.theme().group_box)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .flex_wrap()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .text_lg()
-                                                    .font_semibold()
-                                                    .child(core.core_type().to_string()),
-                                            )
-                                            .child(Tag::primary().small().child(core_tag(core.version()))),
-                                    );
-                                if let Some(environment) = core.environment() {
-                                    card = card.child(
-                                        div()
-                                            .text_sm()
-                                            .whitespace_normal()
-                                            .child(format!("Environment: {environment}")),
-                                    );
-                                }
-                                if !core.tags().is_empty() {
-                                    card = card.child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("编译 Tags"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .flex_wrap()
-                                                    .gap_1()
-                                                    .children(core.tags().iter().map(|tag| {
-                                                        Tag::secondary().small().child(tag.clone())
-                                                    })),
-                                            ),
-                                    );
-                                }
-                                card.child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(core.path().display().to_string()),
-                                )
-                            }))
-                            .children(self.active_core.is_none().then(|| {
-                                div()
-                                    .p_4()
-                                    .border_1()
-                                    .rounded_lg()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("尚未选择生效核心。请从下方本地版本选择，或检查更新后下载。")
-                            })),
-                    )
+                            .id("core-test-override")
+                            .accessibility_id("core-test-override")
+                            .role(Role::Status)
+                            .aria_label(warning.clone())
+                            .text_sm()
+                            .text_color(cx.theme().warning)
+                            .min_w_0()
+                            .whitespace_normal()
+                            .child(warning)
+                    }))
+                    .children(status.map(|status| {
+                        div()
+                            .id("core-management-status")
+                            .accessibility_id("core-management-status")
+                            .role(Role::Status)
+                            .aria_label(status.clone())
+                            .text_sm()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_color(if self.error.is_some() {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(status)
+                    }))
+                    .child(self.render_selected_core(cx))
                     .child(
                         div()
                             .flex()
@@ -380,9 +202,9 @@ crate::design::toolbar()
                                             .icon(IconName::CloudDownload)
                                             .label("检查更新")
                                             .disabled(disabled)
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.check_remote(cx)
-                                            })),
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| this.check_remote(cx)),
+                                            ),
                                     ),
                             )
                             .child(
@@ -405,13 +227,12 @@ crate::design::toolbar()
                             )
                             .children(remote.map(|remote| {
                                 let version = remote.version().to_string();
-                                let installed = self
-                                    .local
-                                    .iter()
-                                    .any(|core| core.version() == version);
+                                let installed =
+                                    self.local.iter().any(|core| core.version() == version);
                                 Button::new(format!(
                                     "core-download-{}-{}-{version}",
-                                    self.selected_core, selected_channel.as_str()
+                                    self.selected_core,
+                                    selected_channel.as_str()
                                 ))
                                 .small()
                                 .primary()
@@ -422,9 +243,9 @@ crate::design::toolbar()
                                     "下载并选中"
                                 })
                                 .disabled(selection_disabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.download(version.clone(), cx)
-                                }))
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| this.download(version.clone(), cx),
+                                ))
                             }))
                             .child(div().border_t_1().border_color(cx.theme().border))
                             .child(div().font_semibold().child("本地版本"))
@@ -442,8 +263,7 @@ crate::design::toolbar()
                                     .iter()
                                     .map(|core| self.version_row(core, selection_disabled, cx)),
                             ),
-                    )
-                    .child(self.startup_card(cx)),
+                    ),
             )
     }
 }

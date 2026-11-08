@@ -70,9 +70,7 @@ impl SystemSettingsView {
                 match result {
                     Ok(document) => {
                         this.apply(document, window, cx);
-                        this.notice = Some(
-                            "已保存；下次启动核心生效。未修改当前系统代理、路由或证书。".into(),
-                        );
+                        this.notice = Some("已保存 · 下次启动生效".into());
                         cx.emit(SystemSettingsChanged);
                     }
                     Err(error) => this.error = Some(error),

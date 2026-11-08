@@ -27,12 +27,12 @@ const ACCENTS: [(AccentPreference, &str, &str); 4] = [
 ];
 
 #[derive(Clone)]
-struct ScaleOption {
+struct PercentOption {
     percent: u16,
     title: SharedString,
 }
 
-impl SearchableListItem for ScaleOption {
+impl SearchableListItem for PercentOption {
     type Value = u16;
     fn title(&self) -> SharedString {
         self.title.clone()
@@ -42,27 +42,36 @@ impl SearchableListItem for ScaleOption {
     }
 }
 
-fn scale_options(current: u16) -> Vec<ScaleOption> {
-    let mut values = vec![75, 90, 100, 110, 125, 150];
+fn percent_options(current: u16, mut values: Vec<u16>) -> Vec<PercentOption> {
     if !values.contains(&current) {
         values.push(current);
         values.sort_unstable();
     }
     values
         .into_iter()
-        .map(|percent| ScaleOption {
+        .map(|percent| PercentOption {
             percent,
             title: format!("{percent}%").into(),
         })
         .collect()
 }
 
+fn scale_options(current: u16) -> Vec<PercentOption> {
+    percent_options(current, vec![75, 90, 100, 110, 125, 150])
+}
+
+fn acrylic_opacity_options(current: u16) -> Vec<PercentOption> {
+    percent_options(current, vec![20, 35, 50, 65, 80, 100])
+}
+
 pub(crate) struct AppearanceView {
     preferences: AppearancePreferences,
-    scale: Entity<SelectState<Vec<ScaleOption>>>,
+    scale: Entity<SelectState<Vec<PercentOption>>>,
+    acrylic_opacity: Entity<SelectState<Vec<PercentOption>>>,
     closing: bool,
     error: Option<String>,
     _scale_subscription: Subscription,
+    _acrylic_opacity_subscription: Subscription,
     _appearance_subscription: Subscription,
 }
 
@@ -83,7 +92,7 @@ impl AppearanceView {
         let scale_subscription = cx.subscribe_in(
             &scale,
             window,
-            |this, _, event: &SelectEvent<Vec<ScaleOption>>, window, cx| {
+            |this, _, event: &SelectEvent<Vec<PercentOption>>, window, cx| {
                 if let SelectEvent::Confirm(Some(percent)) = event {
                     this.change(this.preferences.with_scale_percent(*percent), window, cx);
                     // Select commits before emitting. Roll back its presentation on I/O
@@ -91,6 +100,36 @@ impl AppearanceView {
                     let saved = this.preferences.scale_percent();
                     if saved != *percent {
                         this.scale.update(cx, |state, cx| {
+                            state.set_selected_value(&saved, window, cx);
+                        });
+                    }
+                }
+            },
+        );
+        let acrylic_opacity = cx.new(|cx| {
+            SelectState::new(
+                acrylic_opacity_options(preferences.acrylic_opacity_percent()),
+                None,
+                window,
+                cx,
+            )
+        });
+        acrylic_opacity.update(cx, |state, cx| {
+            state.set_selected_value(&preferences.acrylic_opacity_percent(), window, cx);
+        });
+        let acrylic_opacity_subscription = cx.subscribe_in(
+            &acrylic_opacity,
+            window,
+            |this, _, event: &SelectEvent<Vec<PercentOption>>, window, cx| {
+                if let SelectEvent::Confirm(Some(percent)) = event {
+                    this.change(
+                        this.preferences.with_acrylic_opacity_percent(*percent),
+                        window,
+                        cx,
+                    );
+                    let saved = this.preferences.acrylic_opacity_percent();
+                    if saved != *percent {
+                        this.acrylic_opacity.update(cx, |state, cx| {
                             state.set_selected_value(&saved, window, cx);
                         });
                     }
@@ -106,9 +145,11 @@ impl AppearanceView {
         Self {
             preferences,
             scale,
+            acrylic_opacity,
             closing: false,
             error,
             _scale_subscription: scale_subscription,
+            _acrylic_opacity_subscription: acrylic_opacity_subscription,
             _appearance_subscription: appearance_subscription,
         }
     }
@@ -139,22 +180,6 @@ impl AppearanceView {
                 appearance::apply_to_window(preferences, window, cx);
             }
             Err(error) => self.error = Some(format!("无法保存外观偏好：{error}")),
-        }
-        cx.notify();
-    }
-
-    fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
-            return;
-        }
-        match cx.global_mut::<AppearanceState>().reload() {
-            Ok(()) => {
-                self.preferences = cx.global::<AppearanceState>().preferences();
-                self.error = None;
-                self.sync_scale(window, cx);
-                appearance::apply_to_window(self.preferences, window, cx);
-            }
-            Err(error) => self.error = Some(format!("无法载入外观偏好：{error}")),
         }
         cx.notify();
     }
