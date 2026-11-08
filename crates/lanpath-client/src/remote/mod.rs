@@ -31,7 +31,9 @@ mod cached_script;
 mod context;
 #[cfg(feature = "mitm")]
 mod import_store;
+mod local;
 mod manager;
+pub use local::*;
 mod notify;
 mod refresh;
 mod service;

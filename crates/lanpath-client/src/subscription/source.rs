@@ -26,15 +26,17 @@ impl SubscriptionSource {
 
 impl SubscriptionStore {
     fn source_file(&self, id: Uuid) -> std::path::PathBuf {
-        self.file()
-            .with_file_name("subscription_cache")
+        crate::resource_storage::cache_path(&self.data_dir, "subscription_cache")
             .join(format!("{id}.source.json"))
     }
 
     /// Persist the response separately; existing converted JSON remains unchanged.
     pub fn write_source(&self, id: Uuid, source: &SubscriptionSource) -> LanpathResult<()> {
         let path = self.source_file(id);
-        std::fs::create_dir_all(self.file().with_file_name("subscription_cache"))?;
+        std::fs::create_dir_all(crate::resource_storage::cache_path(
+            &self.data_dir,
+            "subscription_cache",
+        ))?;
         std::fs::write(path, serde_json::to_vec(source)?)?;
         Ok(())
     }

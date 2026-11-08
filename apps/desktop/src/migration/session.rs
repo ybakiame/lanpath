@@ -108,6 +108,7 @@ impl SessionView {
                         core.migrate_settings()?;
                         if restore {
                             core.apply_backup_restore()?;
+                            core.migrate_settings()?;
                         }
                         core.load_settings()
                     })();
@@ -196,7 +197,11 @@ impl SessionView {
                 "3. 原子恢复备份",
             ]
         } else {
-            &["1. 备份旧设置", "2. 转换并校验 app.toml"]
+            &[
+                "1. 备份旧设置与资源",
+                "2. 整理配置与缓存",
+                "3. 校验迁移结果",
+            ]
         };
         div()
             .flex()

@@ -1,390 +1,288 @@
+use super::{MitmView, Operation, traffic_list::traffic_columns};
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, button::Button, checkbox::Checkbox, input::Editor,
-    list::List, scroll::ScrollableElement as _,
+    ActiveTheme as _, Disableable as _, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    input::Editor,
+    list::List,
+    scroll::ScrollableElement as _,
+    switch::Switch,
+    tab::{Tab, TabBar},
 };
 use gpui_kit::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
-use lanpath_client::mitm::{CaOwnershipStatus, CaTrustStatus};
-
-use super::traffic_list::traffic_columns;
-use super::{MitmView, Operation};
 
 impl Render for MitmView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let busy = self.busy();
-        let editing_disabled = self.locked || busy;
-        let trust = self
-            .trust
-            .as_ref()
-            .map(|trust| {
-                let label = match trust.status {
-                    CaTrustStatus::Trusted => "已信任",
-                    CaTrustStatus::NotTrusted => "未信任",
-                    CaTrustStatus::Unknown => "未知",
-                };
-                if trust.detail.trim().is_empty() {
-                    label.to_string()
-                } else {
-                    format!("{label} · {}", trust.detail)
-                }
-            })
-            .unwrap_or_else(|| "未查询".into());
-        let operation = self.operation.map(|operation| match operation {
-            Operation::Save => "正在保存 MITM 设置…",
-            Operation::Refresh => "正在刷新证书与运行状态…",
-            Operation::InstallCa => "正在安装实验 MITM CA…",
-            Operation::RemoveCa => "正在移除本应用拥有的 CA 信任…",
-        });
-        let status = operation
-            .map(str::to_string)
-            .or_else(|| self.error.clone())
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let disabled = self.locked || self.busy();
+        let compact = window.viewport_size().width < window.rem_size() * 64.;
+        let status = self
+            .error
+            .clone()
+            .or_else(|| self.sync_error.clone())
             .or_else(|| self.notice.clone())
             .unwrap_or_else(|| {
-                if let Some(addr) = self.mitm_addr {
-                    format!("MITM 运行中 · {addr}")
+                if self.operation == Some(Operation::Save) {
+                    "正在保存设置…".into()
+                } else if self.dirty {
+                    "有未保存修改 · 保存后下次启动生效".into()
+                } else if self.operation == Some(Operation::InstallCa) {
+                    "正在安装 CA…".into()
+                } else if self.operation == Some(Operation::RemoveCa) {
+                    "正在移除拥有的 CA 信任…".into()
+                } else if self.mitm_addr.is_some() {
+                    "MITM 运行中 · 资源变更在下次启动生效".into()
                 } else if self.running && self.enabled {
-                    "核心运行中，但 MITM 未启动；请检查有效白名单".into()
+                    "MITM 未启动 · 请检查是否有启用的主机规则".into()
                 } else if self.enabled {
-                    "已启用；保存后在下次核心启动时生效".into()
+                    "已启用 · 下次启动生效".into()
                 } else {
                     "MITM 已关闭".into()
                 }
             });
-        let status_error = self.error.is_some();
         let traffic_count = self.traffic.read(cx).delegate().len();
-        let ca_path = self
-            .ca
-            .as_ref()
-            .map(|ca| ca.path.clone())
-            .unwrap_or_else(|| "尚未生成".into());
-
+        let enabled = Switch::new("mitm-enabled")
+            .label("启用 MITM")
+            .checked(self.enabled)
+            .disabled(disabled)
+            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                this.enabled = *checked;
+                this.dirty = true;
+                this.notice = None;
+                cx.notify();
+            }));
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .gap_3()
-            .child(crate::design::page_header(
-                "MITM",
-                "管理 HTTPS 检查、证书信任与请求记录",
-                div(),
-                cx,
-            ))
+            .gap_2()
+            .child(if compact {
+                crate::design::toolbar()
+                    .child(div().flex_1().font_semibold().text_lg().child("MITM"))
+                    .child(enabled)
+                    .into_any_element()
+            } else {
+                crate::design::page_header("MITM", "HTTPS 检查与请求记录", enabled, cx)
+                    .into_any_element()
+            })
+            .child(self.render_certificate(cx))
+            .child(
+                TabBar::new("mitm-sections")
+                    .segmented()
+                    .selected_index(self.section)
+                    .child(Tab::new().label("主机规则"))
+                    .child(Tab::new().label(format!("请求记录 · {traffic_count}")))
+                    .on_click(cx.listener(|this, section: &usize, _, cx| {
+                        this.section = *section;
+                        if *section == 1 {
+                            this.refresh_traffic(cx);
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(if self.section == 0 {
+                self.render_hosts(compact, cx).into_any_element()
+            } else {
+                self.render_traffic(cx).into_any_element()
+            })
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .flex_wrap()
                     .flex_shrink_0()
                     .gap_2()
                     .child(
-                        Checkbox::new("mitm-enabled")
-                            .label("启用 MITM")
-                            .checked(self.enabled)
-                            .disabled(editing_disabled)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                this.enabled = *checked;
-                                this.dirty = true;
-                                this.notice = None;
-                                cx.notify();
-                            })),
+                        div()
+                            .id("mitm-status")
+                            .accessibility_id("mitm-status")
+                            .role(Role::Status)
+                            .aria_label(status.clone())
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .max_h_16()
+                            .overflow_y_scroll()
+                            .text_color(if self.error.is_some() || self.sync_error.is_some() {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(status),
                     )
                     .child(
                         Button::new("mitm-save")
+                            .accessibility_id("mitm-save")
+                            .primary()
                             .label("保存设置")
-                            .disabled(editing_disabled || !self.dirty())
+                            .disabled(disabled || !self.dirty())
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-                    )
-                    .child(
-                        Button::new("mitm-reload")
-                            .label("重新载入")
-                            .disabled(editing_disabled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.reload(window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("mitm-refresh")
-                            .label("刷新状态")
-                            .disabled(self.locked || busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.refresh_metadata(cx);
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .id("mitm-status")
-                    .role(Role::Status)
-                    .aria_label(status.clone())
-                    .text_sm()
-                    .min_w_0()
-                    .max_h_16()
-                    .flex_shrink_0()
-                    .overflow_y_scrollbar()
-                    .text_color(if status_error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(status),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_stretch()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .gap_4()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .max_w_full()
-                            .min_w_0()
-                            .min_h_0()
-                            .gap_4()
-                            .overflow_y_scrollbar()
-                            .child(section_title(
-                                "实验 CA",
-                                "证书和私钥只写入实验数据根；系统信任必须显式确认",
-                                cx,
-                            ))
-                            .child(info_row("证书路径", ca_path, cx))
-                            .child(info_row("系统信任", trust, cx))
-                            .child(info_row(
-                                "SHA-256",
-                                self.ca
-                                    .as_ref()
-                                    .map(|ca| ca.sha256.clone())
-                                    .unwrap_or_else(|| "未加载".into()),
-                                cx,
-                            ))
-                            .child(info_row(
-                                "信任范围",
-                                self.ca
-                                    .as_ref()
-                                    .map(|ca| format!("{:?}", ca.scope))
-                                    .unwrap_or_else(|| "未加载".into()),
-                                cx,
-                            ))
-                            .child(info_row(
-                                "回执 SHA-256",
-                                self.trust
-                                    .as_ref()
-                                    .and_then(|trust| trust.receipt_sha256.clone())
-                                    .unwrap_or_else(|| "无拥有的安装回执".into()),
-                                cx,
-                            ))
-                            .child(info_row(
-                                "安装所有权",
-                                self.trust
-                                    .as_ref()
-                                    .map(|trust| {
-                                        match trust.ownership {
-                                            CaOwnershipStatus::Untracked => {
-                                                "无拥有的安装回执；既有根不会移除"
-                                            }
-                                            CaOwnershipStatus::Owned => {
-                                                "本应用新增；回执与原始所有权匹配"
-                                            }
-                                            CaOwnershipStatus::Absent => {
-                                                "已不在信任库；可清理旧回执"
-                                            }
-                                            CaOwnershipStatus::Changed => {
-                                                "所有权已变；拒绝移除并保留回执"
-                                            }
-                                            CaOwnershipStatus::Unknown => {
-                                                "所有权查询失败；禁止移除"
-                                            }
-                                        }
-                                        .to_string()
-                                    })
-                                    .unwrap_or_else(|| "未查询".into()),
-                                cx,
-                            ))
-                            .child(info_row(
-                                "脚本方言",
-                                format!("{:?}", self.script_dialect),
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .flex_wrap()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("mitm-install-ca")
-                                            .label("安装到系统信任库…")
-                                            .min_w_0()
-                                            .max_w_full()
-                                            .disabled(self.locked || busy || self.ca.is_none())
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.request_install_ca(window, cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("mitm-remove-ca")
-                                            .label("移除拥有的信任…")
-                                            .min_w_0()
-                                            .max_w_full()
-                                            .disabled(
-                                                self.locked
-                                                    || busy
-                                                    || !self.trust.as_ref().is_some_and(|trust| {
-                                                        matches!(
-                                                            trust.ownership,
-                                                            CaOwnershipStatus::Owned
-                                                                | CaOwnershipStatus::Absent
-                                                        )
-                                                    }),
-                                            )
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.request_remove_ca(window, cx);
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("mitm-copy-ca")
-                                            .label("复制证书 PEM")
-                                            .min_w_0()
-                                            .max_w_full()
-                                            .disabled(self.ca.is_none())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.copy_ca(cx);
-                                            })),
-                                    ),
-                            )
-                            .child(section_title(
-                                "派生白名单",
-                                "已启用远程片段与配置导入声明的 Hostname，只读",
-                                cx,
-                            ))
-                            .child(if self.derived.is_empty() {
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("暂无派生 Hostname")
-                            } else {
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .children(self.derived.iter().map(|entry| {
-                                        div()
-                                            .flex()
-                                            .flex_wrap()
-                                            .min_w_0()
-                                            .items_center()
-                                            .gap_2()
-                                            .text_sm()
-                                            .child(entry.hostname.clone())
-                                            .child(
-                                                div()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(entry.sources.join("、")),
-                                            )
-                                    }))
-                            })
-                            .child(section_title(
-                                "手动补充",
-                                "每行一个域名模式；- 或 ! 前缀表示排除项",
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .h_40()
-                                    .flex_shrink_0()
-                                    .child(Editor::new(&self.hostnames).size_full()),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("空白名单不会启动 MITM；实验版不会自动接管系统代理。"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .flex_grow(2.)
-                            .min_w_0()
-                            .min_h_0()
-                            .gap_2()
-                            .child(section_title(
-                                "抓包记录",
-                                format!("本进程内存记录，最新在前 · {traffic_count} 条"),
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .px_3()
-                                    .flex_shrink_0()
-                                    .min_w_0()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(traffic_columns("时间", "方法", "URL", "状态", "耗时")),
-                            )
-                            .child(List::new(&self.traffic).flex_1().min_h_0()),
                     ),
             )
     }
 }
 
-fn section_title(
-    title: impl Into<String>,
-    description: impl Into<String>,
-    cx: &Context<MitmView>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .min_w_0()
-        .gap_1()
-        .child(div().font_semibold().child(title.into()))
-        .child(
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(description.into()),
-        )
-}
+impl MitmView {
+    fn render_hosts(&self, compact: bool, cx: &Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .font_semibold()
+                            .child(format!("资源主机 · {}", self.derived.len())),
+                    )
+                    .children((!compact).then(|| {
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("来自已启用的片段与本地资源")
+                    })),
+            )
+            .child(
+                crate::design::surface(cx)
+                    .id("mitm-derived")
+                    .accessibility_id("mitm-derived")
+                    .role(Role::Group)
+                    .aria_label(format!("资源主机 · {}", self.derived.len()))
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .size_full()
+                            .overflow_y_scrollbar()
+                            .p_3()
+                            .children(self.derived.is_empty().then(|| {
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if compact {
+                                        "暂无主机，请在脚本页启用片段或手动补充。"
+                                    } else {
+                                        "暂无主机声明。请在脚本页启用并更新片段，或在下方手动添加。"
+                                    })
+                            }))
+                            .children(self.derived.iter().map(|entry| {
+                                let label =
+                                    format!("{} · {}", entry.hostname, entry.sources.join("、"));
+                                div()
+                                    .id(gpui_kit::SharedString::from(format!(
+                                        "mitm-host:{}",
+                                        entry.hostname
+                                    )))
+                                    .accessibility_id(format!("mitm-host:{}", entry.hostname))
+                                    .role(Role::Group)
+                                    .aria_label(label)
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .min_w_0()
+                                    .gap_2()
+                                    .py_1()
+                                    .text_sm()
+                                    .child(entry.hostname.clone())
+                                    .child(
+                                        div()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(entry.sources.join("、")),
+                                    )
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_shrink_0()
+                    .gap_2()
+                    .child(
+                        Button::new("mitm-manual-toggle")
+                            .accessibility_id("mitm-manual-toggle")
+                            .small()
+                            .ghost()
+                            .label(format!(
+                                "{}手动补充 · {}",
+                                if self.manual_open { "收起" } else { "展开" },
+                                self.hostnames
+                                    .read(cx)
+                                    .value()
+                                    .lines()
+                                    .filter(|line| !line.trim().is_empty())
+                                    .count()
+                            ))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.manual_open = !this.manual_open;
+                                cx.notify();
+                            })),
+                    )
+                    .children(self.manual_open.then(|| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("每行一个域名，支持通配符；- 或 ! 前缀表示排除"),
+                            )
+                            .child(
+                                div().h_24().child(
+                                    Editor::new(&self.hostnames)
+                                        .aria_label("手动 MITM 主机")
+                                        .size_full(),
+                                ),
+                            )
+                    })),
+            )
+            .children((!compact).then(|| {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("进入页面自动同步资源主机；没有包含项时不启动 MITM。")
+            }))
+    }
 
-fn info_row(
-    label: impl Into<String>,
-    value: impl Into<String>,
-    cx: &Context<MitmView>,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_wrap()
-        .min_w_0()
-        .items_start()
-        .gap_2()
-        .text_sm()
-        .child(
-            div()
-                .w_24()
-                .max_w_full()
-                .flex_shrink_0()
-                .text_color(cx.theme().muted_foreground)
-                .child(label.into()),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .flex_basis(gpui_kit::rems(8.))
-                .whitespace_normal()
-                .child(value.into()),
-        )
+    fn render_traffic(&self, cx: &Context<Self>) -> impl IntoElement {
+        crate::design::surface(cx)
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .gap_2()
+            .child(
+                div()
+                    .px_3()
+                    .pt_3()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if self.running {
+                        "当前应用会话 · 最新在前 · 每 2 秒自动更新"
+                    } else {
+                        "当前应用会话 · 最新在前 · 核心已停止"
+                    }),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(traffic_columns("时间", "方法", "URL", "状态", "耗时")),
+            )
+            .child(List::new(&self.traffic).flex_1().min_h_0())
+    }
 }

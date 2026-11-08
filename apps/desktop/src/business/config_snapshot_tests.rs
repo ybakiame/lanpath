@@ -11,6 +11,7 @@ async fn admitted_settings_survive_external_changes_through_generation_and_polic
         std::fs::create_dir_all(root.path().join(directory)).unwrap();
     }
     let business = BusinessService::new(root.path(), None, Bindings::new(17899, 19090));
+    business.client_config().unwrap();
     let subscriptions = business.subscription_store();
     let selected = subscriptions
         .add("snapshot", "https://example.invalid/snapshot", true, None)

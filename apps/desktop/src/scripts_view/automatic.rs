@@ -20,6 +20,8 @@ impl ScriptsView {
 
     pub(crate) fn poll_automatic_refresh(&mut self, cx: &mut Context<Self>) {
         if !self.automatic_eligible
+            || self.resource_form_open
+            || self.local.open
             || self.busy()
             || self.dirty()
             || !self.resources.iter().any(|resource| resource.enabled)

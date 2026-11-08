@@ -60,6 +60,8 @@ mod config_snapshot_tests;
 #[cfg(test)]
 mod core_selection_tests;
 #[cfg(test)]
+mod mitm_resource_tests;
+#[cfg(test)]
 mod mitm_tests;
 #[cfg(test)]
 mod request_settings_tests;

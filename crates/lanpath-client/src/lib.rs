@@ -30,6 +30,7 @@ pub mod profile;
 pub mod proxies;
 pub mod remote;
 mod request_network;
+pub mod resource_storage;
 pub use request_network::request_client_builder;
 mod request_probe;
 pub use request_probe::test_github_connectivity;

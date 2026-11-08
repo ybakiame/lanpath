@@ -117,7 +117,7 @@ async fn fetch_at(
     clock: impl Fn() -> u64,
 ) -> LanpathResult<Option<FetchReport>> {
     let automatic = context.is_some();
-    let path = manager.data_dir.join("remote_refresh.json");
+    let path = crate::resource_storage::cache_path(&manager.data_dir, "remote_refresh.json");
     // Never silently reset an unreadable ledger (including on manual refresh).
     let mut schedule = Schedule::load(&path)?;
     // Freeze eligibility before admission: downloads may cross another resource's

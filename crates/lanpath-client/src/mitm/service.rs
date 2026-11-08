@@ -50,7 +50,11 @@ pub struct MitmWhitelistView {
 
 impl MitmWhitelistView {
     pub fn has_inclusions(&self) -> bool {
-        !self.manual.is_empty() || !self.derived.is_empty()
+        self.manual
+            .iter()
+            .map(String::as_str)
+            .chain(self.derived.iter().map(|entry| entry.hostname.as_str()))
+            .any(|hostname| !hostname.starts_with('-') && !hostname.starts_with('!'))
     }
 
     pub fn load(data_dir: &Path, config: &ClientConfig) -> Self {
@@ -344,6 +348,17 @@ mod tests {
             "-example.com".into(),
             "*.example.net".into(),
         ]));
+        let mut view = MitmWhitelistView::default();
+        view.derived.push(DerivedHostnameView {
+            hostname: "-excluded.example".into(),
+            sources: vec!["module".into()],
+        });
+        assert!(!view.has_inclusions());
+        view.derived.push(DerivedHostnameView {
+            hostname: "api.example".into(),
+            sources: vec!["module".into()],
+        });
+        assert!(view.has_inclusions());
     }
 
     #[tokio::test]

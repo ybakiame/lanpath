@@ -10,7 +10,17 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     for root in ROOTS {
         // The portable snapshot keeps its logical client.json representation;
         // app.toml is reconstructed at restore time to preserve local appearance.
-        if *root != "app.toml" {
+        if *root == "cache" {
+            if crate::resource_storage::unified(dir) {
+                for name in ["remotes", "subscriptions", "profiles", "scripts"] {
+                    collect(dir, &format!("cache/{name}"), &mut files)?;
+                }
+            }
+        } else if *root == "resources" {
+            if crate::resource_storage::unified(dir) {
+                collect(dir, "resources/imports", &mut files)?;
+            }
+        } else if !matches!(*root, "app.toml" | "subscriptions.toml") {
             collect(dir, root, &mut files)?;
         }
     }
@@ -44,6 +54,7 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     cfg.core_binary = Default::default();
     cfg.mitm.ca_dir = Default::default();
     files.insert("client.json".into(), serde_json::to_vec(&cfg)?);
+    resource_layout::capture_manifests(dir, &mut files)?;
     let source = dir.to_string_lossy();
     for (name, bytes) in &mut files {
         if path_relocation::document_has_paths(name) {
@@ -56,7 +67,11 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     }
     let mut snapshot = Snapshot {
         summary: BackupSummary {
-            version: 2,
+            version: if crate::resource_storage::unified(dir) {
+                3
+            } else {
+                2
+            },
             app_version: env!("CARGO_PKG_VERSION").into(),
             platform: std::env::consts::OS.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -83,7 +98,7 @@ fn collect(dir: &Path, name: &str, files: &mut BTreeMap<String, Vec<u8>>) -> Lan
         return Err(invalid("备份目录包含符号链接，请先移除链接"));
     }
     if meta.is_dir() {
-        if name.ends_with(".json") || name.split('/').count() >= 8 {
+        if name.ends_with(".json") || name.ends_with(".toml") || name.split('/').count() >= 8 {
             return Err(invalid("备份目录结构无效"));
         }
         for entry in std::fs::read_dir(path)? {
@@ -111,7 +126,7 @@ fn collect(dir: &Path, name: &str, files: &mut BTreeMap<String, Vec<u8>>) -> Lan
 }
 
 pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
-    if !matches!(snapshot.summary.version, 1 | 2) {
+    if !matches!(snapshot.summary.version, 1..=3) {
         return Err(invalid("备份版本不受支持，请更新客户端"));
     }
     check_size(&snapshot.files)?;
@@ -136,7 +151,31 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
     let read = |name: &str| -> LanpathResult<serde_json::Value> {
         Ok(match snapshot.files.get(name) {
             Some(b) => serde_json::from_slice(b)?,
-            None => serde_json::json!([]),
+            None if name == "subscriptions.json"
+                && snapshot.files.contains_key("subscriptions.toml") =>
+            {
+                let bytes = &snapshot.files["subscriptions.toml"];
+                let text =
+                    std::str::from_utf8(bytes).map_err(|error| invalid(&error.to_string()))?;
+                let document: crate::resource_storage::SubscriptionDocument =
+                    toml::from_str(text).map_err(|error| invalid(&error.to_string()))?;
+                serde_json::to_value(document.subscriptions)?
+            }
+            None => match snapshot.files.get("app.toml") {
+                Some(bytes) if matches!(name, "subscriptions.json" | "remotes.json") => {
+                    let text =
+                        std::str::from_utf8(bytes).map_err(|error| invalid(&error.to_string()))?;
+                    let document: toml::Value =
+                        toml::from_str(text).map_err(|error| invalid(&error.to_string()))?;
+                    document
+                        .get("resources")
+                        .and_then(|section| section.get(name.trim_end_matches(".json")))
+                        .map(serde_json::to_value)
+                        .transpose()?
+                        .unwrap_or(serde_json::json!([]))
+                }
+                _ => serde_json::json!([]),
+            },
         })
     };
     let subs: Vec<crate::Subscription> = serde_json::from_value(read("subscriptions.json")?)?;
@@ -160,9 +199,7 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
     if let Some(bytes) = snapshot.files.get("local_override.json") {
         let _: crate::LocalOverride = serde_json::from_slice(bytes)?;
     }
-    if let Some(bytes) = snapshot.files.get("remotes.json") {
-        let _: Vec<crate::RemoteResource> = serde_json::from_slice(bytes)?;
-    }
+    let _: Vec<crate::RemoteResource> = serde_json::from_value(read("remotes.json")?)?;
     if let Some(a) = &snapshot.summary.appearance
         && (!matches!(a.theme.as_str(), "light" | "dark" | "system")
             || a.accent.len() > 32
@@ -206,11 +243,13 @@ pub(super) fn relocate(snapshot: &mut Snapshot, dir: &Path) -> LanpathResult<()>
     if crate::settings::app_settings_path(dir).is_file() {
         let original = std::fs::read_to_string(crate::settings::app_settings_path(dir))?;
         let merged = crate::settings::merge_app_section_text(&original, "client", &cfg)?;
+        let merged = resource_layout::restore(dir, &mut snapshot.files, merged)?;
         snapshot
             .files
             .insert("app.toml".into(), merged.into_bytes());
         snapshot.files.remove("client.json");
     } else {
+        resource_layout::restore_legacy(&mut snapshot.files)?;
         snapshot
             .files
             .insert("client.json".into(), serde_json::to_vec_pretty(&cfg)?);

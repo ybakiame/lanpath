@@ -19,7 +19,12 @@ struct Journal {
 fn legacy_roots() -> Vec<String> {
     ROOTS
         .iter()
-        .filter(|root| **root != "rulesets")
+        .filter(|root| {
+            !matches!(
+                **root,
+                "rulesets" | "cache" | "resources" | "subscriptions.toml"
+            )
+        })
         .map(|root| (*root).into())
         .collect()
 }
@@ -105,9 +110,24 @@ fn apply_pending_impl(dir: &Path, validate: bool) -> LanpathResult<()> {
             serde_json::from_slice(&std::fs::read(pending.join("client.json"))?)?;
         let original = std::fs::read_to_string(crate::settings::app_settings_path(dir))?;
         let merged = crate::settings::merge_app_section_text(&original, "client", &raw)?;
+        let mut files = std::collections::BTreeMap::new();
+        for root in ROOTS {
+            collect_pending(&pending, root, &mut files)?;
+        }
+        let merged = resource_layout::restore(dir, &mut files, merged)?;
+        // Legacy pending payloads retain their files until the normal, backed-up
+        // startup migration converts directories after the restore transaction.
         atomic_write(&pending.join("app.toml"), merged.as_bytes())?;
-        std::fs::remove_file(pending.join("client.json"))?;
+        remove(&pending.join("client.json"))?;
     }
+    let roots: Vec<_> = ROOTS
+        .iter()
+        .copied()
+        .filter(|name| {
+            crate::resource_storage::unified(dir)
+                || !matches!(*name, "cache" | "resources" | "subscriptions.toml")
+        })
+        .collect();
     let summary: BackupSummary =
         serde_json::from_slice(&std::fs::read(pending.join("manifest.json"))?)?;
     let work = dir.join(WORK);
@@ -117,15 +137,15 @@ fn apply_pending_impl(dir: &Path, validate: bool) -> LanpathResult<()> {
     std::fs::create_dir_all(work.join("original"))?;
     let incoming = work.join("incoming");
     std::fs::create_dir_all(&incoming)?;
-    for root in ROOTS {
+    for root in &roots {
         copy_tree(&pending.join(root), &incoming.join(root))?;
     }
     let mut journal = Journal {
         originals: Vec::new(),
-        roots: ROOTS.iter().map(|root| (*root).into()).collect(),
+        roots: roots.iter().map(|root| (*root).into()).collect(),
         committed: false,
     };
-    for root in ROOTS {
+    for root in &roots {
         if let Ok(meta) = std::fs::symlink_metadata(dir.join(root)) {
             if meta.file_type().is_symlink() {
                 return Err(invalid("目标配置包含符号链接，恢复已停止"));
@@ -135,7 +155,7 @@ fn apply_pending_impl(dir: &Path, validate: bool) -> LanpathResult<()> {
     }
     atomic_write(&dir.join(JOURNAL), &serde_json::to_vec(&journal)?)?;
     let result = (|| -> LanpathResult<()> {
-        for root in ROOTS {
+        for root in &roots {
             let target = dir.join(root);
             if target.exists() {
                 std::fs::rename(&target, work.join("original").join(root))?;

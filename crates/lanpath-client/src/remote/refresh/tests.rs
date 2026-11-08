@@ -470,7 +470,18 @@ async fn shared_writer_serializes_manual_auto_and_cancellation_has_no_late_publi
     server.state.responded.notified().await;
     let reopened = RemoteResourceService::new(root.path());
     reopened.set_enabled("gated", false).await.unwrap();
-    let report = reopened.fetch_due(&context).await.unwrap().unwrap();
+    // Automatic admission intentionally skips while any service owns the shared
+    // writer. Parallel fixtures may acquire it immediately after set_enabled.
+    let report = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(report) = reopened.fetch_due(&context).await.unwrap() {
+                break report;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(report.fetched, 1);
     assert_eq!(
         std::fs::read_to_string(&script).unwrap(),

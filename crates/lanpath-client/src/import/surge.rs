@@ -64,7 +64,10 @@ pub(super) fn parse_surge_script(
     let Some(options) = script_options(cfg, "script", line, &params) else {
         return;
     };
-    let Some(path) = params.get("script-path").filter(|path| is_remote_url(path)) else {
+    let Some(path) = params
+        .get("script-path")
+        .filter(|path| is_remote_url(path) || (cfg.allow_local_sources && !path.trim().is_empty()))
+    else {
         cfg.warn(
             "script",
             line,
@@ -102,7 +105,7 @@ pub(super) fn parse_surge_script(
                 if params.get("max-size").is_some_and(|value| value == "-1")
                     && kind == ScriptKind::HttpResponse
                 {
-                    cfg.warn("script", line, "response max-size=-1 uses Lanpath's bounded 32 MiB inspection envelope; larger responses skip the script and pass through unchanged");
+                    cfg.advisory("script", "response max-size=-1 uses a bounded 32 MiB inspection envelope in Lanpath; larger responses skip the script and pass through unchanged");
                 } else if max_size > lanpath_mitm::SURGE_BODY_ENVELOPE {
                     cfg.warn("script", line, "body limit exceeds the supported 32 MiB inspection envelope; not activated");
                     return;

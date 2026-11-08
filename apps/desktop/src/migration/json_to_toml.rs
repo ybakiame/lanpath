@@ -73,7 +73,7 @@ mod tests {
 
         assert!(super::super::is_required(root.path()).unwrap());
         let backups = super::super::run(root.path()).unwrap();
-        assert_eq!(backups.len(), 1);
+        assert_eq!(backups.len(), 2);
         assert!(!super::super::is_required(root.path()).unwrap());
         assert!(!root.path().join("client.json").exists());
         assert!(!root.path().join("appearance.json").exists());
@@ -106,7 +106,11 @@ mod tests {
         std::fs::write(root.path().join("client.json"), "stale").unwrap();
 
         let backups = super::super::run(root.path()).unwrap();
-        assert_eq!(std::fs::read(root.path().join("app.toml")).unwrap(), app);
+        assert!(
+            std::fs::read(root.path().join("app.toml"))
+                .unwrap()
+                .starts_with(&app)
+        );
         assert!(!root.path().join("client.json").exists());
         assert_eq!(
             std::fs::read_to_string(backups[0].join("legacy/client.json")).unwrap(),

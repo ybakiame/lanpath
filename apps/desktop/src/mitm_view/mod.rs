@@ -1,5 +1,7 @@
+mod certificate;
 mod operations;
 mod render;
+mod snapshot;
 mod traffic_list;
 
 use std::{sync::Arc, time::Duration};
@@ -49,7 +51,14 @@ pub(crate) struct MitmView {
     operation: Option<Operation>,
     error: Option<String>,
     notice: Option<String>,
+    sync_error: Option<String>,
+    refresh_requested: bool,
+    section: usize,
+    ca_details_open: bool,
+    manual_open: bool,
     operation_task: Option<Task<()>>,
+    runtime_task: Option<Task<()>>,
+    runtime_generation: u64,
     _poll_task: Task<()>,
     _input_subscription: Subscription,
 }
@@ -85,16 +94,24 @@ impl MitmView {
                 cx.notify();
             }
         });
-        let poll_task = cx.spawn(async move |this, cx| {
+        let poll_task = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.active {
-                            this.refresh_traffic(cx);
-                        }
+                if cx
+                    .update(|window, cx| {
+                        this.update(cx, |this, cx| {
+                            if this.active {
+                                if this.running && this.section == 1 {
+                                    this.refresh_traffic(cx);
+                                }
+                                if this.refresh_requested {
+                                    this.refresh_metadata(window, cx);
+                                }
+                            }
+                        })
+                        .is_err()
                     })
-                    .is_err()
+                    .unwrap_or(true)
                 {
                     break;
                 }
@@ -120,7 +137,14 @@ impl MitmView {
             operation: None,
             error,
             notice: None,
+            sync_error: None,
+            refresh_requested: false,
+            section: 0,
+            ca_details_open: false,
+            manual_open: false,
             operation_task: None,
+            runtime_task: None,
+            runtime_generation: 0,
             _poll_task: poll_task,
             _input_subscription: input_subscription,
         }
@@ -134,23 +158,26 @@ impl MitmView {
         self.operation.is_some()
     }
 
-    pub(crate) fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_active(&mut self, active: bool, _cx: &mut Context<Self>) {
+        let entering = active && !self.active;
         self.active = active;
-        if active {
-            self.refresh_metadata(cx);
-            self.refresh_traffic(cx);
+        if entering {
+            self.refresh_requested = true;
         }
     }
 
     pub(crate) fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
-        if self.running != running {
-            self.notice = None;
+        if self.running == running {
+            return;
         }
+        self.notice = None;
+        self.runtime_generation += 1;
+        self.runtime_task = None;
         self.running = running;
-        if running && self.active {
-            self.refresh_metadata(cx);
-        } else if !running {
+        if !running {
             self.mitm_addr = None;
+        } else if self.active {
+            self.refresh_runtime(cx);
         }
         cx.notify();
     }
@@ -164,15 +191,43 @@ impl MitmView {
 
     fn refresh_traffic(&mut self, cx: &mut Context<Self>) {
         match self.core.mitm_traffic() {
-            Ok(records) => self.traffic.update(cx, |state, cx| {
-                if state.delegate_mut().replace(records) {
+            Ok(records) => {
+                let changed = self.traffic.update(cx, |state, cx| {
+                    let changed = state.delegate_mut().replace(records);
+                    if changed {
+                        cx.notify();
+                    }
+                    changed
+                });
+                if changed {
                     cx.notify();
                 }
-            }),
-            Err(error) if self.error.is_none() => self.error = Some(error),
+            }
+            Err(error) if self.error.is_none() => {
+                self.error = Some(error);
+                cx.notify();
+            }
             Err(_) => {}
         }
-        cx.notify();
+    }
+
+    fn refresh_runtime(&mut self, cx: &mut Context<Self>) {
+        let core = self.core.clone();
+        let generation = self.runtime_generation;
+        self.runtime_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { core.mitm_addr() }).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.runtime_generation != generation {
+                    return;
+                }
+                this.runtime_task = None;
+                match result {
+                    Ok(addr) => this.mitm_addr = addr,
+                    Err(error) => this.error = Some(error),
+                }
+                cx.notify();
+            });
+        }));
     }
 }
 

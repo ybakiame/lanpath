@@ -1,7 +1,5 @@
 use gpui_kit::{AppContext as _, Context, Window, component::WindowExt as _};
 
-use crate::script_dialects::validate_selection;
-
 use super::{
     Operation, ScriptsView,
     editing::{dialect_label, kind_label},
@@ -48,9 +46,9 @@ impl ScriptsView {
                         Ok(resource) => {
                             this.selected = Some(resource.name.clone());
                             this.creating = false;
+                            this.finish_resource_dialog(window, cx);
                             this.reload_resources(window, cx);
-                            this.notice =
-                                Some("远程资源已保存；更新缓存后，下次启动会重建定时任务".into());
+                            this.notice = Some("资源已保存 · 缓存下次启动生效".into());
                         }
                         Err(error) => this.error = Some(error),
                     }
@@ -217,7 +215,12 @@ impl ScriptsView {
                                 this.dialect = dialect;
                             }
                             if let Some(meta) = detected.meta {
-                                this.icon = meta.icon;
+                                set_input(
+                                    &this.inputs.icon,
+                                    meta.icon.as_deref().unwrap_or(""),
+                                    window,
+                                    cx,
+                                );
                                 this.arguments = meta.arguments;
                             }
                             this.syncing = false;
@@ -270,55 +273,6 @@ impl ScriptsView {
                             this.notice = Some(fetch_notice(&report));
                             this.fetch_report = Some(report);
                             this.reload_resources(window, cx);
-                        }
-                        Err(error) => this.error = Some(error),
-                    }
-                    cx.notify();
-                })
-                .ok();
-            });
-        }));
-        cx.notify();
-    }
-
-    pub(super) fn import_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.locked || self.busy() || !self.import_dirty {
-            return;
-        }
-        if let Err(error) = validate_selection(self.import_dialect, None) {
-            self.error = Some(error.to_string());
-            cx.notify();
-            return;
-        }
-        let content = self.inputs.import_content.read(cx).text().to_string();
-        let dialect = self.import_dialect;
-        let (Some(service), core) = (self.service.clone(), self.core.clone()) else {
-            return;
-        };
-        self.operation = Some(Operation::Import);
-        self.error = None;
-        self.notice = None;
-        self.import_summary = None;
-        self.task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    core.block_on(async { service.import_script_config(&content, dialect).await })?
-                        .map_err(|error| error.to_string())
-                })
-                .await;
-            let _ = cx.update(|window, cx| {
-                this.update(cx, |this, cx| {
-                    this.operation = None;
-                    match result {
-                        Ok(summary) => {
-                            this.syncing = true;
-                            this.inputs
-                                .import_content
-                                .update(cx, |state, cx| state.set_value(String::new(), window, cx));
-                            this.syncing = false;
-                            this.import_dirty = false;
-                            this.notice = Some(import_notice(&summary));
-                            this.import_summary = Some(summary);
                         }
                         Err(error) => this.error = Some(error),
                     }
@@ -391,22 +345,12 @@ fn derive_name(url: &str) -> String {
 
 pub(super) fn fetch_notice(report: &lanpath_client::remote::FetchReport) -> String {
     format!(
-        "更新完成：资源 {}，脚本 {}，重写 {}，任务 {}，警告 {}",
+        "更新完成：资源 {}，脚本 {}，重写 {}，任务 {}，主机 {}，警告 {}",
         report.fetched,
         report.scripts,
         report.rewrites,
         report.tasks,
+        report.hostnames,
         report.warnings.len()
-    )
-}
-
-fn import_notice(summary: &lanpath_client::remote::ImportSummary) -> String {
-    format!(
-        "导入完成：重写 {}，脚本 {}，任务 {}，主机名 {}，警告 {}",
-        summary.rewrites,
-        summary.scripts,
-        summary.tasks,
-        summary.hostnames,
-        summary.warnings.len()
     )
 }

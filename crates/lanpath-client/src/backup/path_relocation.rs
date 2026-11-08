@@ -7,6 +7,7 @@ pub fn document_has_paths(name: &str) -> bool {
         "client.json" | "local_override.json" | "config_slices.json"
     ) || name
         .strip_prefix("subscription_cache/")
+        .or_else(|| name.strip_prefix("cache/subscriptions/"))
         .is_some_and(|leaf| {
             !leaf.contains('/') && leaf.ends_with(".json") && !leaf.ends_with(".source.json")
         })

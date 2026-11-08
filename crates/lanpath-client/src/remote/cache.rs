@@ -25,6 +25,9 @@ pub struct CachedRemoteConfig {
     #[serde(default)]
     pub mitm_templates: Vec<String>,
     pub meta: Option<ConfigMeta>,
+    /// Durable, editable GPUI local-resource source; absent in legacy imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<super::LocalSource>,
 }
 
 impl CachedRemoteConfig {
@@ -51,6 +54,7 @@ impl CachedRemoteConfig {
             mitm_templates: imported.mitm_templates.clone(),
             meta: (imported.meta != ConfigMeta::default()).then(|| imported.meta.clone()),
             module_id: String::new(),
+            local: None,
         }
     }
 

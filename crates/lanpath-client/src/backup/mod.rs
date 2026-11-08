@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 mod archive;
 pub mod path_relocation;
 mod preview;
+mod resource_layout;
 mod service;
 #[cfg(test)]
 mod service_tests;
@@ -28,6 +29,9 @@ const MAX_EXPANDED: usize = 64 * 1024 * 1024;
 const MAX_FILES: usize = 1024;
 pub(super) const ROOTS: &[&str] = &[
     "app.toml",
+    "subscriptions.toml",
+    "cache",
+    "resources",
     "client.json",
     "subscriptions.json",
     "profiles.json",
@@ -79,6 +83,19 @@ pub(super) fn allowed(name: &str) -> bool {
         return false;
     }
     let parts: Vec<_> = name.split('/').collect();
+    if parts[0] == "cache"
+        && parts.len() > 1
+        && !matches!(
+            parts[1],
+            "remotes" | "subscriptions" | "profiles" | "scripts"
+        )
+    {
+        return false;
+    }
+    if parts[0] == "resources" && parts.len() > 1 && parts[1] != "imports" {
+        return false;
+    }
+
     parts.len() <= 8
         && !parts.iter().any(|p| {
             p.is_empty()
@@ -88,8 +105,10 @@ pub(super) fn allowed(name: &str) -> bool {
                 || reserved(p)
         })
         && ROOTS.contains(&parts[0])
-        && ((parts.len() == 1 && (parts[0].ends_with(".json") || parts[0] == "app.toml"))
-            || (parts.len() > 1 && !parts[0].ends_with(".json")))
+        && ((parts.len() == 1
+            && (parts[0].ends_with(".json")
+                || matches!(parts[0], "app.toml" | "subscriptions.toml")))
+            || (parts.len() > 1 && !parts[0].ends_with(".json") && !parts[0].ends_with(".toml")))
 }
 
 fn reserved(part: &str) -> bool {

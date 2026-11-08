@@ -21,13 +21,22 @@ impl RemoteManager {
         Self { data_dir }
     }
 
-    /// Remote manifest path: `data_dir/remotes.json`.
+    /// GPUI manifest document (`app.toml`); other shells use `remotes.json`.
     pub fn remotes_file(&self) -> PathBuf {
-        self.data_dir.join("remotes.json")
+        if crate::resource_storage::unified(&self.data_dir) {
+            crate::settings::app_settings_path(&self.data_dir)
+        } else {
+            self.data_dir.join("remotes.json")
+        }
     }
 
     /// Read remote resource manifest; returns empty list when file does not exist.
     pub fn load(&self) -> LanpathResult<Vec<RemoteResource>> {
+        if crate::resource_storage::unified(&self.data_dir) {
+            return Ok(crate::resource_storage::load(&self.data_dir)?
+                .remotes()
+                .to_vec());
+        }
         let path = self.remotes_file();
         if !path.exists() {
             return Ok(Vec::new());
@@ -36,7 +45,7 @@ impl RemoteManager {
         Ok(serde_json::from_str(&text)?)
     }
 
-    /// Save remote resource manifest to `data_dir/remotes.json`.
+    /// Save the manifest through the selected shell storage layout.
     pub fn save(&self, remotes: &[RemoteResource]) -> LanpathResult<()> {
         self.save_with_context(remotes, None)
     }
@@ -46,6 +55,21 @@ impl RemoteManager {
         remotes: &[RemoteResource],
         context: Option<&RemoteFetchContext>,
     ) -> LanpathResult<()> {
+        if crate::resource_storage::unified(&self.data_dir) {
+            crate::resource_storage::load(&self.data_dir)?;
+            return crate::settings::update_app_section::<crate::resource_storage::ResourceSettings>(
+                &self.data_dir,
+                "resources",
+                |settings| {
+                    settings.set_remotes(remotes.to_vec());
+                    Ok(())
+                },
+                || match context {
+                    Some(context) => context.check_write(&self.remotes_file()),
+                    None => Ok(()),
+                },
+            );
+        }
         let text = serde_json::to_string_pretty(remotes)?;
         super::refresh::atomic_write_with_context(&self.remotes_file(), text.as_bytes(), context)?;
         Ok(())
@@ -193,21 +217,26 @@ impl RemoteManager {
         context: Option<&RemoteFetchContext>,
     ) -> LanpathResult<()> {
         if let Some(context) = context {
-            context.check_write(&self.data_dir.join("remote_refresh.json"))?;
+            context.check_write(&crate::resource_storage::cache_path(
+                &self.data_dir,
+                "remote_refresh.json",
+            ))?;
             match remote.kind {
                 RemoteKind::Script => context.check_write(
-                    &self
-                        .data_dir
-                        .join("scripts")
+                    &crate::resource_storage::cache_path(&self.data_dir, "scripts")
                         .join(format!("{}.js", safe_name(&remote.name))),
                 )?,
                 RemoteKind::Snippet => {
                     context.check_write(&self.remotes_file())?;
                     #[cfg(feature = "mitm")]
-                    context.check_write(&self.data_dir.join("remote_cache").join(format!(
-                        "{}.json",
-                        super::activation::remote_module_id(remote).replace(':', "-"),
-                    )))?;
+                    context.check_write(
+                        &crate::resource_storage::cache_path(&self.data_dir, "remote_cache").join(
+                            format!(
+                                "{}.json",
+                                super::activation::remote_module_id(remote).replace(':', "-"),
+                            ),
+                        ),
+                    )?;
                 }
             }
         }
@@ -300,6 +329,12 @@ impl RemoteManager {
         Ok((imported, complete))
     }
 
+    /// Destination for a downloaded pure-JS resource (not a local user script).
+    pub fn script_file(&self, name: &str) -> PathBuf {
+        crate::resource_storage::cache_path(&self.data_dir, "scripts")
+            .join(format!("{}.js", safe_name(name)))
+    }
+
     /// Write pure JS script to `data_dir/scripts/<name>.js`.
     fn write_script(
         &self,
@@ -307,7 +342,7 @@ impl RemoteManager {
         content: &str,
         context: Option<&RemoteFetchContext>,
     ) -> LanpathResult<PathBuf> {
-        let dir = self.data_dir.join("scripts");
+        let dir = crate::resource_storage::cache_path(&self.data_dir, "scripts");
         let path = dir.join(format!("{}.js", safe_name(name)));
         super::refresh::atomic_write_with_context(&path, content.as_bytes(), context)?;
         Ok(path)
@@ -321,7 +356,7 @@ impl RemoteManager {
         imported: &ImportedConfig,
         context: Option<&RemoteFetchContext>,
     ) -> LanpathResult<(usize, Vec<String>)> {
-        let dir = self.data_dir.join("remote_cache");
+        let dir = crate::resource_storage::cache_path(&self.data_dir, "remote_cache");
         let module_id = super::activation::remote_module_id(remote);
         let mut cached = super::CachedRemoteConfig::from_imported(imported);
         cached.bind_module(&module_id);
@@ -335,7 +370,7 @@ impl RemoteManager {
     /// Find `<safe_name(name)>.<ext>` icon cache under `data_dir/icons/`; return path when exists,
     /// otherwise `None`. ext must be in [`ICON_EXTENSIONS`] whitelist (case-insensitive).
     pub fn icon_file(&self, name: &str) -> Option<PathBuf> {
-        let dir = self.data_dir.join("icons");
+        let dir = crate::resource_storage::cache_path(&self.data_dir, "icons");
         let base = safe_name(name);
         for entry in std::fs::read_dir(&dir).ok()?.flatten() {
             let path = entry.path();
@@ -372,7 +407,7 @@ impl RemoteManager {
             .or_else(|| super::icon_ext_from_bytes(&bytes))
             .unwrap_or("img");
 
-        let dir = self.data_dir.join("icons");
+        let dir = crate::resource_storage::cache_path(&self.data_dir, "icons");
         std::fs::create_dir_all(&dir)?;
         let base = safe_name(name);
         let path = dir.join(format!("{base}.{ext}"));

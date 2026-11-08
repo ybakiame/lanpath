@@ -1,11 +1,14 @@
 mod automatic;
 mod editing;
 mod inputs;
+mod interval;
+mod local;
 mod operations;
 mod render;
-mod render_import;
 mod render_remotes;
 mod render_tasks;
+mod resource_dialog;
+mod resource_form;
 
 use std::{sync::Arc, time::Duration};
 
@@ -13,9 +16,7 @@ use crate::{business::BusinessService, runtime::DesktopRuntime, scripts_view::in
 use gpui_kit::{AppContext as _, Context, EventEmitter, Subscription, Task, Window};
 use lanpath_client::{
     ArgSpec,
-    remote::{
-        FetchReport, ImportSummary, RemoteKind, RemoteResource, RemoteTaskView, ScriptDialect,
-    },
+    remote::{FetchReport, RemoteKind, RemoteResource, RemoteTaskView, ScriptDialect},
 };
 
 const DIALECT_SCOPE_NOTICE: &str =
@@ -25,7 +26,7 @@ const DIALECT_SCOPE_NOTICE: &str =
 pub(super) enum Section {
     Remotes,
     Tasks,
-    Import,
+    Local,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub(super) enum Operation {
     Detect,
     Fetch,
     AutomaticFetch,
-    Import,
+    Local,
     RunTask,
 }
 
@@ -48,17 +49,17 @@ pub(crate) struct ScriptsView {
     resources: Vec<RemoteResource>,
     selected: Option<String>,
     creating: bool,
+    resource_form_open: bool,
+    resource_confirm_discard: bool,
     kind: RemoteKind,
     dialect: ScriptDialect,
-    import_dialect: ScriptDialect,
+    local: local::LocalState,
     arguments: Vec<ArgSpec>,
-    icon: Option<String>,
     enabled: bool,
     section: Section,
     inputs: FormInputs,
     syncing: bool,
     resource_dirty: bool,
-    import_dirty: bool,
     locked: bool,
     running: bool,
     active: bool,
@@ -68,7 +69,6 @@ pub(crate) struct ScriptsView {
     error: Option<String>,
     notice: Option<String>,
     fetch_report: Option<FetchReport>,
-    import_summary: Option<ImportSummary>,
     tasks: Vec<RemoteTaskView>,
     task_output: Option<(String, String)>,
     generation: u64,
@@ -97,7 +97,9 @@ impl ScriptsView {
         } else {
             None
         };
-        let (inputs, subscriptions) = FormInputs::new(window, cx);
+        let (inputs, mut subscriptions) = FormInputs::new(window, cx);
+        let (local, local_subscriptions) = local::LocalState::new(service.as_ref(), window, cx);
+        subscriptions.extend(local_subscriptions);
         let poll_task = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(5)).await;
@@ -121,17 +123,17 @@ impl ScriptsView {
             resources,
             selected,
             creating: false,
-            import_dialect: ScriptDialect::Surge,
+            resource_form_open: false,
+            resource_confirm_discard: false,
+            local,
             kind: RemoteKind::Script,
             dialect: ScriptDialect::Surge,
             arguments: Vec::new(),
-            icon: None,
             enabled: true,
             section: Section::Remotes,
             inputs,
             syncing: false,
             resource_dirty: false,
-            import_dirty: false,
             locked: false,
             running: false,
             active: false,
@@ -141,7 +143,6 @@ impl ScriptsView {
             error: load_error,
             notice: None,
             fetch_report: None,
-            import_summary: None,
             tasks: Vec::new(),
             task_output: None,
             generation: 0,
@@ -159,14 +160,15 @@ impl ScriptsView {
     }
 
     pub(crate) fn save_from_shortcut(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.section == Section::Remotes && !self.creating && self.selected_resource().is_some()
-        {
+        if self.local.open {
+            self.save_local(window, cx);
+        } else if self.section == Section::Remotes && self.resource_form_open {
             self.save_resource(window, cx);
         }
     }
 
     pub(crate) fn dirty(&self) -> bool {
-        self.resource_dirty || self.import_dirty
+        self.resource_dirty || self.local.dirty
     }
 
     pub(crate) fn busy(&self) -> bool {
@@ -255,16 +257,16 @@ impl ScriptsView {
             window,
             cx,
         );
-        set_input(
-            &self.inputs.interval,
-            &selected
-                .as_ref()
-                .map(|resource| resource.update_interval_secs)
-                .unwrap_or(86_400)
-                .to_string(),
-            window,
-            cx,
-        );
+        let seconds = selected
+            .as_ref()
+            .map(|resource| resource.update_interval_secs)
+            .filter(|value| *value > 0)
+            .unwrap_or(86_400);
+        let (value, unit) = interval::split(seconds);
+        set_input(&self.inputs.interval, &value.to_string(), window, cx);
+        self.inputs
+            .interval_unit
+            .update(cx, |state, cx| state.set_selected_value(&unit, window, cx));
         let argument_values = selected
             .as_ref()
             .map(|resource| {
@@ -291,7 +293,15 @@ impl ScriptsView {
             .as_ref()
             .map(|resource| resource.arguments.clone())
             .unwrap_or_default();
-        self.icon = selected.as_ref().and_then(|resource| resource.icon.clone());
+        set_input(
+            &self.inputs.icon,
+            selected
+                .as_ref()
+                .and_then(|resource| resource.icon.as_deref())
+                .unwrap_or(""),
+            window,
+            cx,
+        );
         self.enabled = selected
             .as_ref()
             .map(|resource| resource.enabled)
@@ -337,21 +347,6 @@ impl ScriptsView {
         self.error = None;
         self.notice = None;
         self.fetch_report = None;
-        cx.notify();
-    }
-
-    fn import_changed(&mut self, cx: &mut Context<Self>) {
-        self.import_dirty = !self
-            .inputs
-            .import_content
-            .read(cx)
-            .text()
-            .to_string()
-            .trim()
-            .is_empty();
-        self.error = None;
-        self.notice = None;
-        self.import_summary = None;
         cx.notify();
     }
 

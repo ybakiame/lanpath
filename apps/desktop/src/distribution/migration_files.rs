@@ -11,6 +11,9 @@ use std::{
 
 pub(super) const CONFIG: &[&str] = &[
     "app.toml",
+    "subscriptions.toml",
+    "cache",
+    "resources",
     "client.json",
     "subscriptions.json",
     "profiles.json",

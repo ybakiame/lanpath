@@ -13,6 +13,14 @@ use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use toml_edit::{DocumentMut, Item};
 
+static APP_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn app_write_lock() -> LanpathResult<std::sync::MutexGuard<'static, ()>> {
+    APP_WRITE_LOCK
+        .lock()
+        .map_err(|_| LanpathError::Config("应用配置写入锁不可用".into()))
+}
+
 pub const APP_SETTINGS_FILE: &str = "app.toml";
 pub const LEGACY_CLIENT_FILE: &str = "client.json";
 pub const LEGACY_APPEARANCE_FILE: &str = "appearance.json";
@@ -230,7 +238,8 @@ pub fn persist_client(path: &Path, value: &serde_json::Value) -> LanpathResult<(
                 Some(Path::new(binary)),
             )?;
         }
-        let text = std::fs::read_to_string(path).unwrap_or_default();
+        let _guard = app_write_lock()?;
+        let text = read_app_text(path)?;
         let mut value = value.clone();
         if let Some(object) = value.as_object_mut() {
             object.remove("core_binary");
@@ -272,8 +281,57 @@ pub fn persist_app_section<T: Serialize>(
     section: &str,
     value: &T,
 ) -> LanpathResult<()> {
+    let _guard = app_write_lock()?;
+    persist_section_unlocked(root, section, value)
+}
+
+pub(crate) fn update_app_section<T: Serialize + DeserializeOwned + Default>(
+    root: &Path,
+    section: &str,
+    update: impl FnOnce(&mut T) -> LanpathResult<()>,
+    check: impl Fn() -> LanpathResult<()>,
+) -> LanpathResult<()> {
+    let _guard = app_write_lock()?;
+    check()?;
+    let mut value: T = load_app_section(root, section)?.unwrap_or_default();
+    update(&mut value)?;
     let path = app_settings_path(root);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let text = read_app_text(&path)?;
+    let merged = merge_app_section_text(&text, section, &value)?;
+    atomic_write_checked(&path, &merged, check)
+}
+
+/// Merge top-level fields in a standalone document, preserving other keys/comments.
+pub(crate) fn persist_document_fields<T: Serialize>(path: &Path, value: &T) -> LanpathResult<()> {
+    let _guard = app_write_lock()?;
+    let text = read_app_text(path)?;
+    let mut document = text
+        .parse::<DocumentMut>()
+        .map_err(|error| config_error(path, error))?;
+    let fields = serialize_item(value)?;
+    if let Some(table) = fields.as_table() {
+        for (key, item) in table.iter() {
+            document[key] = item.clone();
+        }
+    }
+    atomic_write(path, &document.to_string())
+}
+
+fn read_app_text(path: &Path) -> LanpathResult<String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn persist_section_unlocked<T: Serialize>(
+    root: &Path,
+    section: &str,
+    value: &T,
+) -> LanpathResult<()> {
+    let path = app_settings_path(root);
+    let text = read_app_text(&path)?;
     let merged = merge_app_section_text(&text, section, value)?;
     atomic_write(&path, &merged)
 }
@@ -322,12 +380,22 @@ fn without_nulls(value: serde_json::Value) -> serde_json::Value {
 }
 
 fn atomic_write(path: &Path, text: &str) -> LanpathResult<()> {
+    atomic_write_checked(path, text, || Ok(()))
+}
+
+fn atomic_write_checked(
+    path: &Path,
+    text: &str,
+    check: impl Fn() -> LanpathResult<()>,
+) -> LanpathResult<()> {
+    check()?;
     let parent = path
         .parent()
         .ok_or_else(|| LanpathError::Config(format!("{} has no parent", path.display())))?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
     file.write_all(text.as_bytes())?;
     file.as_file().sync_all()?;
+    check()?;
     file.persist(path).map_err(|error| error.error)?;
     Ok(())
 }
@@ -337,100 +405,4 @@ fn config_error(path: &Path, error: impl std::fmt::Display) -> LanpathError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn migration_preserves_legacy_files_and_section_writes_preserve_other_content() {
-        let root = tempfile::tempdir().unwrap();
-        let legacy_client = br#"{"mixed_port":17899}"#;
-        let legacy_appearance = br#"{"scale_percent":117}"#;
-        std::fs::write(root.path().join(LEGACY_CLIENT_FILE), legacy_client).unwrap();
-        std::fs::write(root.path().join(LEGACY_APPEARANCE_FILE), legacy_appearance).unwrap();
-
-        ensure_app_settings(root.path()).unwrap();
-        assert_eq!(
-            std::fs::read(root.path().join(LEGACY_CLIENT_FILE)).unwrap(),
-            legacy_client
-        );
-        assert_eq!(
-            std::fs::read(root.path().join(LEGACY_APPEARANCE_FILE)).unwrap(),
-            legacy_appearance
-        );
-        assert_eq!(
-            load_client(&app_settings_path(root.path())).unwrap()["mixed_port"],
-            17899
-        );
-
-        let original = std::fs::read_to_string(app_settings_path(root.path()))
-            .unwrap()
-            .replace("[appearance]", "# retained comment\n[appearance]");
-        std::fs::write(app_settings_path(root.path()), original).unwrap();
-        persist_app_section(
-            root.path(),
-            "client",
-            &serde_json::json!({"mixed_port": 18000}),
-        )
-        .unwrap();
-
-        let text = std::fs::read_to_string(app_settings_path(root.path())).unwrap();
-        assert!(text.contains("# retained comment"));
-        let appearance: serde_json::Value = load_app_section(root.path(), "appearance")
-            .unwrap()
-            .unwrap();
-        assert_eq!(appearance["scale_percent"], 117);
-        assert_eq!(
-            load_client(&app_settings_path(root.path())).unwrap()["mixed_port"],
-            18000
-        );
-    }
-
-    #[test]
-    fn resaving_same_core_does_not_create_a_previous_version() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("cores/sing-box/1.2.3/sing-box");
-        persist_core_current(root.path(), Some(&path)).unwrap();
-        persist_core_current(root.path(), Some(&path)).unwrap();
-        let core = load_core_settings(root.path()).unwrap().unwrap();
-        assert_eq!(core.current.as_ref().unwrap().version, "1.2.3");
-        assert!(core.previous.is_none());
-    }
-
-    #[test]
-    fn nested_core_selection_tracks_current_and_previous_versions() {
-        let root = tempfile::tempdir().unwrap();
-        let first = root.path().join("cores/sing-box/1.2.3/sing-box");
-        let second = root.path().join("cores/sing-box/1.2.4/sing-box");
-        std::fs::write(
-            root.path().join(LEGACY_CLIENT_FILE),
-            serde_json::to_vec(&serde_json::json!({"core_binary": first})).unwrap(),
-        )
-        .unwrap();
-
-        ensure_app_settings(root.path()).unwrap();
-        let core = load_core_settings(root.path()).unwrap().unwrap();
-        assert_eq!(core.current.as_ref().unwrap().version, "1.2.3");
-        assert!(core.previous.is_none());
-
-        persist_client(
-            &app_settings_path(root.path()),
-            &serde_json::json!({"core_binary": second}),
-        )
-        .unwrap();
-        let persisted = load_app_section::<CoreSettings>(root.path(), "core")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            persisted.current.as_ref().unwrap().path,
-            Path::new("cores/sing-box/1.2.4/sing-box")
-        );
-        assert_eq!(
-            persisted.previous.as_ref().unwrap().path,
-            Path::new("cores/sing-box/1.2.3/sing-box")
-        );
-        let core = load_core_settings(root.path()).unwrap().unwrap();
-        assert_eq!(core.previous.as_ref().unwrap().version, "1.2.3");
-        assert_eq!(core.kind, CoreType::SingBox);
-        assert_eq!(core.channel, "stable");
-    }
-}
+mod tests;

@@ -43,7 +43,7 @@ impl RemoteManager {
     pub(crate) fn active_cached_parts(&self) -> LanpathResult<(Vec<ActivePart>, Vec<String>)> {
         let mut parts = Vec::new();
         let mut warnings = Vec::new();
-        let cache_dir = self.data_dir.join("remote_cache");
+        let cache_dir = crate::resource_storage::cache_path(&self.data_dir, "remote_cache");
         for remote in self
             .load()?
             .into_iter()
@@ -64,7 +64,8 @@ impl RemoteManager {
                 None => warnings.push("remote cache is unreadable; retained inactive; refetch the resource".into()),
             }
         }
-        let index_path = cache_dir.join("local_imports.json");
+        let imports_dir = crate::resource_storage::imports_path(&self.data_dir);
+        let index_path = imports_dir.join("local_imports.json");
         if index_path.exists() {
             let collections: Vec<String> = match std::fs::read_to_string(&index_path)
                 .ok()
@@ -82,14 +83,22 @@ impl RemoteManager {
                     warnings.push("invalid local collection identity retained inactive".into());
                     continue;
                 }
-                let path = cache_dir.join("local").join(format!("{id}.json"));
+                let path = imports_dir.join("local").join(format!("{id}.json"));
                 match read_cache(&path) {
-                    Some(cache) if cache.module_id == format!("local:{id}") => parts.push(("本地导入".into(), None, cache)),
+                    Some(cache) if cache.module_id == format!("local:{id}") => {
+                        // Legacy imports retain their behavior; restored bundles keep their controls.
+                        if cache.local.as_ref().is_some_and(|source| !source.enabled) {
+                            continue;
+                        }
+                        let name = cache.local.as_ref().map(|source| source.name.clone())
+                            .unwrap_or_else(|| "本地导入".into());
+                        parts.push((name, None, cache));
+                    }
                     _ => warnings.push("local collection is unreadable or has mismatched identity; retained inactive; reimport source".into()),
                 }
             }
         }
-        if cache_dir.join("imported.json").exists() {
+        if imports_dir.join("imported.json").exists() {
             warnings.push("legacy local import cache retained inactive: original module identities cannot be recovered; explicitly reimport the original snippets".into());
         }
         Ok((parts, warnings))

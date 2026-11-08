@@ -29,6 +29,7 @@
 - [0016 GPUI 统一应用设置与可恢复迁移会话](0016-gpui-unified-app-settings.md) — Accepted（仅实验性开发）
 
 - [0017 GPUI 实验桌面双核心与版本管理](0017-gpui-dual-core-management.md) — Accepted（仅实验性桌面；Tauri/Android 前端保持 sing-box）
+- [0018：GPUI 资源清单与缓存布局](0018-gpui-resource-storage.md)
 
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 

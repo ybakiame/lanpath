@@ -215,7 +215,7 @@ fn archive_enforces_version_duplicates_and_expanded_limit() {
     assert!(snapshot::validate(&mut snapshot).is_err());
     snapshot.files.remove("scripts/Node.js");
     snapshot.files.remove("scripts/node.js");
-    snapshot.summary.version = 3;
+    snapshot.summary.version = 4;
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default();
     zip.start_file("manifest.json", options).unwrap();

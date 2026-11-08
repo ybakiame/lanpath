@@ -9,7 +9,7 @@ use super::{CachedSubscriptionContent, NodeTagView, Subscription};
 /// add / remove / set_enabled / set_profile_id).
 #[derive(Debug, Clone)]
 pub struct SubscriptionStore {
-    data_dir: PathBuf,
+    pub(super) data_dir: PathBuf,
 }
 
 impl SubscriptionStore {
@@ -20,12 +20,20 @@ impl SubscriptionStore {
 
     /// `data_dir/subscriptions.json`.
     pub fn file(&self) -> PathBuf {
-        self.data_dir.join("subscriptions.json")
+        if crate::resource_storage::unified(&self.data_dir) {
+            self.data_dir
+                .join(crate::resource_storage::SUBSCRIPTIONS_FILE)
+        } else {
+            self.data_dir.join("subscriptions.json")
+        }
     }
 
     /// Read subscription list; returns empty list when file is missing, logs
     /// warning and falls back to empty list when corrupted.
     pub fn load(&self) -> LanpathResult<Vec<Subscription>> {
+        if crate::resource_storage::unified(&self.data_dir) {
+            return crate::resource_storage::load_subscriptions(&self.data_dir);
+        }
         let path = self.file();
         if !path.exists() {
             return Ok(Vec::new());
@@ -46,6 +54,10 @@ impl SubscriptionStore {
 
     /// Save subscription list to `data_dir/subscriptions.json`.
     pub fn save(&self, subs: &[Subscription]) -> LanpathResult<()> {
+        if crate::resource_storage::unified(&self.data_dir) {
+            crate::resource_storage::load_subscriptions(&self.data_dir)?;
+            return crate::resource_storage::persist_subscriptions(&self.data_dir, subs);
+        }
         std::fs::create_dir_all(&self.data_dir)?;
         let text = serde_json::to_string_pretty(subs)?;
         std::fs::write(self.file(), text)?;
@@ -153,8 +165,7 @@ impl SubscriptionStore {
 
     /// `data_dir/subscription_cache/<id>.json`.
     pub fn cache_file(&self, id: Uuid) -> PathBuf {
-        self.data_dir
-            .join("subscription_cache")
+        crate::resource_storage::cache_path(&self.data_dir, "subscription_cache")
             .join(format!("{id}.json"))
     }
 
@@ -165,7 +176,7 @@ impl SubscriptionStore {
         id: Uuid,
         content: &CachedSubscriptionContent,
     ) -> LanpathResult<()> {
-        let dir = self.data_dir.join("subscription_cache");
+        let dir = crate::resource_storage::cache_path(&self.data_dir, "subscription_cache");
         std::fs::create_dir_all(&dir)?;
         let text = serde_json::to_string_pretty(content)?;
         std::fs::write(dir.join(format!("{id}.json")), text)?;

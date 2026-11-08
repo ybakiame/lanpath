@@ -1,7 +1,4 @@
-use lanpath_client::remote::{
-    FetchReport, ImportSummary, RemoteDetection, RemoteResource, RemoteResourceService,
-    ScriptDialect,
-};
+use lanpath_client::remote::{FetchReport, RemoteDetection, RemoteResource, RemoteResourceService};
 use lanpath_common::LanpathResult;
 
 use super::BusinessService;
@@ -61,11 +58,12 @@ impl BusinessService {
         self.remote_service().fetch_all().await
     }
 
+    #[cfg(test)]
     pub(crate) async fn import_script_config(
         &self,
         content: &str,
-        dialect: ScriptDialect,
-    ) -> LanpathResult<ImportSummary> {
+        dialect: lanpath_client::remote::ScriptDialect,
+    ) -> LanpathResult<lanpath_client::remote::ImportSummary> {
         validate_selection(dialect, None)?;
         self.remote_service().import_content(content, dialect).await
     }

@@ -25,6 +25,8 @@ async fn generated_pipeline_records_real_mitm_traffic() {
         Some(binary.clone()),
         Bindings::new(17899, 19090),
     );
+    // Initialize the GPUI document before creating subscriptions in its layout.
+    business.client_config().unwrap();
 
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let target_port = target.local_addr().unwrap().port();
@@ -67,8 +69,12 @@ async fn generated_pipeline_records_real_mitm_traffic() {
     slices.route.final_tag = "direct".into();
     business.save_config_slices(&slices).unwrap();
     business
-        .save_mitm_settings(true, vec!["127.0.0.1".into()], ScriptDialect::Surge)
+        .save_mitm_settings(true, vec![], ScriptDialect::Surge)
         .unwrap();
+    super::mitm_resource_tests::fetch_module(&business, "127.0.0.1").await;
+    let whitelist = business.mitm_settings().unwrap().whitelist;
+    assert_eq!(whitelist.derived.len(), 1);
+    assert_eq!(whitelist.derived[0].hostname, "127.0.0.1");
 
     let client_config = business.client_config().unwrap();
     let mitm_service = MitmService::new(
@@ -144,7 +150,7 @@ async fn generated_pipeline_records_real_mitm_traffic() {
         "unexpected proxy response: {response:?}; core output: {core_error}"
     );
     assert!(
-        response.ends_with("mitm-target-ok"),
+        response.ends_with("mitm-target-ok-script-ok"),
         "target body missing: {response:?}"
     );
     assert!(

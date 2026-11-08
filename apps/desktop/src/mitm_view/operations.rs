@@ -55,112 +55,6 @@ impl MitmView {
         cx.notify();
     }
 
-    pub(super) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.locked || self.busy() {
-            return;
-        }
-        if self.dirty() {
-            let view = cx.weak_entity();
-            window.open_alert_dialog(cx, move |dialog, _, _| {
-                let view = view.clone();
-                dialog
-                    .title("放弃 MITM 设置修改？")
-                    .description("重新载入会丢弃未保存的开关和手动 Hostname 白名单。")
-                    .confirm()
-                    .ok_text("放弃并重新载入")
-                    .cancel_text("取消")
-                    .on_ok(move |_, window, cx| {
-                        let _ = view.update(cx, |view, cx| view.load_now(window, cx));
-                        true
-                    })
-            });
-        } else {
-            self.load_now(window, cx);
-        }
-    }
-
-    fn load_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let result = self
-            .service
-            .as_ref()
-            .ok_or_else(|| "实验数据目录不可用".to_string())
-            .and_then(|service| service.mitm_settings().map_err(|error| error.to_string()));
-        match result {
-            Ok(settings) => {
-                let text = settings.hostnames.join("\n");
-                self.syncing = true;
-                self.hostnames
-                    .update(cx, |state, cx| state.set_value(text, window, cx));
-                self.syncing = false;
-                self.enabled = settings.enabled;
-                self.dirty = false;
-                self.script_dialect = settings.script_dialect;
-                self.derived = settings.whitelist.derived;
-                self.error = None;
-                self.notice = Some("已重新载入 MITM 设置".into());
-            }
-            Err(error) => self.error = Some(error),
-        }
-        self.refresh_metadata(cx);
-        cx.notify();
-    }
-
-    pub(super) fn refresh_metadata(&mut self, cx: &mut Context<Self>) {
-        if self.operation.is_some() {
-            return;
-        }
-        let core = self.core.clone();
-        self.operation = Some(Operation::Refresh);
-        self.error = None;
-        self.operation_task = Some(cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    (
-                        core.mitm_ca(),
-                        core.mitm_trust_status(),
-                        core.mitm_addr(),
-                        core.mitm_traffic(),
-                    )
-                })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                this.operation = None;
-                this.operation_task = None;
-                let (ca, trust, addr, traffic) = result;
-                let mut errors = Vec::new();
-                match ca {
-                    Ok(ca) => this.ca = Some(ca),
-                    Err(error) => {
-                        this.ca = None;
-                        errors.push(error);
-                    }
-                }
-                match trust {
-                    Ok(trust) => this.trust = Some(trust),
-                    Err(error) => {
-                        this.trust = None;
-                        errors.push(error);
-                    }
-                }
-                match addr {
-                    Ok(addr) => this.mitm_addr = addr,
-                    Err(error) => errors.push(error),
-                }
-                match traffic {
-                    Ok(records) => this.traffic.update(cx, |state, cx| {
-                        if state.delegate_mut().replace(records) {
-                            cx.notify();
-                        }
-                    }),
-                    Err(error) => errors.push(error),
-                }
-                this.error = (!errors.is_empty()).then(|| errors.join("；"));
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-
     pub(super) fn request_install_ca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.locked || self.busy() {
             return;
@@ -239,7 +133,7 @@ impl MitmView {
             return;
         };
         let description = format!(
-            "指纹 SHA-256：{expected}\\n范围：Windows CurrentUser Root\\n仅移除本应用新增且原始所有权令牌仍匹配的证书。既有根和所有权已改变的证书保持不动。"
+            "指纹 SHA-256：{expected}\n范围：Windows CurrentUser Root\n仅移除本应用新增且原始所有权令牌仍匹配的证书。既有根和所有权已改变的证书保持不动。"
         );
         let view = cx.weak_entity();
         window.open_alert_dialog(cx, move |dialog, _, _| {
@@ -304,7 +198,7 @@ impl MitmView {
 
     pub(super) fn copy_ca(&mut self, cx: &mut Context<Self>) {
         let Some(ca) = &self.ca else {
-            self.error = Some("CA 尚未生成，请先刷新证书状态".into());
+            self.error = Some("CA 尚未生成，正在自动同步证书状态".into());
             cx.notify();
             return;
         };

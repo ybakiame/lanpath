@@ -143,7 +143,7 @@ impl ClientState {
                     LanpathError::Client("订阅关联的覆写模板不存在，请在首页重新关联".to_string())
                 })?;
                 profile::resolve_remote_overrides(
-                    &self.config.data_dir.join("profile_cache"),
+                    &crate::resource_storage::cache_path(&self.config.data_dir, "profile_cache"),
                     linked,
                 )
                 .await

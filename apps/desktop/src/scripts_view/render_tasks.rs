@@ -1,4 +1,6 @@
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, button::Button};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Sizable as _, button::Button, tag::Tag,
+};
 use gpui_kit::{Context, ParentElement as _, Styled as _, div};
 
 use super::{Operation, ScriptsView, render::section_title};
@@ -69,18 +71,14 @@ impl ScriptsView {
                                     })),
                             ),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "{} · cron {} · 下次 {} · 上次 {}",
-                                task.dialect,
-                                task.cron_expr,
-                                format_time(task.next_run.as_ref()),
-                                format_time(task.last_run.as_ref())
-                            )),
-                    )
+                    .child(if task.last_error.is_some() { Tag::danger().small().child("上次失败") }
+                        else if task.last_run.is_some() { Tag::primary().small().child("上次已运行") }
+                        else { Tag::secondary().small().child("等待首次运行") })
+                    .child(div().text_xs().text_color(cx.theme().muted_foreground)
+                        .child(format!("{} · cron {}",task.dialect,task.cron_expr)))
+                    .child(div().flex().flex_wrap().gap_3()
+                        .child(div().text_xs().text_color(cx.theme().muted_foreground).child(format!("下次：{}",format_time(task.next_run.as_ref()))))
+                        .child(div().text_xs().text_color(cx.theme().muted_foreground).child(format!("上次：{}",format_time(task.last_run.as_ref())))))
                     .children(task.last_error.as_ref().map(|error| {
                         div()
                             .text_sm()

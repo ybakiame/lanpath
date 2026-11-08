@@ -38,7 +38,7 @@ impl RemoteManager {
         summary.tasks = cached.task_scripts.len();
         summary.rewrites = cached.rewrites.len();
         summary.hostnames = cached.resolved_hostnames(None).0.len();
-        let cache_dir = self.data_dir.join("remote_cache");
+        let cache_dir = crate::resource_storage::imports_path(&self.data_dir);
         let collection_dir = cache_dir.join("local");
         std::fs::create_dir_all(&collection_dir)?;
         let index = cache_dir.join("local_imports.json");

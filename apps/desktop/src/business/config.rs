@@ -85,7 +85,7 @@ impl BusinessService {
                         LanpathError::Client("订阅关联的覆写模板不存在，请重新关联".into())
                     })?;
                 resolve_remote_overrides_with_context(
-                    &self.root.join("profile_cache"),
+                    &lanpath_client::resource_storage::cache_path(&self.root, "profile_cache"),
                     &profile,
                     &requests,
                 )

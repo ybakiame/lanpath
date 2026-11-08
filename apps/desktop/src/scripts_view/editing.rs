@@ -14,7 +14,10 @@ impl ScriptsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.locked || self.busy() || self.selected.as_deref() == Some(name.as_str()) {
+        if self.locked
+            || self.busy()
+            || (self.resource_form_open && self.selected.as_deref() == Some(name.as_str()))
+        {
             return;
         }
         if self.resource_dirty {
@@ -46,6 +49,7 @@ impl ScriptsView {
         self.sync_resource(window, cx);
         self.error = None;
         self.notice = None;
+        self.open_resource_dialog(window, cx);
     }
 
     pub(super) fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -77,35 +81,8 @@ impl ScriptsView {
         self.creating = true;
         self.sync_resource(window, cx);
         self.error = None;
-        self.notice = Some("填写资源 URL 后可嗅探类型、元数据与模块参数".into());
-    }
-
-    pub(super) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.locked || self.busy() {
-            return;
-        }
-        if self.resource_dirty {
-            let view = cx.weak_entity();
-            window.open_alert_dialog(cx, move |dialog, _, _| {
-                let view = view.clone();
-                dialog
-                    .title("放弃远程资源修改？")
-                    .description("重新载入会丢弃当前资源表单修改。配置导入正文会保留。")
-                    .confirm()
-                    .ok_text("放弃并重新载入")
-                    .cancel_text("取消")
-                    .on_ok(move |_, window, cx| {
-                        let _ = view.update(cx, |view, cx| {
-                            view.reload_resources(window, cx);
-                            view.notice = Some("已重新载入远程资源".into());
-                        });
-                        true
-                    })
-            });
-        } else {
-            self.reload_resources(window, cx);
-            self.notice = Some("已重新载入远程资源".into());
-        }
+        self.notice = Some("填写名称与 URL，可识别资源类型".into());
+        self.open_resource_dialog(window, cx);
     }
 
     pub(super) fn set_kind(&mut self, kind: RemoteKind, cx: &mut Context<Self>) {
@@ -130,25 +107,6 @@ impl ScriptsView {
         }
         self.enabled = enabled;
         self.resource_changed(cx);
-    }
-
-    pub(super) fn set_import_dialect(&mut self, dialect: ScriptDialect, cx: &mut Context<Self>) {
-        if self.locked || self.busy() || !is_selectable(dialect) || self.import_dialect == dialect {
-            return;
-        }
-        self.import_dialect = dialect;
-        if !self
-            .inputs
-            .import_content
-            .read(cx)
-            .text()
-            .to_string()
-            .trim()
-            .is_empty()
-        {
-            self.import_dirty = true;
-        }
-        cx.notify();
     }
 
     fn previous_dialect(&self) -> Option<ScriptDialect> {
@@ -189,10 +147,22 @@ impl ScriptsView {
             .value()
             .trim()
             .parse::<u64>()
-            .map_err(|_| "更新间隔必须是正整数秒数".to_string())?;
+            .map_err(|_| "更新间隔必须是正整数".to_string())?;
         if interval == 0 {
             return Err("更新间隔必须大于 0".into());
         }
+        let interval = super::interval::to_seconds(
+            interval,
+            self.inputs
+                .interval_unit
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or("天"),
+        )?;
+        let icon = self.inputs.icon.read(cx).value().trim().to_string();
+        let icon = (!icon.is_empty()).then_some(icon);
+        lanpath_client::validate_remote_url(&icon)?;
         Ok(RemoteResource {
             name,
             url,
@@ -204,7 +174,7 @@ impl ScriptsView {
             argument_values: parse_argument_values(
                 &self.inputs.arguments.read(cx).text().to_string(),
             )?,
-            icon: self.icon.clone(),
+            icon,
             arguments: self.arguments.clone(),
         })
     }

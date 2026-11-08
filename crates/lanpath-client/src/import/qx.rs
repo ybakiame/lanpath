@@ -138,7 +138,7 @@ fn parse_qx_script_hook(
     let (first, rest) = take_word(args);
     let (path, attached_params) = first.split_once(',').unwrap_or((first, ""));
     // The rejected source must not consume a rule slot or a corresponding URL slot.
-    if !is_remote_url(path) {
+    if !is_remote_url(path) && !(cfg.allow_local_sources && !path.trim().is_empty()) {
         cfg.warn(
             "rewrite",
             line,
@@ -233,7 +233,10 @@ fn regex_replacement<'a>(action: &str, args: &'a str) -> Option<(&'a str, &'a st
 pub(super) fn parse_qx_task(cfg: &mut super::ImportedConfig, dialect: ScriptDialect, line: &str) {
     let (declaration, params) = line.split_once(',').unwrap_or((line, ""));
     let mut words: Vec<_> = declaration.split_whitespace().collect();
-    let Some(path) = words.pop().filter(|path| is_remote_url(path)) else {
+    let Some(path) = words
+        .pop()
+        .filter(|path| is_remote_url(path) || (cfg.allow_local_sources && !path.trim().is_empty()))
+    else {
         cfg.warn(
             "task",
             line,

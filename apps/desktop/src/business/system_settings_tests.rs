@@ -5,7 +5,9 @@ use super::BusinessService;
 use crate::{configuration::Bindings, proxy_service::ProxyService};
 
 fn service(root: &std::path::Path) -> BusinessService {
-    BusinessService::new(root, None, Bindings::new(17899, 19090))
+    let service = BusinessService::new(root, None, Bindings::new(17899, 19090));
+    service.client_config().unwrap(); // Match the startup initialization before feature stores.
+    service
 }
 
 #[tokio::test]

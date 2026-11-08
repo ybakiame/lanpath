@@ -57,6 +57,9 @@ use utils::*;
 #[cfg(feature = "mitm")]
 #[derive(Default)]
 pub struct ImportedConfig {
+    /// Only the explicit local-bundle parser admits local JS identities. It never reads paths.
+    #[doc(hidden)]
+    pub allow_local_sources: bool,
     /// URL / Header / Body rewrite and Reject / Mock rules.
     pub rewrites: Vec<RewriteRule>,
     /// Script hook rules; `source` is empty, corresponding script URLs are in
@@ -72,12 +75,30 @@ pub struct ImportedConfig {
     pub mitm_templates: Vec<String>,
     /// Unrecognized lines / mapping deviations that cannot be expressed.
     pub warnings: Vec<String>,
+    /// Supported declarations with an explicit runtime limit. Also retained in
+    /// `warnings` for existing consumers, but do not indicate a rejected directive.
+    pub advisory_warnings: Vec<String>,
     /// File header `#!key=value` metadata (see [`ConfigMeta`]).
     pub meta: ConfigMeta,
 }
 
 #[cfg(feature = "mitm")]
 impl ImportedConfig {
+    pub fn blocking_warnings(&self) -> impl Iterator<Item = &String> {
+        self.warnings
+            .iter()
+            .filter(|warning| !self.advisory_warnings.contains(warning))
+    }
+
+    /// Only static diagnostics may bypass dynamic-detail redaction. Keep the
+    /// warning visible while distinguishing accepted declarations from rejection.
+    fn advisory(&mut self, section: &'static str, message: &'static str) {
+        let text = format!("[{section}] {message}");
+        tracing::warn!(section, "{text}");
+        self.warnings.push(text.clone());
+        self.advisory_warnings.push(text);
+    }
+
     /// Record a warning: `tracing::warn` while also writing to the `warnings` list.
     fn warn(&mut self, section: &str, _line: &str, msg: &str) {
         // A diagnostic must not echo configuration text, URLs, arguments or regexes.
@@ -107,11 +128,31 @@ impl ImportedConfig {
 /// (e.g., Surge / Loon `[Script]`) share the same parsing path.
 #[cfg(feature = "mitm")]
 pub fn parse_import(content: &str, dialect: ScriptDialect) -> LanpathResult<ImportedConfig> {
+    parse(content, dialect, false)
+}
+
+/// Parse a GPUI local bundle. Script filenames are identities joined to supplied JS,
+/// never filesystem paths or permission to download/read a source.
+#[cfg(feature = "mitm")]
+pub fn parse_local_resource(
+    content: &str,
+    dialect: ScriptDialect,
+) -> LanpathResult<ImportedConfig> {
+    parse(content, dialect, true)
+}
+
+#[cfg(feature = "mitm")]
+fn parse(
+    content: &str,
+    dialect: ScriptDialect,
+    allow_local_sources: bool,
+) -> LanpathResult<ImportedConfig> {
     if dialect == ScriptDialect::Stash {
         return Ok(stash::parse_stash(content));
     }
     let mut cfg = ImportedConfig {
         meta: parse_config_meta(content),
+        allow_local_sources,
         ..ImportedConfig::default()
     };
     let mut section = String::new();

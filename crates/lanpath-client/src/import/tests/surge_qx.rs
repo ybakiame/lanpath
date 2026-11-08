@@ -2,7 +2,7 @@
 //! Sources: https://manual.nssurge.com/http/map-local.html and sibling rewrite pages;
 //! https://github.com/crossutility/Quantumult-X/blob/master/sample.conf.
 
-use super::super::parse_import;
+use super::super::{ImportedConfig, parse_import};
 use lanpath_mitm::{HookMode, RewriteAction, RewriteEngine};
 use lanpath_script::{ScriptDialect, ScriptKind};
 
@@ -297,4 +297,39 @@ fn qx_header_rewrite_can_change_request_line_without_losing_headers() {
     assert_eq!(method, "POST");
     assert_eq!(url, "https://a.invalid/new");
     assert_eq!(headers, [("X-Test".into(), "kept".into())]);
+}
+
+#[test]
+fn supported_response_unlimited_declaration_retains_complete_nonblocking_warning() {
+    let cfg = parse_import("[Script]\nresponse=type=http-response,pattern=^https://example.invalid/,script-path=https://assets.invalid/response.js,requires-body=true,max-size=-1", ScriptDialect::Surge).unwrap();
+    assert_eq!(cfg.scripts.len(), 1);
+    assert_eq!(cfg.scripts[0].max_size, usize::MAX);
+    assert_eq!(cfg.advisory_warnings.len(), 1);
+    assert_eq!(cfg.warnings, cfg.advisory_warnings);
+    assert_eq!(cfg.blocking_warnings().count(), 0);
+    assert!(cfg.warnings[0].contains("32 MiB"));
+    assert!(
+        cfg.warnings[0].ends_with("larger responses skip the script and pass through unchanged")
+    );
+    assert!(!cfg.warnings[0].contains("[detail]"));
+}
+
+#[test]
+fn static_advisories_preserve_apostrophes_while_dynamic_details_remain_redacted() {
+    let mut cfg = ImportedConfig::default();
+    cfg.advisory(
+        "script",
+        "Lanpath's supported inspection limit remains bounded",
+    );
+    cfg.warn(
+        "script",
+        "",
+        "unsupported option 'https://secret.invalid/?token=private'; not activated",
+    );
+    assert!(cfg.advisory_warnings[0].ends_with("inspection limit remains bounded"));
+    assert!(cfg.advisory_warnings[0].contains("Lanpath's"));
+    assert_eq!(cfg.blocking_warnings().count(), 1);
+    assert!(!cfg.warnings[1].contains("secret"));
+    assert!(!cfg.warnings[1].contains("private"));
+    assert!(cfg.warnings[1].contains("[detail]"));
 }
