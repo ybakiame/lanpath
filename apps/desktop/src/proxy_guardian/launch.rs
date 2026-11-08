@@ -175,6 +175,9 @@ impl Guardian {
     }
 
     pub(crate) fn status(&mut self) -> LanpathResult<SystemProxyOwnership> {
+        if self.process.exited()? {
+            return Ok(SystemProxyOwnership::RecoveryRequired);
+        }
         match self.request(Request::Status)? {
             Response::Status(status) => Ok(status),
             _ => Err(failure("guardian status response mismatch")),

@@ -58,7 +58,7 @@ pub(crate) struct Snapshot {
     pub guards: Vec<Option<TypedValue>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RecoveryIntent {
     pub version: u32,
     pub owner: String,

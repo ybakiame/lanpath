@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 #[cfg(any(windows, test))]
 pub(crate) mod coordination;
+mod disabled;
 
 pub(crate) trait OperationGuard {}
 impl<T> OperationGuard for T {}
@@ -33,7 +34,8 @@ struct State {
 ///
 /// No destructor mutates global settings. Keep the referenced core alive until `restore`
 /// succeeds. Call `recover_abandoned` explicitly before starting/reaping an old core.
-/// Recovery refuses unrecognised/externally changed settings, retaining protected evidence.
+/// Recovery never overwrites unrecognised/external edits. A verified direct state may
+/// finish a formerly direct session without changing the user's disabled settings.
 pub struct SystemProxySession {
     backend: Box<dyn SessionBackend>,
     state: Mutex<State>,
@@ -208,6 +210,8 @@ impl SystemProxySession {
     }
 
     /// Without an owned session this performs no registry, WinINet or journal write.
+    /// Restore the exact baseline, or release a verified manually disabled session
+    /// without overwriting inactive addresses, bypasses or connection blobs.
     pub fn restore(&self) -> LanpathResult<()> {
         let mut state = self
             .state
@@ -294,7 +298,29 @@ impl SystemProxySession {
         if current.guards != intent.original.guards {
             return Err(error("policy/PAC/scope changed; refusing restoration"));
         }
-        if current != intent.original && intent.observed.as_ref() != Some(&current) {
+        // Returning to the original effective state is sufficient even when Windows
+        // rewrote connection blobs. An active successor still requires an exact match.
+        if current.effective != intent.original.effective
+            && intent.observed.as_ref() != Some(&current)
+        {
+            if disabled::verified_direct(intent, &current) {
+                self.backend
+                    .validate(&current, AcquisitionPolicy::RequireDirect)?;
+                // The exception grants no registry write authority. Check the exact
+                // durable owner/checkpoint and reread before retiring only its journal.
+                if self.backend.load()?.as_ref() != Some(&*intent)
+                    || self.backend.snapshot()? != current
+                {
+                    return Err(error(
+                        "disabled proxy state or recovery owner changed; evidence retained",
+                    ));
+                }
+                self.backend.clear()?;
+                tracing::info!(
+                    "system proxy already disabled; released owned recovery state without modifying settings"
+                );
+                return Ok(());
+            }
             return Err(error(
                 "external change or interrupted unknown apply; refusing restoration",
             ));

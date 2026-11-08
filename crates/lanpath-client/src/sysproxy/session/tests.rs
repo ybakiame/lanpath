@@ -32,6 +32,8 @@ struct Fixture {
     restore_failure: bool,
     notify_failure: bool,
     load_failure: bool,
+    clear_failure: bool,
+    load_pause: Option<Pause>,
     read_failure: bool,
     global_writes: usize,
     journal_writes: usize,
@@ -73,6 +75,8 @@ fn fixture() -> Arc<Mutex<Fixture>> {
         restore_failure: false,
         notify_failure: false,
         load_failure: false,
+        clear_failure: false,
+        load_pause: None,
         read_failure: false,
         global_writes: 0,
         journal_writes: 0,
@@ -153,11 +157,15 @@ impl SessionBackend for Arc<Mutex<Fixture>> {
         }
     }
     fn load(&self) -> LanpathResult<Option<RecoveryIntent>> {
-        let fixture = self.lock().unwrap();
+        let mut fixture = self.lock().unwrap();
         if fixture.load_failure {
             return Err(error("journal inaccessible"));
         }
-        Ok(fixture.journal.clone())
+        let journal = fixture.journal.clone();
+        let pause = fixture.load_pause.take();
+        drop(fixture);
+        checkpoint_pause(pause);
+        Ok(journal)
     }
     fn save(&self, intent: &RecoveryIntent) -> LanpathResult<()> {
         let mut fixture = self.lock().unwrap();
@@ -167,6 +175,9 @@ impl SessionBackend for Arc<Mutex<Fixture>> {
     }
     fn clear(&self) -> LanpathResult<()> {
         let mut fixture = self.lock().unwrap();
+        if fixture.clear_failure {
+            return Err(error("journal clear failed"));
+        }
         fixture.journal_writes += 1;
         fixture.journal = None;
         Ok(())
@@ -182,6 +193,41 @@ impl SessionBackend for Arc<Mutex<Fixture>> {
 
 fn endpoint() -> SocketAddr {
     "127.0.0.1:18080".parse().unwrap()
+}
+
+fn manually_disable_owned_proxy(fixture: &Arc<Mutex<Fixture>>) {
+    let mut state = fixture.lock().unwrap();
+    state.current.effective.flags = DIRECT;
+    state.current.values[0] = Some(TypedValue {
+        kind: 4,
+        bytes: 0u32.to_le_bytes().to_vec(),
+    });
+    // Windows leaves the owned server/bypass in place and rewrites connection blobs.
+    state.current.values[3] = Some(TypedValue {
+        kind: 3,
+        bytes: vec![9; 12],
+    });
+}
+
+#[test]
+fn manually_disabled_owned_proxy_releases_ownership_without_rewriting_settings() {
+    let fixture = fixture();
+    let owner = session(&fixture);
+    owner.acquire(endpoint()).unwrap();
+    manually_disable_owned_proxy(&fixture);
+    let before = fixture.lock().unwrap().current.clone();
+    let writes = fixture.lock().unwrap().global_writes;
+    assert_eq!(
+        owner.status().unwrap(),
+        SystemProxyOwnership::RecoveryRequired
+    );
+    owner.restore().unwrap();
+    assert_eq!(owner.status().unwrap(), SystemProxyOwnership::Unowned);
+    let state = fixture.lock().unwrap();
+    assert_eq!(state.current, before);
+    assert_eq!(state.global_writes, writes);
+    assert!(state.journal.is_none());
+    assert!(!state.leased);
 }
 fn session(fixture: &Arc<Mutex<Fixture>>) -> SystemProxySession {
     SystemProxySession::new(Box::new(fixture.clone()), "test-client")
@@ -434,6 +480,28 @@ fn matching_guardian_refuses_external_effective_typed_and_policy_edits() {
 }
 
 #[test]
+fn guardian_accepts_manually_restored_effective_baseline_despite_connection_blob_changes() {
+    let fixture = fixture();
+    let owner = session(&fixture);
+    owner.acquire(endpoint()).unwrap();
+    {
+        let mut state = fixture.lock().unwrap();
+        state.leased = false;
+        state.current.effective = baseline().effective;
+        state.current.values[3] = Some(TypedValue {
+            kind: 3,
+            bytes: vec![9; 12],
+        });
+    }
+    let guardian = session(&fixture);
+    assert!(guardian.recover_abandoned_owner(owner.owner_id()).unwrap());
+    let state = fixture.lock().unwrap();
+    assert_eq!(state.current, baseline());
+    assert!(state.journal.is_none());
+    assert!(!state.leased);
+}
+
+#[test]
 fn guardian_lifetime_finishes_mutation_checkpoints_after_gui_caller_disappears() {
     // These barriers stop the real session engine after a backend mutation and before
     // its readback/checkpoint. Only the GUI response receiver disappears; the owner
@@ -496,4 +564,193 @@ fn guardian_lifetime_finishes_mutation_checkpoints_after_gui_caller_disappears()
         assert!(state.journal.is_none());
         assert!(!state.leased);
     }
+}
+
+#[test]
+fn disabled_state_preserves_windows_rewritten_inactive_fields_and_allows_a_new_session() {
+    let fixture = fixture();
+    let owner = session(&fixture);
+    owner.acquire(endpoint()).unwrap();
+    manually_disable_owned_proxy(&fixture);
+    {
+        let mut state = fixture.lock().unwrap();
+        state.current.effective.server.clear();
+        state.current.effective.bypass = "<local>".into();
+        state.current.values[1] = Some(TypedValue {
+            kind: 1,
+            bytes: vec![0, 0],
+        });
+        state.current.values[2] = Some(TypedValue {
+            kind: 1,
+            bytes: "<local>\0"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect(),
+        });
+    }
+    let before = fixture.lock().unwrap().current.clone();
+    let writes = fixture.lock().unwrap().global_writes;
+    owner.restore().unwrap();
+    assert_eq!(fixture.lock().unwrap().current, before);
+    assert_eq!(fixture.lock().unwrap().global_writes, writes);
+    let next = session(&fixture);
+    next.acquire(endpoint()).unwrap();
+    next.restore().unwrap();
+    assert_eq!(fixture.lock().unwrap().current, before);
+}
+
+#[test]
+fn abandoned_disabled_session_releases_only_the_matching_owner() {
+    let fixture = fixture();
+    let owner = session(&fixture);
+    owner.acquire(endpoint()).unwrap();
+    manually_disable_owned_proxy(&fixture);
+    fixture.lock().unwrap().leased = false;
+    let before = fixture.lock().unwrap().current.clone();
+    let writes = fixture.lock().unwrap().global_writes;
+    let replacement = session(&fixture);
+    assert!(
+        !replacement
+            .recover_abandoned_owner("not-this-owner")
+            .unwrap()
+    );
+    assert!(fixture.lock().unwrap().journal.is_some());
+    assert!(
+        replacement
+            .recover_abandoned_owner(owner.owner_id())
+            .unwrap()
+    );
+    let state = fixture.lock().unwrap();
+    assert_eq!(state.current, before);
+    assert_eq!(state.global_writes, writes);
+    assert!(state.journal.is_none());
+    assert!(!state.leased);
+}
+
+#[test]
+fn disabled_release_requires_committed_ownership_and_unchanged_supported_direct_scope() {
+    for edit in 0..9 {
+        let fixture = fixture();
+        let owner = session(&fixture);
+        if edit == 0 {
+            let mut state = fixture.lock().unwrap();
+            state.current.effective.flags = DIRECT | PROXY;
+            state.current.effective.server = "foreign-before-acquire:88".into();
+        }
+        owner
+            .acquire_with_policy(endpoint(), AcquisitionPolicy::ExplicitTakeover)
+            .unwrap();
+        manually_disable_owned_proxy(&fixture);
+        {
+            let mut state = fixture.lock().unwrap();
+            state.leased = false;
+            match edit {
+                0 => {} // Never reactivate an explicitly replaced foreign baseline.
+                1 => state.current.effective.flags = DIRECT | PROXY,
+                2 => state.current.effective.flags = DIRECT | 8,
+                3 => state.current.effective.pac_url = "https://policy.invalid/pac".into(),
+                4 => {
+                    state.current.guards[0] = Some(TypedValue {
+                        kind: 1,
+                        bytes: vec![0, 0],
+                    })
+                }
+                5 => state.current.values[0] = None,
+                6 => {
+                    state.current.values[0] = Some(TypedValue {
+                        kind: 1,
+                        bytes: vec![0, 0],
+                    })
+                }
+                7 => state.journal.as_mut().unwrap().observed = None,
+                _ => {
+                    state
+                        .journal
+                        .as_mut()
+                        .unwrap()
+                        .observed
+                        .as_mut()
+                        .unwrap()
+                        .effective
+                        .server = "unknown-checkpoint:99".into()
+                }
+            }
+        }
+        let before = fixture.lock().unwrap().current.clone();
+        let writes = fixture.lock().unwrap().global_writes;
+        let replacement = session(&fixture);
+        assert!(
+            replacement
+                .recover_abandoned_owner(owner.owner_id())
+                .is_err(),
+            "edit {edit}"
+        );
+        let state = fixture.lock().unwrap();
+        assert_eq!(state.current, before, "edit {edit}");
+        assert_eq!(state.global_writes, writes, "edit {edit}");
+        assert!(state.journal.is_some());
+    }
+}
+
+#[test]
+fn disabled_release_retains_evidence_on_failed_clear_or_changed_durable_owner() {
+    for change_owner in [false, true] {
+        let fixture = fixture();
+        let owner = session(&fixture);
+        owner.acquire(endpoint()).unwrap();
+        manually_disable_owned_proxy(&fixture);
+        {
+            let mut state = fixture.lock().unwrap();
+            if change_owner {
+                state.journal.as_mut().unwrap().owner = "successor".into();
+            } else {
+                state.clear_failure = true;
+            }
+        }
+        let before = fixture.lock().unwrap().current.clone();
+        let writes = fixture.lock().unwrap().global_writes;
+        assert!(owner.restore().is_err());
+        assert_eq!(fixture.lock().unwrap().current, before);
+        assert_eq!(fixture.lock().unwrap().global_writes, writes);
+        assert!(fixture.lock().unwrap().journal.is_some());
+        assert!(fixture.lock().unwrap().leased);
+        if !change_owner {
+            fixture.lock().unwrap().clear_failure = false;
+            owner.restore().unwrap();
+            assert!(fixture.lock().unwrap().journal.is_none());
+            assert_eq!(fixture.lock().unwrap().current, before);
+        }
+    }
+}
+
+#[test]
+fn reenabled_proxy_during_disabled_release_is_not_cleared_or_overwritten() {
+    let fixture = fixture();
+    let owner = session(&fixture);
+    owner.acquire(endpoint()).unwrap();
+    manually_disable_owned_proxy(&fixture);
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    fixture.lock().unwrap().load_pause = Some(Pause {
+        entered: entered_tx,
+        resume: resume_rx,
+    });
+    let writes = fixture.lock().unwrap().global_writes;
+    let worker = std::thread::spawn(move || owner.restore());
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    {
+        let mut state = fixture.lock().unwrap();
+        state.current.effective.flags = DIRECT | PROXY;
+        state.current.effective.server = "external-successor:88".into();
+    }
+    let before = fixture.lock().unwrap().current.clone();
+    resume_tx.send(()).unwrap();
+    assert!(worker.join().unwrap().is_err());
+    let state = fixture.lock().unwrap();
+    assert_eq!(state.current, before);
+    assert_eq!(state.global_writes, writes);
+    assert!(state.journal.is_some());
+    assert!(state.leased);
 }
