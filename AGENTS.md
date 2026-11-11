@@ -24,6 +24,11 @@ apps/nsh 为 ADR-0019 授权的纯 Rust NSH 验证目标，保持独立 Cargo �
 只验证共享业务与平台适配，不接管核心、系统代理或 VPN，不替换 Tauri/GPUI 或读取其数据。
 Android 后续仍复用 Kotlin VpnService 与 Go/libbox；NSH 页面运行不等于 VPN 已接入。
 
+apps/desktop 为 `nsh-validation` 分支上的 NSH Windows 迁移目标：纯 Rust NSH 0.5.0、独立 Cargo
+项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移 Tauri/GPUI/apps/nsh 数据；
+与 apps/nsh 相同不接管核心、系统代理或 VPN。迁移期内 apps/gpui 保留为 GPUI 对照，不被
+apps/desktop 替换；生产切换仍以单独决策为前提。
+
 ## 环境和验证
 
 按任务读取仓库 skills，不要求工具自动发现：
@@ -47,7 +52,7 @@ standalone devenv 2.4.0 的固定安装入口见 [环境指南](devenv.md)；`de
 前端无单元测试运行器，verify 为 build+lint+format；交互验证注明 mock/设备边界。
 Rust 执行 cargo build --workspace 和 bun run verify:rust，含根 fmt/clippy/test、
 桌面壳 host clippy 与有 SDK/target 时 Android target check；根 workspace 不覆盖壳。
-根门禁不覆盖 apps/gpui 或 apps/nsh；其改动另执行独立项目 fmt/clippy/test/build 及
+根门禁不覆盖 apps/gpui、apps/nsh 或 apps/desktop；其改动另执行独立项目 fmt/clippy/test/build 及
 Windows 原生场景，NSH 按目标增加 nsh test、Android 打包与获准的真机验证，不据此新增强制 CI 门禁。
 Go 桥调整还需构建 lanpathcore.aar，并编译 Android Kotlin/资源；不得沿用旧品牌 AAR。
 

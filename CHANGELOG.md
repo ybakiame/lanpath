@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- 新增 `apps/desktop`：NSH Windows 迁移目标的首个切片。纯 Rust NSH 0.5.0 独立 Cargo 项目，
+  应用身份 `com.ybakiame.lanpath.desktop.nsh`，桌面窗口壳含侧栏导航；仅实现“订阅验证”页
+  （共享 `lanpath-client` 解析固定测试订阅）与真实浅色/深色/跟随系统切换并持久化的“外观”页，
+  无核心启动、网络请求、系统代理或 VPN，不读取/迁移 Tauri/GPUI/apps/nsh 数据；apps/gpui 保留为
+  GPUI 对照。headless 测试覆盖共享解析、导航与外观切换。
+
+- 扩展 `apps/desktop` 订阅页为真实订阅列表与持久化：复用共享 `lanpath-client::SubscriptionStore`，
+  数据写入 NSH 桌面独立隔离数据根（所有权标记 + 文件锁租约 + 生产/链接路径准入，自 apps/gpui
+  迁移并适配为 `.lanpath-desktop-nsh` 身份；`LANPATH_DESKTOP_DATA_DIR` 或 storage 键显式覆盖，
+  默认根独立于 Tauri/GPUI/apps/nsh）。启动加载真实订阅（名称、启用状态、节点数、错误），
+  新增表单校验失败不覆盖已有数据，支持启用切换与确认删除；保留固定订阅的共享解析验证，
+  无任何网络请求或核心启动。headless 场景以纯 Rust `nsh_testing::Headless` 实现
+  （tests/ 下 10 项，与单元/准入测试合计 35 项 + 1 跨进程锁用例），无 TSX 测试依赖。
+
 - 新增独立 `nsh-validation` 分支与 `apps/nsh` 纯 Rust 验证应用：NSH 0.5.0 调用共享 `lanpath-client` 解析订阅，headless、Windows 原生窗口和 Android 13 真机交互通过；独立身份不启动核心、系统代理或 VPN，不替换 Tauri/GPUI。补齐 GTK4/GStreamer 与 Android ABI 构建依赖，后续先验证 Kotlin VpnService/Go AAR 集成。见 ADR-0019。
 
 - 修复 GPUI 正常启动后误显示“需要恢复”：运行中的自有代理、MITM、核心及辅助会话不再因资源存在而判为故障，明确代理冲突和停核残留仍要求恢复；启停回调与后台轮询使用同一判定。核心页改为紧凑单行标题，移除重复说明与空占位，Environment、Tags 和路径收进构建详情；移除最近启动记录，阶段、耗时、警告与失败原因统一写入应用日志。

@@ -73,3 +73,11 @@ Tauri 桌面退役以完整验收为前提。移动 Rust UI 是后续评估路�
 在 Windows 与 Android 的复用。应用身份、数据和设备行为与现行产品隔离；不启动核心、系统代理或 VPN。
 Android 的 Kotlin VpnService 与 Go/libbox 保留为后续桥接边界，当前真机解析通过不代表 VPN 已接入。
 生产替换、Tauri/GPUI 退役和全局网络控制不属于 ADR-0019 的 Proposed 验证范围。
+
+## NSH Windows 迁移目标
+
+同分支的 `apps/desktop` 是纯 Rust NSH 0.5.0 桌面窗口壳（侧栏导航 + 主内容区），为 GPUI 完整应用的
+NSH Windows 迁移目标：首个切片实现“订阅验证”页（共享 `parse_subscription_body` 与
+`node_tags_from_nodes` 解析固定测试订阅）和真实浅色/深色/跟随系统切换的外观页，不显示未实现页面。
+应用身份 `com.ybakiame.lanpath.desktop.nsh`，数据与 Tauri/GPUI/apps/nsh 隔离；迁移期内
+`apps/gpui` 保留为 GPUI 对照。不启动核心、网络请求、系统代理或 VPN。
