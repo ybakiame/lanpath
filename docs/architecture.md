@@ -66,3 +66,10 @@ GPUI 仅发行一份签名 ZIP，默认程序旁便携标记与 `data/`；移除
 安全更新仍由精确资源准入和可恢复原生载荷事务处理。未来 `0.2.x-rc` 桌面候选只走 GPUI；
 Tauri 桌面退役以完整验收为前提。移动 Rust UI 是后续评估路线，先保留现有 VPN/libbox，
 不把实验性 gpui-mobile 视为 Android 产品验证；详见 ADR-0014。
+
+## NSH 跨平台验证目标
+
+`nsh-validation` 分支的 `apps/nsh` 使用固定 NSH 0.5.0 和纯 Rust 组件，验证共享 `lanpath-client`
+在 Windows 与 Android 的复用。应用身份、数据和设备行为与现行产品隔离；不启动核心、系统代理或 VPN。
+Android 的 Kotlin VpnService 与 Go/libbox 保留为后续桥接边界，当前真机解析通过不代表 VPN 已接入。
+生产替换、Tauri/GPUI 退役和全局网络控制不属于 ADR-0019 的 Proposed 验证范围。

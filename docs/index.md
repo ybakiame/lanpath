@@ -7,6 +7,7 @@
 - [品牌](brand-guidelines.md)
 - [GPUI 桌面设计](desktop-design.md)
 - [GPUI 桌面重设计验证](testing/2026-11-07-gpui-desktop-redesign.md)
+- [NSH 跨平台验证](testing/2026-11-11-nsh-validation.md)
 - [ADR](adr/README.md)
 - [来源](source-provenance.json)
 - [协议采纳](adoption/adoption-report.md)

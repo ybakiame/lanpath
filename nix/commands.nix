@@ -9,7 +9,7 @@ in {
   # 命令仅显式执行；进入 shell 不安装依赖、不构建 AAR、不启动代理。
   scripts = {
     lanpath-install.exec = atRoot "bun install --frozen-lockfile";
-    lanpath-rust-targets.exec = atRoot "rustup target add aarch64-linux-android";
+    lanpath-rust-targets.exec = atRoot "rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android";
     lanpath-verify-frontend.exec = atRoot ''
       bun run --filter lanpath-app verify
       bun run --filter @lanpath/client-core verify

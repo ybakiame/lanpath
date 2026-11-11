@@ -30,6 +30,7 @@
 
 - [0017 GPUI 实验桌面双核心与版本管理](0017-gpui-dual-core-management.md) — Accepted（仅实验性桌面；Tauri/Android 前端保持 sing-box）
 - [0018：GPUI 资源清单与缓存布局](0018-gpui-resource-storage.md)
+- [0019 NSH 跨平台验证分支](0019-nsh-cross-platform-validation.md) — Proposed（仅验证，不替换现行目标）
 
 源仓相关历史 ADR：0007 单壳双目标、0008 Windows 打包、0012 核心生命周期、0013 自研 UI、0014 窗口与策略。完整历史保留在来源仓库，不将旧服务端路径当作新仓构建契约。
 
