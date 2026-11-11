@@ -15,7 +15,7 @@
 
 - 独立桌面项目执行 fmt、strict all-target Clippy、节点摘要定向单测及 build。
 - 节点摘要回归覆盖嵌套选择、缺少选择、循环、直连和阻断。
-- `apps/desktop/tools/native_status_bar_review.ps1` 接收显式 Binary、WindowTools、OutputDirectory，
+- `apps/gpui/tools/native_status_bar_review.ps1` 接收显式 Binary、WindowTools、OutputDirectory，
   使用独立临时数据根。检查底部固定位置、内容/导航边界、各项无重叠、快捷跳转、F6/Shift+F6、
   Tab/Enter、弹层关闭、明暗主题、最小窗口、150% 缩放及长订阅名称。
 - 原完整 UI 脚本导航定位改为从内容使用 Shift+F6；本轮仅运行状态栏定向验收，避免重复全量 UI 测试。

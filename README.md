@@ -38,7 +38,7 @@ Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，�
 
 ## Windows GPUI 实验版
 
-`apps/desktop` 是独立 GPUI 应用，程序为 `lanpath-gpui.exe`，不依赖 WebView。
+`apps/gpui` 是独立 GPUI 应用，程序为 `lanpath-gpui.exe`，不依赖 WebView。
 仅分发签名 ZIP，默认便携：完整解压后保留旁边的空文件 `lanpath-gpui.portable`，
 数据写入程序目录下的 `data/`，不受终端或快捷方式工作目录影响。
 需要独立标准目录 `%LOCALAPPDATA%\LanpathGPUI` 时，正常退出后移除便携标记再重开；

@@ -98,7 +98,7 @@ ignored，真实签名升级恢复用例另行执行通过。受影响 `lanpath-
 因此不宣称全机路由完全不变或已证明 Tailscale 共存；这与逐场景精确归还自有 WinINet 设置
 是不同结论。保留原始快照及差异证据，不对不属于本次会话的路由执行删除/重建。
 
-入口为独立 Cargo 项目 `apps/desktop`，分发程序为 `lanpath-gpui.exe`，显示名为
+入口为独立 Cargo 项目 `apps/gpui`，分发程序为 `lanpath-gpui.exe`，显示名为
 “Lanpath GPUI”。[ADR-0013](adr/0013-gpui-experimental-parallel-migration.md) 记录并行迁移，
 [ADR-0014](adr/0014-gpui-native-integration-and-distribution.md) 授权窄权限 helper 和独立分发身份。
 不替换稳定 Tauri/Android，也不授权公开发布。普通 GUI 拒绝继承高权限 token；
@@ -107,10 +107,10 @@ helper 子命令先于 GUI、业务存储与重启初始化分派。
 从仓库根在 Nix 环境分别执行独立项目检查；根 `verify:rust` 不覆盖此项目：
 
 ```sh
-devenv shell -- cargo fmt --manifest-path apps/desktop/Cargo.toml --check
-devenv shell -- cargo clippy --manifest-path apps/desktop/Cargo.toml --locked --all-targets -- -D warnings
-devenv shell -- cargo test --manifest-path apps/desktop/Cargo.toml --locked --lib
-devenv shell -- cargo build --manifest-path apps/desktop/Cargo.toml --locked
+devenv shell -- cargo fmt --manifest-path apps/gpui/Cargo.toml --check
+devenv shell -- cargo clippy --manifest-path apps/gpui/Cargo.toml --locked --all-targets -- -D warnings
+devenv shell -- cargo test --manifest-path apps/gpui/Cargo.toml --locked --lib
+devenv shell -- cargo build --manifest-path apps/gpui/Cargo.toml --locked
 ```
 
 本机 Windows 原生验证使用已授权的 Rust 1.98.0/MSVC/Windows SDK/CMake，不授权安装或升级组件。
@@ -122,7 +122,7 @@ devenv shell -- cargo build --manifest-path apps/desktop/Cargo.toml --locked
 
 ```powershell
 Remove-Item Env:LANPATH_DESKTOP_CORE_BINARY -ErrorAction SilentlyContinue
-cargo run --release --manifest-path apps/desktop/Cargo.toml --locked
+cargo run --release --manifest-path apps/gpui/Cargo.toml --locked
 ```
 
 `LANPATH_DESKTOP_CORE_BINARY` 仅保留为显式测试覆盖：可指向单独复制的真实核心，但不得指向现行
@@ -147,12 +147,12 @@ cargo run --release --manifest-path apps/desktop/Cargo.toml --locked
 GPUI 的受控 Windows 核心独立于 Tauri/Android 的官方种子；在本仓 Nix 环境构建：
 
 ```sh
-devenv shell -- bun apps/desktop/tools/managed_core.ts x86_64-pc-windows-msvc
+devenv shell -- bun apps/gpui/tools/managed_core.ts x86_64-pc-windows-msvc
 # ARM64 使用 aarch64-pc-windows-msvc；交叉构建不等于 ARM64 原生验收。
 ```
 
-源码与补丁清单位于 `apps/desktop/managed-core/source.json`，产物默认写入独立
-`apps/desktop/target/<target>/managed-core/resources/seed/`。分发工具将应用 PE 的编译期摘要
+源码与补丁清单位于 `apps/gpui/managed-core/source.json`，产物默认写入独立
+`apps/gpui/target/<target>/managed-core/resources/seed/`。分发工具将应用 PE 的编译期摘要
 与种子绑定，旧应用或补丁变化必须先重新编译应用，不靠版本输出为高权限执行建立信任。
 打包须使用已授权的 Windows SDK `mt.exe`，WSL 下通过 `GPUI_MT` 指定；只规范化待签名副本，
 不会修改原始构建文件。签名仍使用独立 GPUI 身份，不能以关闭验签作为调试替代。
@@ -182,7 +182,7 @@ Limited/Full 类型仍须一致；不能删掉登录绑定或接受其他管理�
 在同一普通权限 Windows 开发终端可显式执行，不会弹出提权请求或启动核心：
 
 ```text
-cargo +1.98.0-x86_64-pc-windows-msvc test --locked --manifest-path apps/desktop/Cargo.toml --lib privileged::security::token_tests::actual_windows_linked_pair_is_accepted_without_elevating_the_test_process -- --ignored --exact --nocapture
+cargo +1.98.0-x86_64-pc-windows-msvc test --locked --manifest-path apps/gpui/Cargo.toml --lib privileged::security::token_tests::actual_windows_linked_pair_is_accepted_without_elevating_the_test_process -- --ignored --exact --nocapture
 ```
 
 Windows 防火墙的 `Rules.Add` 拒绝 Rust 规范化产生的 `\\?\C:\…` 应用路径，即使
@@ -227,7 +227,7 @@ helper 在物化资源后仍独立运行与编辑器相同的完整能力策略�
 `LANPATH_TEST_GPUI_BINARY` 为真实 Windows GUI 程序的绝对路径后，可显式运行：
 
 ```text
-cargo +1.98.0-x86_64-pc-windows-msvc test --locked --manifest-path apps/desktop/Cargo.toml --test native_window_lifecycle -- --ignored
+cargo +1.98.0-x86_64-pc-windows-msvc test --locked --manifest-path apps/gpui/Cargo.toml --test native_window_lifecycle -- --ignored
 ```
 
 此项默认忽略，不是新增强制门禁。原生进程仅使用临时数据根，失败只清理自己持有的子进程；
@@ -243,7 +243,7 @@ Windows 窗口先以隐藏状态构建，视图及关闭回调完成注册后再
 实验版以独立 `app.toml` 的 `[client]`、订阅清单/成功缓存和覆写模板作为持久业务源，不再编辑完整
 `configuration.json`。应用外观位于同一文件的 `[appearance]`，远程资源清单位于 `[resources]`，订阅清单独立保存为 `subscriptions.toml`；其他业务文档保留既有格式。可重建下载、图标和刷新进度分类放入 `cache/`，本地导入持久保存在 `resources/imports/`。
 检测旧 `client.json` 或 `appearance.json` 时，先进入不可操作的迁移页，后台完成备份、转换和校验，
-再创建业务页面。版本化迁移位于 `apps/desktop/src/migration/`，每次在 `backup/migrations/` 保存
+再创建业务页面。版本化迁移位于 `apps/gpui/src/migration/`，每次在 `backup/migrations/` 保存
 旧文件、转换结果和清单，全部成功后移除原位置旧文件；失败不发布新配置或删除原件。已迁移目录
 若遗留旧文件，会补做备份和清理且不覆盖有效 `app.toml`。详见 [ADR-0016](adr/0016-gpui-unified-app-settings.md) 与 [ADR-0018](adr/0018-gpui-resource-storage.md)。
 
@@ -642,9 +642,9 @@ Clash API 为 `127.0.0.1:19090`，MITM 生效时另使用 `mixed_port + 1` 的 l
 
 ```powershell
 $env:LANPATH_TEST_SING_BOX = Join-Path $env:LOCALAPPDATA 'LanpathExperimentalCore\sing-box.exe'
-cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
-cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::scripts_tests::fetched_remote_task_runs_while_real_core_is_live -- --ignored --exact
-cargo test --release --manifest-path apps/desktop/Cargo.toml --locked --lib business::mitm_tests::generated_pipeline_records_real_mitm_traffic -- --ignored --exact --nocapture
+cargo test --release --manifest-path apps/gpui/Cargo.toml --locked --lib business::tests::generated_subscription_pipeline_starts_real_core -- --ignored --exact
+cargo test --release --manifest-path apps/gpui/Cargo.toml --locked --lib business::scripts_tests::fetched_remote_task_runs_while_real_core_is_live -- --ignored --exact
+cargo test --release --manifest-path apps/gpui/Cargo.toml --locked --lib business::mitm_tests::generated_pipeline_records_real_mitm_traffic -- --ignored --exact --nocapture
 ```
 
 Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本阶段没有新增 CI 门禁。
@@ -664,12 +664,12 @@ Linux 主机构建不代表 Windows/ARM64 发布或 Android 设备验收；本�
 `GPUI_WINDOWS_TEMP_DIR` 指定已授权的 SDK 与 Windows 原生临时目录。不再依赖 NSIS 或生成安装器。
 
 ```sh
-devenv shell -- bun apps/desktop/tools/package.ts all x86_64-pc-windows-msvc
-devenv shell -- bun apps/desktop/tools/verify.ts verify x86_64 MANIFEST ARTIFACT
+devenv shell -- bun apps/gpui/tools/package.ts all x86_64-pc-windows-msvc
+devenv shell -- bun apps/gpui/tools/verify.ts verify x86_64 MANIFEST ARTIFACT
 ```
 
 `all` 依次执行 `stage`、`portable`、`manifest`；也可单独执行各阶段。产物位于
-`apps/desktop/target/TARGET/release/bundle/gpui/`：唯一 `-portable.zip`、
+`apps/gpui/target/TARGET/release/bundle/gpui/`：唯一 `-portable.zip`、
 `gpui-ARCH.json` 及其签名、摘要清单。ZIP 同时适用于便携和标准目录，不再提供 setup 或第二套更新描述符。
 ARM64 使用 `aarch64-pc-windows-msvc` 与验签架构 `aarch64`；交叉编译、PE 架构检查不替代原生运行。
 参考 [RustGrid 的发行流程](https://github.com/yisier/rustgrid/blob/main/.github/workflows/release.yml)
@@ -680,9 +680,9 @@ ARM64 使用 `aarch64-pc-windows-msvc` 与验签架构 `aarch64`；交叉编译�
 不能在 WSL/UNC 源码目录执行载荷替换：
 
 ```sh
-devenv shell -- bun apps/desktop/tools/verify.ts upgrade x86_64 MANIFEST ZIP ROOT
+devenv shell -- bun apps/gpui/tools/verify.ts upgrade x86_64 MANIFEST ZIP ROOT
 # 中断恢复：GPUI_UPDATE_HELPER 指向 ROOT 之外的完整已认证包中的 lanpath-gpui.exe
-devenv shell -- bun apps/desktop/tools/verify.ts recover ROOT
+devenv shell -- bun apps/gpui/tools/verify.ts recover ROOT
 ```
 
 目标必须已有完整已认证包且新版本更高；初次使用直接完整解压 ZIP，不经过安装事务。

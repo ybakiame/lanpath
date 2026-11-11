@@ -31,5 +31,5 @@
   停核保留资源需恢复、完全清理后不需恢复，均通过；未启用系统代理后端或信任私有 CA。
 - 原生核心页检查 35 项通过：1180×800、960×640、显式持久化的 150% 缩放，摘要间距、
   标题按钮、无历史/空状态行、构建详情内容及 Escape 关闭。人工复核对应截图通过。
-  截图和 UIA 数据位于忽略的 `apps/desktop/target/native-core-page-review/`，不入库。
-- Windows 镜像的 `apps/desktop/target/debug/lanpath-gpui.exe` 已更新；安装目录未覆盖。
+  截图和 UIA 数据位于忽略的 `apps/gpui/target/native-core-page-review/`，不入库。
+- Windows 镜像的 `apps/gpui/target/debug/lanpath-gpui.exe` 已更新；安装目录未覆盖。

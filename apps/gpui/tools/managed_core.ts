@@ -154,6 +154,6 @@ export async function buildManagedSeed(target: string, output?: string): Promise
 
 if (import.meta.main) {
   const [target, output] = process.argv.slice(2);
-  if (!target) throw new Error("Usage: bun apps/desktop/tools/managed_core.ts <Windows target> [output directory]");
+  if (!target) throw new Error("Usage: bun apps/gpui/tools/managed_core.ts <Windows target> [output directory]");
   await buildManagedSeed(target, output);
 }

@@ -38,7 +38,7 @@ jobs:
         id: managed-core-go
         shell: pwsh
         run: |
-          $source = Get-Content -Raw apps/desktop/managed-core/source.json | ConvertFrom-Json
+          $source = Get-Content -Raw apps/gpui/managed-core/source.json | ConvertFrom-Json
           "version=$($source.go_version.Substring(2))" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-go@v6
         with:
@@ -60,17 +60,17 @@ jobs:
         id: product
         shell: pwsh
         run: |
-          $version = (Select-String -Path apps/desktop/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          $version = (Select-String -Path apps/gpui/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "gpui-v$version") { throw 'GPUI tag/package version mismatch' }
           "version=$version" >> $env:GITHUB_OUTPUT
-          bun test apps/desktop/tools
+          bun test apps/gpui/tools
           if ($LASTEXITCODE -ne 0) { throw 'GPUI packaging regressions failed' }
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop
+          workspaces: apps/gpui
           key: gpui-${{ matrix.target }}
       - name: Build independent GPUI executable
-        run: cargo build --manifest-path apps/desktop/Cargo.toml --locked --release --target '${{ matrix.target }}' --bin lanpath-gpui
+        run: cargo build --manifest-path apps/gpui/Cargo.toml --locked --release --target '${{ matrix.target }}' --bin lanpath-gpui
       - name: Create signed dual-data-mode ZIP bundle
         shell: pwsh
         env:
@@ -82,7 +82,7 @@ jobs:
             [IO.File]::WriteAllText($key, $env:GPUI_PRIVATE_KEY_PEM, [Text.UTF8Encoding]::new($false))
             $env:GPUI_PRIVATE_KEY_PEM = ''
             $env:GPUI_SIGNING_PRIVATE_KEY_FILE = $key
-            bun apps/desktop/tools/package.ts all '${{ matrix.target }}'
+            bun apps/gpui/tools/package.ts all '${{ matrix.target }}'
             if ($LASTEXITCODE -ne 0) { throw 'Signed GPUI packaging failed' }
           } finally {
             Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
@@ -90,18 +90,18 @@ jobs:
       - name: Verify signed consumer bundle before artifact upload
         shell: pwsh
         run: |
-          $dir = 'apps/desktop/target/${{ matrix.target }}/release/bundle/gpui'
+          $dir = 'apps/gpui/target/${{ matrix.target }}/release/bundle/gpui'
           $artifact = 'LanpathGPUI_${{ steps.product.outputs.version }}_windows_${{ matrix.arch }}-portable.zip'
-          bun apps/desktop/tools/verify.ts verify '${{ matrix.arch }}' "$dir/gpui-${{ matrix.arch }}.json" "$dir/$artifact"
+          bun apps/gpui/tools/verify.ts verify '${{ matrix.arch }}' "$dir/gpui-${{ matrix.arch }}.json" "$dir/$artifact"
           if ($LASTEXITCODE -ne 0) { throw 'Signed GPUI consumer verification failed' }
       - uses: actions/upload-artifact@v5
         with:
           name: gpui-windows-${{ matrix.arch }}
           path: |
-            apps/desktop/target/${{ matrix.target }}/release/bundle/gpui/LanpathGPUI_${{ steps.product.outputs.version }}_windows_${{ matrix.arch }}-portable.zip
-            apps/desktop/target/${{ matrix.target }}/release/bundle/gpui/gpui-${{ matrix.arch }}.json
-            apps/desktop/target/${{ matrix.target }}/release/bundle/gpui/gpui-${{ matrix.arch }}.json.sig
-            apps/desktop/target/${{ matrix.target }}/release/bundle/gpui/GPUI-SHA256SUMS.txt
+            apps/gpui/target/${{ matrix.target }}/release/bundle/gpui/LanpathGPUI_${{ steps.product.outputs.version }}_windows_${{ matrix.arch }}-portable.zip
+            apps/gpui/target/${{ matrix.target }}/release/bundle/gpui/gpui-${{ matrix.arch }}.json
+            apps/gpui/target/${{ matrix.target }}/release/bundle/gpui/gpui-${{ matrix.arch }}.json.sig
+            apps/gpui/target/${{ matrix.target }}/release/bundle/gpui/GPUI-SHA256SUMS.txt
           if-no-files-found: error
 
   publish:
@@ -134,7 +134,7 @@ jobs:
           version="${GITHUB_REF_NAME#gpui-v}"
           for arch in x86_64 aarch64; do
             dir="gpui-dist/gpui-windows-$arch"
-            bun apps/desktop/tools/verify.ts verify "$arch" "$dir/gpui-$arch.json" "$dir/LanpathGPUI_${version}_windows_${arch}-portable.zip"
+            bun apps/gpui/tools/verify.ts verify "$arch" "$dir/gpui-$arch.json" "$dir/LanpathGPUI_${version}_windows_${arch}-portable.zip"
           done
           VERIFY
       - name: Publish dedicated version and channel only

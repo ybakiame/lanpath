@@ -15,7 +15,7 @@ Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；现行
 GPUI 实验桌面按 ADR-0017 支持 sing-box 与 Mihomo：共享库存/配置合成按核心类型分派，Android 拒绝 Mihomo。
 不依赖 ProxyPanel 源码，不把协议框架写成产品实现。
 
-apps/desktop 为 ADR-0013 授权的 Windows GPUI 实验性并行目标，保持独立 Cargo 项目；
+apps/gpui 为 ADR-0013 授权的 Windows GPUI 实验性并行目标，保持独立 Cargo 项目；
 现行 Tauri 与 Android 不被替换。GPUI 复用共享 Rust 业务，UI 状态由对应 feature/entity 持有。
 实验身份、数据根、核心进程与端口独立，不自动读取或迁移生产数据，不接管系统代理/TUN，
 不改变现行安装、更新和签名身份。后续生产切换或全局网络控制须单独取得决策。
@@ -47,7 +47,7 @@ standalone devenv 2.4.0 的固定安装入口见 [环境指南](devenv.md)；`de
 前端无单元测试运行器，verify 为 build+lint+format；交互验证注明 mock/设备边界。
 Rust 执行 cargo build --workspace 和 bun run verify:rust，含根 fmt/clippy/test、
 桌面壳 host clippy 与有 SDK/target 时 Android target check；根 workspace 不覆盖壳。
-根门禁不覆盖 apps/desktop 或 apps/nsh；其改动另执行独立项目 fmt/clippy/test/build 及
+根门禁不覆盖 apps/gpui 或 apps/nsh；其改动另执行独立项目 fmt/clippy/test/build 及
 Windows 原生场景，NSH 按目标增加 nsh test、Android 打包与获准的真机验证，不据此新增强制 CI 门禁。
 Go 桥调整还需构建 lanpathcore.aar，并编译 Android Kotlin/资源；不得沿用旧品牌 AAR。
 

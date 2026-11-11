@@ -1,6 +1,6 @@
 # GPUI 桌面重设计验收
 
-范围为独立 `apps/desktop` 的窗口、主题、侧栏、配置导航和页面呈现。设计见
+范围为独立 `apps/gpui` 的窗口、主题、侧栏、配置导航和页面呈现。设计见
 [桌面设计说明](../desktop-design.md)。本记录汇总本批交付证据，不保存逐次操作日志。
 
 ## 构建与检查
@@ -8,10 +8,10 @@
 从仓库根进入 devenv，独立桌面执行：
 
 ```sh
-devenv shell -- cargo fmt --manifest-path apps/desktop/Cargo.toml --check
-devenv shell -- cargo clippy --manifest-path apps/desktop/Cargo.toml --locked --all-targets -- -D warnings
-devenv shell -- cargo test --manifest-path apps/desktop/Cargo.toml --locked --lib
-devenv shell -- cargo build --manifest-path apps/desktop/Cargo.toml --locked
+devenv shell -- cargo fmt --manifest-path apps/gpui/Cargo.toml --check
+devenv shell -- cargo clippy --manifest-path apps/gpui/Cargo.toml --locked --all-targets -- -D warnings
+devenv shell -- cargo test --manifest-path apps/gpui/Cargo.toml --locked --lib
+devenv shell -- cargo build --manifest-path apps/gpui/Cargo.toml --locked
 ```
 
 Windows 镜像使用既有锁定 Rust 1.98.0/MSVC/SDK/CMake 原生工具链执行同组独立项目检查，
@@ -33,7 +33,7 @@ Windows 镜像使用既有锁定 Rust 1.98.0/MSVC/SDK/CMake 原生工具链执�
 
 使用新编译的 Debug GUI、脚本自有子进程及新建临时实验数据根。UI Automation 按名称或 ID
 重新读取，必要时按已解析的可见边界操作；截图来自真实 HWND。产品脚本为
-[native_ui_review.ps1](../../apps/desktop/tools/native_ui_review.ps1)，需 PowerShell 7。
+[native_ui_review.ps1](../../apps/gpui/tools/native_ui_review.ps1)，需 PowerShell 7。
 
 脚本显式接受 `Binary`、`WindowTools`、`OutputDirectory` 参数。`WindowTools` 指向本机
 工作区上层的 `test-tools/windows/DesktopWindow.psm1`，提供窗口发现、滚动、点击、截图与
@@ -76,7 +76,7 @@ Linux 160 通过 / 5 忽略，Windows 157 通过 / 11 忽略。新增两项代�
 筛选和排序后的确认行映射、恢复实际选择，以及超时不复用旧延迟。目录整理和连接摘要
 布局修正后补做定向 Clippy / build，不因布局改动重复整套测试。
 
-新增可选原生脚本 [native_workspace_review.ps1](../../apps/desktop/tools/native_workspace_review.ps1)，
+新增可选原生脚本 [native_workspace_review.ps1](../../apps/gpui/tools/native_workspace_review.ps1)，
 沿用显式传入的 Windows 辅助模块、二进制和输出目录，`LayoutOnly` 可只复查布局。
 首轮行为场景 27 项断言通过、21 张截图、stderr 为空，正常退出码 0：覆盖五分区底部保存、
 网络草稿和 Ctrl+S、离线代理模式与搜索排序、脚本新增/编辑和放弃/删除取消、日志选项和
@@ -111,7 +111,7 @@ ARM64、其他桌面平台、Android、所有 DPI 与全部窗口尺寸未据此
 
 回归覆盖：旧清单和离线内容搬迁、订阅独立文件、试验中间格式转存、重复迁移、损坏清单、目标内容冲突与重试、双文档失败回滚、缓存删除后本地导入仍可激活、并发分区保存、发布前租约失效，以及 v3 加密往返与 v1/v2 备份映射。原有不支持未来版本的测试改为拒绝 v4；旧壳仍导出 v2，不自动迁移 Tauri/Android 数据。
 
-可选原生脚本 [native_resource_review.ps1](../../apps/desktop/tools/native_resource_review.ps1) 显式接收 Binary、WindowTools 和 OutputDirectory，沿用独立 Windows 辅助模块。脚本先以产品创建隔离根，正常退出后注入停用的旧版测试资源和订阅，再启动验证自动转换；原始文件、分类内容、订阅独立文件与备份分别断言。随后验证 modal 草稿保护、非法间隔、单位换算、保存关闭、Ctrl+S 新建、最小窗口 150% 与重开持久性。测试资源名称“旧版资源”只是夹具，不是迁移表单。
+可选原生脚本 [native_resource_review.ps1](../../apps/gpui/tools/native_resource_review.ps1) 显式接收 Binary、WindowTools 和 OutputDirectory，沿用独立 Windows 辅助模块。脚本先以产品创建隔离根，正常退出后注入停用的旧版测试资源和订阅，再启动验证自动转换；原始文件、分类内容、订阅独立文件与备份分别断言。随后验证 modal 草稿保护、非法间隔、单位换算、保存关闭、Ctrl+S 新建、最小窗口 150% 与重开持久性。测试资源名称“旧版资源”只是夹具，不是迁移表单。
 
 原生校验不启动真实核心、不联网获取订阅或脚本、不使用个人数据，不覆盖已安装程序。截图与原始日志只在本机产物目录；共享 Rust 和 Android target 编译不等于 Android 设备行为验收。
 
@@ -130,7 +130,7 @@ Windows 定向验收最终 34 项断言通过，3 次进程均正常退出且 st
 
 桌面独立项目两端 fmt、严格 all-target Clippy、默认库测试与 build 通过：Linux 168 通过 / 5 忽略，Windows 165 通过 / 11 忽略。后续新增快照保留焦点/超时测试，两端各定向验证代理列表 3 项通过；modal 继续编辑及 Esc 返回恢复焦点的修正补做两端 Clippy/build，不重复无关全量场景。代理业务回归确认两种核心的三种模式进入合成结果，且不覆盖网络与结构化设置；运行核心同步失败时仍保留保存值并返回真实警告。
 
-新增可选 [native_local_resource_review.ps1](../../apps/desktop/tools/native_local_resource_review.ps1)，继续显式接收 Binary、WindowTools 与 OutputDirectory。通用 Windows 辅助模块补充 Select-DesktopFile：等待原生地址栏可用，先进入并确认目标目录，再填写该目录下的文件名；已在目标目录时直接选择。该通用助手保留在工作区专用 test-tools 目录，项目脚本不固化宿主绝对路径。
+新增可选 [native_local_resource_review.ps1](../../apps/gpui/tools/native_local_resource_review.ps1)，继续显式接收 Binary、WindowTools 与 OutputDirectory。通用 Windows 辅助模块补充 Select-DesktopFile：等待原生地址栏可用，先进入并确认目标目录，再填写该目录下的文件名；已在目标目录时直接选择。该通用助手保留在工作区专用 test-tools 目录，项目脚本不固化宿主绝对路径。
 
 Windows 原生最终 26 项断言通过，两次进程均正常退出、stderr 为空。覆盖实际文件选择器选取 PNG 图标和 UTF-8 JS 文件、原子资源保存与同 UUID 编辑、Ctrl+S、停用、Esc/继续编辑/再次 Esc 与放弃、删除取消、重开后名称与图标保留、图标移除及整包删除；确认 150% 打开 modal 后收窄至 960×640，footer 保存仍可见。截图复查包含图标分区、资源列表、最小窗口 modal 和代理顶部测速布局；离线模式保存通过。最终文件选择场景没有向资源文件注入测试图标，来自真实原生选择器返回的文件。
 
@@ -156,7 +156,7 @@ Surge 响应脚本的 `max-size=-1` 是支持的声明，但实际检查仍受 3
 
 Windows 显式运行既有真实 sing-box MITM 用例：适配夹具先初始化 GPUI 文档，再创建订阅；改用回环远程模块更新派生主机与关联 JS，生成配置经真实核心校验、启动和 HTTP 代理请求后，收到附加的 `-script-ok` 正文并记录流量，核心与 MITM 正常停止。用例通过；此场景不安装 CA、不改系统代理/TUN，不等于本轮重新验收真实 HTTPS 信任与超限响应。
 
-新增可选 [native_mitm_review.ps1](../../apps/desktop/tools/native_mitm_review.ps1)，显式接收 Binary、WindowTools、OutputDirectory，使用隔离根与两次请求的回环模块服务器。Windows 最终 13 项断言通过：无手动刷新入口、CA 默认折叠与详情展开、真实更新报告主机数、进入页自动显示主机及来源、周期同步保留草稿、Ctrl+S 保存、停用后移除派生主机，以及 960×640 / 150% 下保存按钮和主机视口可见。截图复查主机/来源、CA 折叠与展开、请求记录空态及最小窗口；最小窗口主机视口高 104 个物理像素，保存按钮位于窗口内。进程正常退出、stderr 为空。
+新增可选 [native_mitm_review.ps1](../../apps/gpui/tools/native_mitm_review.ps1)，显式接收 Binary、WindowTools、OutputDirectory，使用隔离根与两次请求的回环模块服务器。Windows 最终 13 项断言通过：无手动刷新入口、CA 默认折叠与详情展开、真实更新报告主机数、进入页自动显示主机及来源、周期同步保留草稿、Ctrl+S 保存、停用后移除派生主机，以及 960×640 / 150% 下保存按钮和主机视口可见。截图复查主机/来源、CA 折叠与展开、请求记录空态及最小窗口；最小窗口主机视口高 104 个物理像素，保存按钮位于窗口内。进程正常退出、stderr 为空。
 
 本轮原生 UI 不启动核心，真实核心证明来自上述单独的业务链路用例；未覆盖所有主题与 DPI、全部 CA 操作和真实超限流量。初轮自动化暴露证书折叠缺少可访问名称、主机行不可被 UIA 读取以及最小窗口主机视口受说明挤占，修正后定向检查和上述场景通过；没有为此重复共享全量门禁。所有夹具、截图和原始日志留在本机产物目录，不使用个人资源，不安装/移除系统信任，不覆盖已安装程序。
 

@@ -14,7 +14,7 @@
 ### 两个应用，一个业务实现
 
 - `apps/client` 继续承载现行 Tauri 桌面及 Android；现有安装、更新、签名和便携身份不变。
-- GPUI 实验应用入口为 `apps/desktop`，使用独立 Cargo 项目和带实验标识的可执行程序/窗口。它不嵌入 WebView，不加入 Android 目标，不自动替换现行桌面入口。
+- GPUI 实验应用入口为 `apps/gpui`，使用独立 Cargo 项目和带实验标识的可执行程序/窗口。它不嵌入 WebView，不加入 Android 目标，不自动替换现行桌面入口。
 - 复用 `lanpath-client`、`lanpath-engine`、`lanpath-common`、`lanpath-script` 和 `lanpath-mitm` 中适用的业务能力；Tauri 与 GPUI 分别适配窗口和平台事件。共享语义不在两个壳内各自实现。
 - GPUI 的草稿、选择和任务状态由对应 Rust feature/entity 拥有，不把 React 的 Query/Jotai/Zustand 机制移植成第二个权威状态源；Tauri/Android 的现有状态规范保持不变。
 - 保持 sing-box 单核心技术路线；实验实例和现行实例的进程、控制端口及数据根必须隔离。并行开发不等于允许共享写入或共同控制全局网络状态。
@@ -75,7 +75,7 @@
 
 ## 首个业务迁移单位：实验配置文档
 
-该阶段将验证程序迁至 `apps/desktop`，并以可编辑完整 JSON 验证真实 checker、持久源和生命周期。
+该阶段将验证程序迁至 `apps/gpui`，并以可编辑完整 JSON 验证真实 checker、持久源和生命周期。
 这是进入业务迁移前的临时切片；下面的“订阅、覆写与配置合成”单位已删除该运行源和编辑入口，
 改由真实业务数据生成配置。以下条目保留为当时的安全与交互验证记录，不描述当前配置来源。
 
@@ -362,8 +362,8 @@ Android 专属 VPN 通知不进入 Windows GPUI 对等范围。
 | `crates/lanpath-client/src/state/mod.rs`、`state/services.rs`                                      | 现行 `stop()` 无条件禁用代理且忽略错误；代理启用失败仅回收核心及服务                 | 关闭未取得代理控制权的实例也可能影响其他代理；停止、自动重载、备份和退出均须纳入会话语义 |
 | `crates/lanpath-client/src/privilege.rs`、`apps/client/src-tauri/src/desktop/commands/platform.rs` | Windows 提权启动整个当前程序，未传递参数/根目录；启动被接受后旧壳退出                | 没有子进程句柄、就绪确认或目录租约交接，不能直接接入 GPUI 的失败即返回根锁               |
 | `crates/lanpath-engine/src/lifecycle.rs`、`manager/singbox.rs`                                     | PID 文件有墙钟时间但不验证 OS 创建时间；停核主要为 kill/wait；网络变更由外部核心承担 | 路径相同不能排除 PID 复用；进程退出不等于 TUN 网卡、路由、DNS 全部恢复                   |
-| `apps/desktop/src/business/state.rs`、`business/config.rs`、`configuration/policy.rs`              | 强制关闭系统代理/TUN，固定端口、空 API secret、IPv6 关闭，并拒绝外部面板资源         | 新设置必须同时迁移保存、合成、策略、实际监听和全部观测客户端，不能只增加表单或放宽白名单 |
-| `crates/lanpath-mitm/src/ca_trust.rs`、`apps/desktop/src/mitm_view/operations.rs`                  | Windows CA 安装到 CurrentUser Root，通常不需 UAC；按当前 CA 指纹查询，安装已有根确认 | 确认安装不等于获准执行测试；持久信任不能随停核自动删除，查询失败不能当作未安装           |
+| `apps/gpui/src/business/state.rs`、`business/config.rs`、`configuration/policy.rs`              | 强制关闭系统代理/TUN，固定端口、空 API secret、IPv6 关闭，并拒绝外部面板资源         | 新设置必须同时迁移保存、合成、策略、实际监听和全部观测客户端，不能只增加表单或放宽白名单 |
+| `crates/lanpath-mitm/src/ca_trust.rs`、`apps/gpui/src/mitm_view/operations.rs`                  | Windows CA 安装到 CurrentUser Root，通常不需 UAC；按当前 CA 指纹查询，安装已有根确认 | 确认安装不等于获准执行测试；持久信任不能随停核自动删除，查询失败不能当作未安装           |
 
 上述共享 Tauri 风险只在本轮记录，不借设计任务修改稳定端行为。未来共享生命周期/API
 切换必须迁移全部受影响 Windows 调用者，不能长期保留一条会话式路径和一条无条件禁用路径；

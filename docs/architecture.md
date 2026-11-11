@@ -51,7 +51,7 @@ client-core 以 Query 轮询对接双端反馈，详见 ADR-0010。
 ## Windows GPUI 实验性并行目标
 
 用户已批准 [ADR-0013](adr/0013-gpui-experimental-parallel-migration.md) 的实验性完整业务迁移开发。
-`apps/desktop` 是独立 Cargo 应用，不加入 Android 目标或替换 `apps/client`。
+`apps/gpui` 是独立 Cargo 应用，不加入 Android 目标或替换 `apps/client`。
 Tauri 与 GPUI 共享适用的 Rust 业务能力，各自持有 UI 状态及平台适配；React 状态规范仍只约束现行 React 页面。
 
 实验应用使用独立身份、持久数据根、核心进程和 loopback 端口；并行期不共享或搬迁 Tauri 的可写数据根。

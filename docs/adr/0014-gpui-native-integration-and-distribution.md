@@ -92,7 +92,7 @@ ADR-0013 第 1–11 单位完成后，用户明确要求继续完成剩余功能
 
 实现与已取得证据（2026-10-25）：
 
-- `apps/desktop/managed-core/source.json` 锁定 sing-box `v1.14.2`、sing-tun
+- `apps/gpui/managed-core/source.json` 锁定 sing-box `v1.14.2`、sing-tun
   `ddaa4ca25e3bcb776d6ce81f4477b3becb5426de`、现有 go-winio 依赖、模块校验和、
   归档 SHA-256、Go `1.26.8`、构建标签及协议 `1`；补丁只作用于独立构建副本。
 - `tools/managed_core.ts` 已真实构建 x64 Windows 核心，实际执行报告
