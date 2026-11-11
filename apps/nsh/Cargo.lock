@@ -3696,9 +3696,11 @@ dependencies = [
  "lanpath-client",
  "nsh-base",
  "nsh-core",
+ "nsh-engine",
  "nsh-platform-linux",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "nsh-testing",
 ]
 
 [[package]]
@@ -3908,6 +3910,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-testing"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ac8c9e9d8205b03748bf3485689b3ea3bd1f8f1b8fbc0b6f66ff19c67d655f"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "nsh-core",
+ "nsh-engine",
+ "regex",
+]
+
+[[package]]
 name = "nsh-updater"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3931,7 +3946,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

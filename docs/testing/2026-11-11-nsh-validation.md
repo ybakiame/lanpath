@@ -17,12 +17,15 @@ NSH 构建，不改变现有应用发布或签名流程。
 
 ## 共享逻辑与 headless
 
+`App.test.tsx`（`nsh test` 的 QuickJS 通道，依赖 Node 工具链）已迁移为纯 Rust 的
+`nsh_testing::Headless` 测试：`apps/nsh/tests/shared_subscription.rs` 随 crate 直接由 cargo test 运行，
+不经 Node/QuickJS。`apps/nsh/tsconfig.json` 随 TSX 测试一并移除。
+
 ```sh
-devenv shell -- target/nsh-tools/v0.5.0/nsh/bin/nsh test apps/nsh
+devenv shell -- cargo test --manifest-path apps/nsh/Cargo.toml --locked
 ```
 
-结果：1 项通过、0 失败；共享解析返回 `ClashYaml`、两个中文节点和零警告。首次完整构建较慢，
-本轮结果不用于性能对比。
+结果：1 项通过、0 失败；共享解析返回 `ClashYaml`、两个中文节点和零警告。
 
 ## Windows
 

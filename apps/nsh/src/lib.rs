@@ -2,7 +2,7 @@ use lanpath_client::{node_tags_from_nodes, parse_subscription_body};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 
-const FIXTURE: &str = r#"proxies:
+const FIXTURE: &str = r"proxies:
   - name: 东京测试节点
     type: ss
     server: 192.0.2.1
@@ -15,7 +15,7 @@ const FIXTURE: &str = r#"proxies:
     port: 8388
     cipher: aes-256-gcm
     password: test-only
-"#;
+";
 
 #[native_module("lanpath-nsh/native")]
 fn native(registry: &mut Registry) {
