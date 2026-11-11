@@ -14,23 +14,30 @@ GPUI 桌面已复用共享 Rust 业务，但不提供当前所需的 Android 产
 
 - 从 `feat/gpui-desktop-validation` 的 `01c930b` 创建 `nsh-validation`，不推送或改变生产分支。
 - `apps/nsh` 是独立 Cargo/NSH 验证应用，使用纯 Rust，不引入 TSX 产品界面。
-- NSH 固定为 0.5.0（CLI 提交 `f4d68f7`）；应用身份为 `com.ybakiame.lanpath.nsh`，不继承
-  Tauri/GPUI 的生产或实验数据根、端口、更新渠道和签名身份。
-- 首个切片只调用 `lanpath-client` 的共享订阅解析和节点标签生成，不启动核心、网络请求、
-  系统代理或 VPN。
+- 随后将原 `apps/desktop` 重命名为 `apps/gpui` 并保留为对照；新 `apps/desktop` 使用 NSH
+  迁移 Windows 功能，具有独立身份、数据根和 Cargo 项目，不与 GPUI 双写或共享运行状态。
+- NSH 固定为 0.5.0（CLI 提交 `f4d68f7`）；各验证应用使用各自的 `com.ybakiame.lanpath*.nsh`
+  身份，不继承 Tauri/GPUI 的数据根、端口、更新渠道和签名身份。
+- 首个切片只调用 `lanpath-client` 的共享订阅解析和节点标签生成；后续桌面切片依次加入真实
+  持久化与业务页面，不在未实现时显示占位操作，不启动未经当前切片授权的系统效果。
 - 保留现有 Kotlin VpnService 和 Go/libbox 作为后续 Android 集成边界；页面与解析成功不等于
   VPN 已接入。
+- NSH 测试使用 Rust `nsh_testing::Headless` 或普通 Rust 测试，不保留 TSX 测试或 Node 工具链；
+  现有生产 Husky 只在正式退役阶段统一处理。
 - 为 NSH 构建补齐 GTK4/GStreamer 和 Android ABI targets，不升级 devenv 输入或既有工具版本。
-- 本验证可在本机使用现有原生 Windows Rust/MSVC 工具链构建和运行 `apps/nsh`；不安装或升级
-  宿主组件，不扩展到发布路径。
+- 本验证可在本机使用现有原生 Windows Rust/MSVC 工具链构建和运行 `apps/nsh` 与新
+  `apps/desktop`；不安装或升级宿主组件，不扩展到发布路径。
 
 ## 已获证据
 
-- NSH headless 测试实际调用共享解析并验证两个中文节点。
+- NSH 测试实际调用共享解析并验证两个中文节点。
 - Windows 原生 cargo check/build 和真实窗口交互通过，中文、主题、UIA 文本及结果正确。
 - Android APK 在 Android 13 真机安装、启动并点击解析通过；APK 为 arm64-v8a/armeabi-v7a，
   使用独立调试签名。
-- 详细命令与边界见[验证记录](../testing/2026-11-11-nsh-validation.md)。
+- 新 desktop 已验证独立数据根、订阅新增/启停/删除、外观持久化和 Windows 重开恢复。
+- 详细命令与边界见[跨平台验证](../testing/2026-11-11-nsh-validation.md)、
+  [desktop 首个切片](../testing/2026-11-11-nsh-desktop-first-slice.md)与
+  [订阅存储切片](../testing/2026-11-11-nsh-desktop-subscription-store.md)。
 
 ## 后续门禁
 
