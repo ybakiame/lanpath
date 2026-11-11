@@ -10,6 +10,7 @@
 - [NSH 跨平台验证](testing/2026-11-11-nsh-validation.md)
 - [NSH Desktop 首个切片验证](testing/2026-11-11-nsh-desktop-first-slice.md)
 - [NSH Desktop 订阅存储验证](testing/2026-11-11-nsh-desktop-subscription-store.md)
+- [NSH Desktop 日志页验证](testing/2026-11-12-nsh-desktop-logs.md)
 - [ADR](adr/README.md)
 - [来源](source-provenance.json)
 - [协议采纳](adoption/adoption-report.md)

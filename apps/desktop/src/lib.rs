@@ -3,6 +3,13 @@ use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
 
 mod data_root;
+mod disk_log_writer;
+mod disk_logs_view;
+mod log_buffer;
+mod log_capture;
+mod log_service;
+mod logs_view;
+mod memory_logs_view;
 mod subscriptions;
 mod subscriptions_view;
 #[cfg(windows)]
@@ -10,6 +17,7 @@ mod windows_access;
 #[cfg(windows)]
 mod windows_file;
 
+use logs_view::logs_page;
 use subscriptions_view::subscription_page;
 
 /// Where the appearance page keeps the user's choice between launches.
@@ -24,6 +32,7 @@ fn native(registry: &mut Registry) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Subscription,
+    Logs,
     Appearance,
 }
 
@@ -80,6 +89,7 @@ impl Mode {
 /// is started.
 #[component]
 pub fn App() -> impl IntoElement {
+    let _log_service = stored(log_service::LogService::open().ok());
     let loaded = Mode::load();
     if loaded != Mode::System {
         set_color_scheme(loaded.appearance());
@@ -100,6 +110,7 @@ pub fn App() -> impl IntoElement {
                     move || page.get() == Page::Subscription,
                     subscription_page,
                 ))
+                .child(when(move || page.get() == Page::Logs, logs_page))
                 .child(when(
                     move || page.get() == Page::Appearance,
                     appearance_page,
@@ -122,6 +133,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
                 .text_color(move || theme().muted_foreground),
         )
         .child(nav_item(page, Page::Subscription, "订阅"))
+        .child(nav_item(page, Page::Logs, "日志"))
         .child(nav_item(page, Page::Appearance, "外观"))
 }
 

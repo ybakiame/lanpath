@@ -1,9 +1,9 @@
 //! 订阅业务：共享 `lanpath-client::SubscriptionStore` 落在 NSH 桌面自己的
 //! 隔离数据根内。不读取/迁移 Tauri/GPUI/apps/nsh 数据；不发起网络请求。
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(test)]
+use std::path::Path;
+use std::sync::Arc;
 
 use lanpath_client::{
     Subscription, SubscriptionStore, normalize_resource_url, validate_subscription_url,
@@ -11,15 +11,7 @@ use lanpath_client::{
 use lanpath_common::{LanpathError, LanpathResult};
 use uuid::Uuid;
 
-use crate::data_root::{DataRoot, resolve_data_location};
-
-/// 进程内按路径缓存已准入的数据根：根目录的锁租约随进程存活，
-/// 同一数据根只准入一次（第二个应用实例会被租约拒绝）。
-static ROOTS: OnceLock<Mutex<HashMap<PathBuf, Arc<DataRoot>>>> = OnceLock::new();
-
-fn roots() -> &'static Mutex<HashMap<PathBuf, Arc<DataRoot>>> {
-    ROOTS.get_or_init(|| Mutex::new(HashMap::new()))
-}
+use crate::data_root::{DataRoot, open_root, resolve_data_location};
 
 pub(crate) struct Subscriptions {
     root: Arc<DataRoot>,
@@ -54,26 +46,22 @@ impl Subscriptions {
         let name = required_text(name, "订阅名称")?;
         let url = normalize_resource_url(url.trim());
         validate_subscription_url(&url).map_err(LanpathError::Validation)?;
-        self.store().add(&name, &url, true, None)
+        let subscription = self.store().add(&name, &url, true, None)?;
+        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "新增订阅：{}", subscription.name.escape_debug());
+        Ok(subscription)
     }
 
     pub(crate) fn set_enabled(&self, id: Uuid, enabled: bool) -> LanpathResult<()> {
-        self.store().set_enabled(id, enabled)
+        self.store().set_enabled(id, enabled)?;
+        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "{}订阅：{id}", if enabled { "启用" } else { "停用" });
+        Ok(())
     }
 
     pub(crate) fn remove(&self, id: Uuid) -> LanpathResult<()> {
-        self.store().remove(id)
+        self.store().remove(id)?;
+        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "删除订阅：{id}");
+        Ok(())
     }
-}
-
-fn open_root(path: &Path) -> LanpathResult<Arc<DataRoot>> {
-    let mut roots = roots().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(root) = roots.get(path) {
-        return Ok(root.clone());
-    }
-    let root = Arc::new(DataRoot::open(path)?);
-    roots.insert(path.to_path_buf(), root.clone());
-    Ok(root)
 }
 
 fn required_text(value: &str, field: &str) -> LanpathResult<String> {

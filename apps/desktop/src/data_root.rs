@@ -6,9 +6,11 @@
 //! （`LANPATH_DESKTOP_DATA_DIR` 环境变量或宿主预置的 NSH storage 键）。
 
 use lanpath_common::{LanpathError, LanpathResult};
+use std::collections::HashMap;
 use std::fs::{self, File, Metadata, OpenOptions, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[path = "data_root_identity.rs"]
 mod identity;
@@ -394,6 +396,24 @@ fn file_options() -> OpenOptions {
 
 fn invalid(message: impl Into<String>) -> LanpathError {
     LanpathError::Config(message.into())
+}
+
+/// 进程内按路径缓存已准入的数据根：根目录的锁租约随进程存活，
+/// 同一数据根只准入一次（第二个应用实例会被租约拒绝）。订阅、日志等
+/// 业务共用同一条租约，避免同进程重复打开同一根。
+static ROOTS: OnceLock<Mutex<HashMap<PathBuf, Arc<DataRoot>>>> = OnceLock::new();
+
+pub(crate) fn open_root(path: &Path) -> LanpathResult<Arc<DataRoot>> {
+    let mut roots = ROOTS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(root) = roots.get(path) {
+        return Ok(root.clone());
+    }
+    let root = Arc::new(DataRoot::open(path)?);
+    roots.insert(path.to_path_buf(), root.clone());
+    Ok(root)
 }
 
 #[cfg(test)]
