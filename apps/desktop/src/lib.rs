@@ -12,6 +12,8 @@ mod logs_view;
 mod memory_logs_view;
 mod profiles;
 mod profiles_view;
+mod request_settings;
+mod request_settings_view;
 mod subscriptions;
 mod subscriptions_view;
 #[cfg(windows)]
@@ -21,6 +23,7 @@ mod windows_file;
 
 use logs_view::logs_page;
 use profiles_view::profiles_page;
+use request_settings_view::request_settings_page;
 use subscriptions_view::subscription_page;
 
 /// Where the appearance page keeps the user's choice between launches.
@@ -35,6 +38,7 @@ fn native(registry: &mut Registry) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Subscription,
+    RequestSettings,
     Profiles,
     Logs,
     Appearance,
@@ -115,6 +119,10 @@ pub fn App() -> impl IntoElement {
                     move || page.get() == Page::Subscription,
                     subscription_page,
                 ))
+                .child(when(
+                    move || page.get() == Page::RequestSettings,
+                    request_settings_page,
+                ))
                 .child(when(move || page.get() == Page::Profiles, profiles_page))
                 .child(when(move || page.get() == Page::Logs, logs_page))
                 .child(when(
@@ -139,6 +147,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
                 .text_color(move || theme().muted_foreground),
         )
         .child(nav_item(page, Page::Subscription, "订阅"))
+        .child(nav_item(page, Page::RequestSettings, "请求设置"))
         .child(nav_item(page, Page::Profiles, "覆写"))
         .child(nav_item(page, Page::Logs, "日志"))
         .child(nav_item(page, Page::Appearance, "外观"))

@@ -12,15 +12,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 
 use lanpath_client::{
-    CachedSubscriptionContent, ClientConfig, RequestProxyMode, SubFormat, Subscription,
-    SubscriptionSource, SubscriptionStore, fetch_subscription_for_config, normalize_resource_url,
-    validate_subscription_url,
+    CachedSubscriptionContent, SubFormat, Subscription, SubscriptionSource, SubscriptionStore,
+    fetch_subscription_for_config, normalize_resource_url, validate_subscription_url,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use uuid::Uuid;
 
 use crate::data_root::{DataRoot, open_root, resolve_data_location};
 use crate::profiles::validate_profile_reference_locked;
+use crate::request_settings::load_request_config;
 
 /// 每数据根一个订阅业务句柄：Weak 缓存，全部句柄释放后自动移除。
 /// 同根句柄共享同一个 `Arc`：切页后新页面拿到的是同一个句柄，
@@ -174,7 +174,7 @@ impl Subscriptions {
                 .into_iter()
                 .find(|subscription| subscription.id == id)
                 .ok_or_else(|| LanpathError::Client("订阅不存在".into()))?;
-            (subscription, request_config(self.root.path())?)
+            (subscription, load_request_config(self.root.path())?)
         };
         // 共享请求策略：连接/超时失败自动重试一次，请求自身有 30 秒超时。
         let result = fetch_subscription_for_config(
@@ -233,7 +233,7 @@ impl Subscriptions {
     /// 当前生效订阅（持久化在本应用 `client.json` 的 `active_subscription_id`）。
     pub(crate) fn active_id(&self) -> LanpathResult<Option<Uuid>> {
         let _guard = self.root.business_guard();
-        Ok(request_config(self.root.path())?.active_subscription_id)
+        Ok(load_request_config(self.root.path())?.active_subscription_id)
     }
 
     /// 设置当前生效订阅：拒绝不存在或已停用的订阅。
@@ -249,7 +249,7 @@ impl Subscriptions {
             Some(_) => return Err(LanpathError::Client("所选订阅已停用，请先启用".into())),
             None => return Err(LanpathError::Client("所选订阅不存在".into())),
         }
-        let mut config = request_config(self.root.path())?;
+        let mut config = load_request_config(self.root.path())?;
         config.active_subscription_id = Some(id);
         config.save()?;
         tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "设置当前生效订阅：{id}");
@@ -259,29 +259,13 @@ impl Subscriptions {
     /// 生效订阅被停用/删除时清空选择（`id` 不匹配则不动配置）。
     /// 调用方须已持有写锁。
     fn clear_active_if_matches_locked(&self, id: Uuid) -> LanpathResult<()> {
-        let mut config = request_config(self.root.path())?;
+        let mut config = load_request_config(self.root.path())?;
         if config.active_subscription_id == Some(id) {
             config.active_subscription_id = None;
             config.save()?;
         }
         Ok(())
     }
-}
-
-/// 本应用的网络请求配置：共享 `load_for_requests` 读请求设置，`data_dir`
-/// 由它固定为本应用数据根，不信任文件里的旧路径。已有配置原样保留
-/// `request_proxy_mode` / `request_proxy_url` / `github_proxy_prefix` 等
-/// 请求字段（active 的保存不改写它们，刷新遵守已保存策略）；只有新装
-/// （数据根还没有 `client.json` / `app.toml`）才设直连 `None`，与 GPUI
-/// 为新配置设定的策略一致，避免环境系统代理把订阅地址转发到第三方。
-fn request_config(root: &std::path::Path) -> LanpathResult<ClientConfig> {
-    let fresh_install = !root.join("client.json").exists()
-        && !lanpath_client::settings::app_settings_path(root).exists();
-    let mut config = ClientConfig::load_for_requests(root)?;
-    if fresh_install {
-        config.request_proxy_mode = RequestProxyMode::None;
-    }
-    Ok(config)
 }
 
 fn required_text(value: &str, field: &str) -> LanpathResult<String> {

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- 扩展 `apps/desktop` 新增真实“请求设置”页与业务：从 apps/gpui 迁移请求设置
+  （`business/request_settings.rs`），适配 NSH 桌面独立数据根与纯 Rust NSH 组件。
+  四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用
+  `client.json`；自定义地址与 GitHub 镜像前缀草稿可编辑保存/重开恢复，保存经共享
+  `validate_request_proxy` 校验（scheme 限制 http/https/socks5/socks5h，拒绝带
+  path/query/fragment 与端口 0，错误不回显凭据/完整 URL，非法不落盘、草稿保留）；
+  非自定义模式同样保存自定义地址草稿供稍后切回（与 GPUI 一致）。保存时在同一业务锁内
+  重新加载最新配置，只改 `request_proxy_mode`/`request_proxy_url`/`github_proxy_prefix`
+  三个字段，不覆盖 active 选择、system/tun、MITM、端口等无关字段；读取页面不无故写盘，
+  新装默认直连且 `data_dir` 固定本根，已有配置损坏返回真实错误、绝不重写为默认；
+  GitHub 前缀按共享 `apply_github_proxy_prefix` 语义在使用时拼接（保存值原样保留）。
+  订阅刷新与请求设置共用同一 `load_request_config` 入口消费已保存策略，避免两处新装默认
+  分叉；核心代理只指向已保存 mixed_port，本切片不启动核心，核心未运行时请求真实失败
+  （页面如实说明，不做连接测试、不提供系统代理/TUN 开关）。日志只记模式，不记地址/前缀。
+  apps/gpui 仅作迁移来源未改动，apps/nsh 不变；测试全为纯 Rust（`src/` 业务 7 项新用例 +
+  `tests/` headless 8 项新用例，Custom 代理经本线程 127.0.0.1 真实 HTTP 服务器以绝对形式
+  收到订阅刷新请求，Core 未启动负例在本机闲置端口短连接拒绝），无 TSX/Node 依赖；
+  Windows 原生验收尚待主代理执行。
+
 - 扩展 `apps/desktop` 新增真实“覆写”页与订阅覆写绑定：复用共享
   `lanpath-client::ProfileStoreV2`（模板存本数据根 `profiles.json`，本应用独立新根
   不读取/迁移其他应用数据），支持列出/新建/编辑/删除覆写模板（删除需确认；被任一订阅

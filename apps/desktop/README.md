@@ -4,8 +4,23 @@
 GPUI 对照 `apps/gpui` 并行存在。应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取或迁移
 Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN，仅订阅新增/刷新按需联网。
 
-窗口壳为侧栏导航 + 主内容区。当前实现四个真实页面：
+窗口壳为侧栏导航 + 主内容区。当前实现五个真实页面：
 
+- 请求设置：订阅刷新与远程资源请求的网络请求策略（从 apps/gpui 迁移并适配）。
+  四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用
+  `client.json`（`request_proxy_mode` / `request_proxy_url` / `github_proxy_prefix`）；
+  自定义地址与 GitHub 镜像前缀草稿可编辑，保存经共享 `validate_request_proxy` 校验，
+  非法地址（scheme 非 http/https/socks5/socks5h、带 path/query/fragment、端口 0 等）拒绝
+  不落盘，错误不回显用户名/密码/token/完整 URL；非自定义模式同样保存自定义地址草稿供
+  稍后切回（与 GPUI 一致）。保存时在同一业务锁内重新加载最新配置，只改请求相关三个
+  字段，不覆盖 active 选择、system/tun、MITM、端口等无关字段；读取页面不无故写盘，
+  新装默认直连（`load_for_requests` 固定 data_dir 本根），已有配置损坏返回真实错误、
+  绝不重写为默认。GitHub 前缀按共享 `apply_github_proxy_prefix` 语义在使用时拼接
+  （保存值原样保留）。保存后 `ClientConfig::load_for_requests` 立即可读，订阅刷新
+  经共享 `load_request_config` 消费同一策略（无第二处新装默认）。核心代理只指向已保存的
+  mixed_port：本切片不启动核心，核心未运行时请求真实失败（页面如实说明，不做连接测试、
+  不提供系统代理/TUN 开关、不显示假成功）。重置恢复已保存草稿（有未保存修改需确认），
+  日志只记模式不记地址/前缀。
 - 订阅：真实订阅列表与持久化。复用共享 `lanpath-client::SubscriptionStore` /
   `Subscription` / `SubFormat`，数据写入本应用自己的隔离数据根（所有权标记 +
   进程内文件锁租约 + 生产/链接路径准入，从 apps/gpui 迁移并适配，约束未削弱）。
@@ -55,12 +70,13 @@ Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN�
   键 `lanpath_desktop_nsh.data_dir` 预置（优先级低于环境变量）。两者都经过同一套准入检查。
 - 准入拒绝生产/便携 Lanpath 祖先、其他 Lanpath 应用数据根（Tauri/GPUI/apps/nsh）、
   符号链接/junction/硬链接共享文件；损坏的身份标记不会静默重建。不提供便携模式。
-- 订阅、覆写模板与日志共用同一条数据根租约与按路径缓存：页面来回切换不重开缓冲，
-  第二进程仍被拒绝。订阅清单（`subscriptions.json`）与覆写模板（`profiles.json`）
-  的所有读写共用数据根上的同一把业务锁：校验引用与落盘在同一临界区内完成，
+- 订阅、请求设置、覆写模板与日志共用同一条数据根租约与按路径缓存：页面来回切换不重开缓冲，
+  第二进程仍被拒绝。订阅清单（`subscriptions.json`）、覆写模板（`profiles.json`）与请求设置
+  （`client.json`）的所有读写共用数据根上的同一把业务锁：校验引用与落盘在同一临界区内完成，
   不会出现“校验无引用后另一线程完成绑定”的竞争；锁不跨网络 await。
 - 订阅原文与节点缓存在数据根 `subscription_cache/`（共享存储层布局）；当前生效订阅
-  选择持久化在本应用自己的 `client.json`（`active_subscription_id`），不触碰其他应用的配置。
+  与请求设置持久化在本应用自己的 `client.json`（`active_subscription_id` 与
+  `request_proxy_mode` / `request_proxy_url` / `github_proxy_prefix`），不触碰其他应用的配置。
 
 ```sh
 cargo test --locked      # 全部测试：单元/数据根准入（src）+ 纯 Rust headless（tests/）
@@ -71,9 +87,12 @@ cargo run                # 本机原生后端直接运行 Rust 根组件
 （内存 storage 后端预置每场景独立临时数据根，1100×800 桌面视口）直接驱动 Rust 根组件；
 日志场景经真实 tracing 采集路径验证内存/磁盘/导出（保存对话框由 headless 注入应答），
 订阅刷新场景经 `tests/common` 的本线程最小 HTTP 服务器（127.0.0.1 随机端口）真实联网，
-断言实际请求路径与 User-Agent，不依赖互联网。覆写模板场景不联网：远程覆写地址只保存
-不下载；种子数据场景先启动一次应用初始化数据根（写入归属标记）再预置业务文件，
-与生产准入一致。
+断言实际请求路径与 User-Agent，不依赖互联网。请求设置场景复用同一服务器做正向代理：
+页面保存 Custom 代理后触发订阅刷新，代理以绝对形式收到不可达目标
+（`192.0.0.0/24` 文档地址）的完整请求，证明请求确实走新代理；Core 未启动负例把已保存
+mixed_port 指向本机闲置端口，断言刷新真实连接拒绝、错误落盘，不等待超时。覆写模板场景
+不联网：远程覆写地址只保存不下载；种子数据场景先启动一次应用初始化数据根（写入归属
+标记）再预置业务文件，与生产准入一致。
 
 `nsh.json` 命名根组件，`src/lib.rs` 是 UI，`theme.json` 沿用 `apps/nsh` 的浅色/深色
 令牌。NSH 生成的文件在 `.nsh/`，Cargo 构建目录为 `target/`。
