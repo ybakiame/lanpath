@@ -2,12 +2,14 @@
 //! 隔离数据根内。不读取/迁移 Tauri/GPUI/apps/nsh 数据；仅在新增/刷新
 //! 订阅时按需联网，不启动核心、系统代理或 TUN。
 //!
-//! 所有清单/配置的读写都经进程内互斥串行化：刷新在后台线程写回时，
-//! UI 线程的启停/生效/删除/编辑在另一侧排队，不会并发写坏清单。
+//! 所有清单/配置的读写都经数据根的共享业务锁串行化：刷新的后台写回
+//! 与 UI 线程的启停/生效/删除/编辑/覆写绑定在同一侧排队，且与覆写模板
+//! 业务（Profiles）共用同一把锁——校验引用与落盘在同一临界区内完成。
+//! 锁不跨网络 await：刷新在请求前后分别短暂取锁。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use lanpath_client::{
     CachedSubscriptionContent, ClientConfig, RequestProxyMode, SubFormat, Subscription,
@@ -18,11 +20,13 @@ use lanpath_common::{LanpathError, LanpathResult};
 use uuid::Uuid;
 
 use crate::data_root::{DataRoot, open_root, resolve_data_location};
+use crate::profiles::validate_profile_reference_locked;
 
 /// 每数据根一个订阅业务句柄：Weak 缓存，全部句柄释放后自动移除。
-/// 同根句柄共享同一把写锁：切页后新页面拿到的是同一个 `Arc`，
-/// 在途刷新的旧句柄与新句柄不会并发读写同一数据根。
-static SERVICES: OnceLock<Mutex<HashMap<PathBuf, Weak<Subscriptions>>>> = OnceLock::new();
+/// 同根句柄共享同一个 `Arc`：切页后新页面拿到的是同一个句柄，
+/// 在途刷新的旧句柄与新句柄经数据根的共享业务锁排队，不会并发读写。
+static SERVICES: OnceLock<std::sync::Mutex<HashMap<PathBuf, Weak<Subscriptions>>>> =
+    OnceLock::new();
 
 /// 一次刷新的落盘结果：成功（节点数/格式已写回）、失败（真实错误已写回
 /// 记录、旧原文/缓存保留）或已过期（刷新期间订阅被编辑/删除，结果未写入，
@@ -36,8 +40,6 @@ pub(crate) enum RefreshStatus {
 
 pub(crate) struct Subscriptions {
     root: Arc<DataRoot>,
-    /// 串行化清单/配置文件读写：刷新的后台写回与 UI 线程的同步操作排队。
-    write_lock: Mutex<()>,
 }
 
 impl Subscriptions {
@@ -54,21 +56,19 @@ impl Subscriptions {
     }
 
     /// 按规范根路径缓存句柄：同根重开（页面切换、测试重开）拿到同一个
-    /// `Arc`，写锁与在途刷新状态一致；所有句柄释放后 Weak 条目自然失效。
+    /// `Arc`；所有句柄释放后 Weak 条目自然失效。业务锁在共享数据根上，
+    /// 同根的 Profiles/Subscriptions 操作天然互斥。
     fn open_service(path: &Path) -> LanpathResult<Arc<Self>> {
         let root = open_root(path)?;
         let key = root.path().to_path_buf();
         let mut services = SERVICES
-            .get_or_init(|| Mutex::new(HashMap::new()))
+            .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(service) = services.get(&key).and_then(Weak::upgrade) {
             return Ok(service);
         }
-        let service = Arc::new(Self {
-            root,
-            write_lock: Mutex::new(()),
-        });
+        let service = Arc::new(Self { root });
         services.insert(key, Arc::downgrade(&service));
         Ok(service)
     }
@@ -77,20 +77,14 @@ impl Subscriptions {
         SubscriptionStore::new(self.root.path().to_path_buf())
     }
 
-    /// 锁中毒（持锁线程 panic）时接管锁：宁可串行继续也不让整个页面失效。
-    fn guard(&self) -> MutexGuard<'_, ()> {
-        self.write_lock
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    }
-
     /// 读取订阅列表；文件缺失按空列表，损坏时共享存储层已回退空列表并告警。
     pub(crate) fn load(&self) -> LanpathResult<Vec<Subscription>> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         self.store().load()
     }
 
     /// 校验并新增订阅后持久化；任何失败都不触碰已有数据。
+    /// 新增订阅的覆写模板绑定固定为 `None`（在编辑弹窗中另行绑定）。
     pub(crate) fn add(
         &self,
         name: &str,
@@ -100,7 +94,7 @@ impl Subscriptions {
         let name = required_text(name, "订阅名称")?;
         let url = normalize_resource_url(url.trim());
         validate_subscription_url(&url).map_err(LanpathError::Validation)?;
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         let subscription = self
             .store()
             .add(&name, &url, true, normalized_text(user_agent))?;
@@ -108,21 +102,28 @@ impl Subscriptions {
         Ok(subscription)
     }
 
-    /// 编辑订阅名称/地址/可选 User-Agent。URL 变更时沿用共享 `store.update`
-    /// 清除旧原文/缓存与上次结果；URL 不变则保留。
+    /// 编辑订阅名称/地址/可选 User-Agent/覆写模板绑定。URL 变更时沿用
+    /// 共享 `store.update` 清除旧原文/缓存与上次结果；URL 不变则保留。
+    /// 绑定非空时校验模板真实存在（同一锁内与模板清单比对），失效引用
+    /// 报真实错误、不落盘、不静默改绑。
     pub(crate) fn update(
         &self,
         id: Uuid,
         name: &str,
         url: &str,
         user_agent: Option<&str>,
+        profile_id: Option<Uuid>,
     ) -> LanpathResult<Subscription> {
         let name = required_text(name, "订阅名称")?;
         let url = normalize_resource_url(url.trim());
         validate_subscription_url(&url).map_err(LanpathError::Validation)?;
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         let store = self.store();
+        if let Some(profile_id) = profile_id {
+            validate_profile_reference_locked(self.root.path(), profile_id)?;
+        }
         store.update(id, &name, &url, normalized_text(user_agent))?;
+        store.set_profile_id(id, profile_id)?;
         tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "编辑订阅：{}", name.escape_debug());
         store
             .load()?
@@ -131,9 +132,9 @@ impl Subscriptions {
             .ok_or_else(|| LanpathError::Client("订阅不存在".into()))
     }
 
-    /// 停用当前生效订阅时同时取消其生效状态。
+    /// 停用当前生效订阅时同时取消其生效状态；不影响覆写模板绑定。
     pub(crate) fn set_enabled(&self, id: Uuid, enabled: bool) -> LanpathResult<()> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         self.store().set_enabled(id, enabled)?;
         if !enabled {
             self.clear_active_if_matches_locked(id)?;
@@ -145,7 +146,7 @@ impl Subscriptions {
     /// 删除订阅（共享存储层同时清除原文/缓存）；删除当前生效订阅时
     /// 同时取消其生效状态。
     pub(crate) fn remove(&self, id: Uuid) -> LanpathResult<()> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         self.store().remove(id)?;
         self.clear_active_if_matches_locked(id)?;
         tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "删除订阅：{id}");
@@ -154,7 +155,7 @@ impl Subscriptions {
 
     /// 最后一次成功刷新的原文；从未成功刷新过时为 `None`。
     pub(crate) fn source(&self, id: Uuid) -> LanpathResult<Option<SubscriptionSource>> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         self.store().load_source(id)
     }
 
@@ -166,7 +167,7 @@ impl Subscriptions {
     /// [`RefreshStatus::Stale`]，旧响应不会覆盖新状态。
     pub(crate) async fn refresh(&self, id: Uuid) -> LanpathResult<RefreshStatus> {
         let (subscription, config) = {
-            let _guard = self.guard();
+            let _guard = self.root.business_guard();
             let subscription = self
                 .store()
                 .load()?
@@ -185,7 +186,7 @@ impl Subscriptions {
 
         // 写回前重新读取并比对：id 消失（被删除）或 URL/UA 变化（被编辑）
         // 都丢弃本次结果。
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         let store = self.store();
         let mut subscriptions = store.load()?;
         let Some(target) = subscriptions
@@ -231,13 +232,13 @@ impl Subscriptions {
 
     /// 当前生效订阅（持久化在本应用 `client.json` 的 `active_subscription_id`）。
     pub(crate) fn active_id(&self) -> LanpathResult<Option<Uuid>> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         Ok(request_config(self.root.path())?.active_subscription_id)
     }
 
     /// 设置当前生效订阅：拒绝不存在或已停用的订阅。
     pub(crate) fn set_active(&self, id: Uuid) -> LanpathResult<()> {
-        let _guard = self.guard();
+        let _guard = self.root.business_guard();
         let selected = self
             .store()
             .load()?

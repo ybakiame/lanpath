@@ -309,7 +309,13 @@ fn update_edits_fields_and_keeps_cache_until_url_changes() {
 
     // URL 不变：仅改名/UA 时上次结果与原文保留。
     let updated = service
-        .update(added.id, "改名", " https://example.com/a.yaml ", Some("  "))
+        .update(
+            added.id,
+            "改名",
+            " https://example.com/a.yaml ",
+            Some("  "),
+            None,
+        )
         .unwrap();
     assert_eq!(updated.name, "改名");
     assert_eq!(updated.url, "https://example.com/a.yaml");
@@ -325,6 +331,7 @@ fn update_edits_fields_and_keeps_cache_until_url_changes() {
             "换地址",
             "https://example.com/b.yaml",
             Some("custom-ua/1.0"),
+            None,
         )
         .unwrap();
     assert_eq!(changed.url, "https://example.com/b.yaml");
@@ -350,11 +357,17 @@ fn update_rejects_invalid_input_and_missing_subscription() {
         ("新名", "ftp://example.com/c.yaml"),
         ("新名", "not-a-url"),
     ] {
-        assert!(service.update(kept.id, name, url, None).is_err());
+        assert!(service.update(kept.id, name, url, None, None).is_err());
     }
     assert!(
         service
-            .update(Uuid::new_v4(), "新名", "https://example.com/b.yaml", None)
+            .update(
+                Uuid::new_v4(),
+                "新名",
+                "https://example.com/b.yaml",
+                None,
+                None
+            )
             .is_err()
     );
 
@@ -478,7 +491,9 @@ async fn refresh_failure_records_real_error_and_keeps_old_cache() {
         delay: Duration::ZERO,
     }]);
     let url = failing.url("/ok.yaml");
-    service.update(added.id, "先成后败", &url, None).unwrap();
+    service
+        .update(added.id, "先成后败", &url, None, None)
+        .unwrap();
     let status = service.refresh(added.id).await.unwrap();
     let RefreshStatus::Failed { error } = status else {
         panic!("expected a failed refresh");
@@ -529,7 +544,7 @@ async fn refresh_result_is_stale_after_mid_flight_edit() {
     // 请求在途期间编辑 URL：晚到的成功结果不得覆盖。
     tokio::time::sleep(Duration::from_millis(80)).await;
     editing
-        .update(id, "慢刷新", &server.url("/elsewhere.yaml"), None)
+        .update(id, "慢刷新", &server.url("/elsewhere.yaml"), None, None)
         .unwrap();
     let status = handle.await.unwrap().unwrap();
     assert!(matches!(status, RefreshStatus::Stale), "{status:?}");
@@ -676,4 +691,75 @@ async fn refresh_honors_the_saved_custom_proxy_policy() {
         "经代理的请求必须是绝对形式，实际：{}",
         recorded[0].path
     );
+}
+
+#[test]
+fn enable_active_and_rename_preserve_profile_binding() {
+    let temporary = tempfile::tempdir().unwrap();
+    let profiles = crate::profiles::Profiles::for_root(temporary.path()).unwrap();
+    let profile = profiles
+        .save(None, "绑定模板", String::new(), String::new(), None, None)
+        .unwrap();
+    let service = Subscriptions::for_root(temporary.path()).unwrap();
+    let added = service
+        .add("绑定订阅", "https://example.com/a.yaml", None)
+        .unwrap();
+    let bound = service
+        .update(
+            added.id,
+            "绑定订阅",
+            "https://example.com/a.yaml",
+            None,
+            Some(profile.id),
+        )
+        .unwrap();
+    assert_eq!(bound.profile_id, Some(profile.id));
+
+    // 启停/生效/改名都不改变绑定。
+    service.set_enabled(added.id, false).unwrap();
+    assert_eq!(service.load().unwrap()[0].profile_id, Some(profile.id));
+    service.set_enabled(added.id, true).unwrap();
+    service.set_active(added.id).unwrap();
+    assert_eq!(service.active_id().unwrap(), Some(added.id));
+    let renamed = service
+        .update(
+            added.id,
+            "改名后",
+            "https://example.com/a.yaml",
+            Some("ua/2"),
+            Some(profile.id),
+        )
+        .unwrap();
+    assert_eq!(renamed.profile_id, Some(profile.id));
+
+    // 同一数据根重开仍保留绑定。
+    let reopened = Subscriptions::for_root(temporary.path()).unwrap();
+    assert_eq!(reopened.load().unwrap()[0].profile_id, Some(profile.id));
+}
+
+#[tokio::test]
+async fn refresh_preserves_profile_binding() {
+    let server = TestServer::new(vec![yaml_route("/bind.yaml")]);
+    let temporary = tempfile::tempdir().unwrap();
+    let profiles = crate::profiles::Profiles::for_root(temporary.path()).unwrap();
+    let profile = profiles
+        .save(None, "刷新模板", String::new(), String::new(), None, None)
+        .unwrap();
+    let service = Subscriptions::for_root(temporary.path()).unwrap();
+    let added = service
+        .add("刷新绑定", &server.url("/bind.yaml"), None)
+        .unwrap();
+    service
+        .update(
+            added.id,
+            "刷新绑定",
+            &server.url("/bind.yaml"),
+            None,
+            Some(profile.id),
+        )
+        .unwrap();
+
+    let status = service.refresh(added.id).await.unwrap();
+    assert!(matches!(status, RefreshStatus::Updated { .. }));
+    assert_eq!(service.load().unwrap()[0].profile_id, Some(profile.id));
 }

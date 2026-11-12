@@ -11,12 +11,13 @@ mod source_view;
 
 use std::sync::Arc;
 
-use lanpath_client::{Subscription, node_tags_from_nodes, parse_subscription_body};
+use lanpath_client::{Profile, Subscription, node_tags_from_nodes, parse_subscription_body};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
 use uuid::Uuid;
 
+use crate::profiles::Profiles;
 use crate::subscriptions::{RefreshStatus, Subscriptions};
 
 const BUSY_REFRESHING: &str = "正在刷新订阅…";
@@ -28,6 +29,8 @@ pub(super) struct EditState {
     name: Signal<String>,
     url: Signal<String>,
     user_agent: Signal<String>,
+    /// 覆写模板绑定草稿：`None` = 无覆写；保存时业务层校验引用真实存在。
+    profile_id: Signal<Option<Uuid>>,
     dirty: Signal<bool>,
     error: Signal<Option<String>>,
     confirm_discard: Signal<bool>,
@@ -40,6 +43,7 @@ impl EditState {
             name: signal(String::new()),
             url: signal(String::new()),
             user_agent: signal(String::new()),
+            profile_id: signal(None),
             dirty: signal(false),
             error: signal(None),
             confirm_discard: signal(false),
@@ -52,6 +56,7 @@ impl EditState {
         self.url.set(subscription.url.clone());
         self.user_agent
             .set(subscription.user_agent.clone().unwrap_or_default());
+        self.profile_id.set(subscription.profile_id);
         self.dirty.set(false);
         self.error.set(None);
         self.confirm_discard.set(false);
@@ -59,6 +64,7 @@ impl EditState {
 
     fn close(&self) {
         self.id.set(None);
+        self.profile_id.set(None);
         self.dirty.set(false);
         self.error.set(None);
         self.confirm_discard.set(false);
@@ -85,7 +91,11 @@ pub(super) struct SourceView {
 #[derive(Clone)]
 pub(super) struct SubscriptionPageState {
     service: Option<Arc<Subscriptions>>,
+    /// 覆写模板业务：与订阅服务共用同一数据根的同一把业务锁；
+    /// 列表用于绑定选择与行内模板名展示。
+    profiles_service: Option<Profiles>,
     list: Signal<Vec<Subscription>>,
+    profiles: Signal<Vec<Profile>>,
     active: Signal<Option<Uuid>>,
     list_error: Signal<Option<String>>,
     form_error: Signal<Option<String>>,
@@ -104,11 +114,18 @@ pub(super) struct SubscriptionPageState {
 
 impl SubscriptionPageState {
     fn new() -> Self {
+        let profiles_service = Profiles::open().ok();
+        let profiles = profiles_service
+            .as_ref()
+            .and_then(|service| service.load().ok())
+            .unwrap_or_default();
         match Subscriptions::open() {
             Ok(service) => {
                 let state = Self {
                     service: Some(service),
+                    profiles_service,
                     list: signal(Vec::new()),
+                    profiles: signal(profiles),
                     active: signal(None),
                     list_error: signal(None),
                     form_error: signal(None),
@@ -125,7 +142,9 @@ impl SubscriptionPageState {
             }
             Err(error) => Self {
                 service: None,
+                profiles_service,
                 list: signal(Vec::new()),
+                profiles: signal(profiles),
                 active: signal(None),
                 list_error: signal(Some(format!("打开数据根失败:{error}"))),
                 form_error: signal(None),
@@ -153,6 +172,14 @@ impl SubscriptionPageState {
         }
         if let Ok(active) = service.active_id() {
             self.active.set(active);
+        }
+        if let Some(profiles_service) = self.profiles_service.clone() {
+            match profiles_service.load() {
+                Ok(profiles) => self.profiles.set(profiles),
+                Err(error) => self
+                    .list_error
+                    .set(Some(format!("加载覆写模板失败:{error}"))),
+            }
         }
     }
 

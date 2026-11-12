@@ -174,6 +174,7 @@ fn subscription_row(
             .text_size(px(12.0))
             .text_color(move || theme().muted_foreground),
         )
+        .child(binding_summary(state.clone(), item))
         .child(when(
             move || item.get().error.is_some(),
             move || {
@@ -186,6 +187,30 @@ fn subscription_row(
             },
         ))
         .child(row_delete_button(state, item))
+}
+
+/// 行内覆写模板绑定：已绑定显示模板名；模板被外部删除或清单损坏导致
+/// 引用失效时显示真实错误提示，不静默改绑。
+fn binding_summary(
+    state: SubscriptionPageState,
+    item: ReadSignal<Subscription>,
+) -> impl IntoElement {
+    when(
+        move || item.get().profile_id.is_some(),
+        move || {
+            let profiles = state.profiles.get();
+            match crate::profiles_view::profile_name(&profiles, item.get().profile_id) {
+                Some(name) => text(format!("覆写：{name}"))
+                    .text_size(px(12.0))
+                    .text_color(move || theme().muted_foreground)
+                    .into_element(),
+                None => text("覆写模板引用失效，请重新绑定")
+                    .text_size(px(12.0))
+                    .text_color(move || theme().destructive)
+                    .into_element(),
+            }
+        },
+    )
 }
 
 /// 删除独立成行（跟在错误文本后），保持操作区简洁。

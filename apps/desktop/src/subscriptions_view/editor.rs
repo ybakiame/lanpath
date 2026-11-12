@@ -1,8 +1,11 @@
-//! 订阅编辑弹窗：名称/地址/可选 User-Agent 草稿与已保存数据分离，
-//! 刷新/启停/删除/设置生效不会清空未保存修改；取消时有未保存修改需确认。
+//! 订阅编辑弹窗：名称/地址/可选 User-Agent/覆写模板绑定草稿与已保存数据
+//! 分离，刷新/启停/删除/设置生效不会清空未保存修改；取消时有未保存修改
+//! 需确认。覆写绑定用单选列表（无覆写 + 每个现存模板），保存时业务层在
+//! 同一业务锁内校验模板真实存在，失效引用显示真实错误、不静默改绑。
 
-use nsh_base::{button, dialog, input, theme};
+use nsh_base::{button, dialog, input, radio, radio_group, theme};
 use nsh_core::prelude::*;
+use uuid::Uuid;
 
 use super::SubscriptionPageState;
 
@@ -106,6 +109,12 @@ fn edit_form(state: SubscriptionPageState, title: String) -> impl IntoElement {
                 .bg(move || theme().background),
         )
         .child(
+            text("覆写模板（配置合成时应用）")
+                .text_size(px(12.0))
+                .text_color(move || theme().muted_foreground),
+        )
+        .child(binding_choices(state.clone()))
+        .child(
             text(move || state.edit.error.get().unwrap_or_default())
                 .text_size(px(12.0))
                 .text_color(move || theme().destructive),
@@ -181,6 +190,64 @@ fn discard_confirm(state: SubscriptionPageState) -> impl IntoElement {
         )
 }
 
+/// 覆写模板绑定选择：无覆写 + 每个现存模板的单选列表（模板多时也清晰
+/// 可选）。选择即写入草稿并标脏；保存时业务层校验引用存在。
+fn binding_choices(state: SubscriptionPageState) -> impl IntoElement {
+    let mut group = radio_group().flex_col().gap_2().child(binding_radio(
+        state.clone(),
+        None,
+        "无覆写".to_owned(),
+        "bind-profile-none",
+    ));
+    let profiles = state.profiles.get();
+    for profile in profiles {
+        group = group.child(binding_radio(
+            state.clone(),
+            Some(profile.id),
+            profile.name.clone(),
+            &format!("bind-profile-{}", profile.id),
+        ));
+    }
+    group
+}
+
+fn binding_radio(
+    state: SubscriptionPageState,
+    target: Option<Uuid>,
+    label: String,
+    test_id: &str,
+) -> impl IntoElement {
+    let checked = move || state.edit.profile_id.get() == target;
+    radio()
+        .checked(checked)
+        .on_change(move |_: &bool| {
+            state.edit.profile_id.set(target);
+            state.edit.dirty.set(true);
+        })
+        .child(
+            view()
+                .test_id(test_id)
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(
+                    view()
+                        .size(px(16.0))
+                        .rounded_full()
+                        .border(px(1.0))
+                        .border_color(move || theme().muted_foreground)
+                        .bg(move || {
+                            if checked() {
+                                theme().primary
+                            } else {
+                                theme().card
+                            }
+                        }),
+                )
+                .child(text(label).text_size(px(13.0))),
+        )
+}
+
 /// 保存编辑：写回共享存储，失败保留草稿并显示真实错误。
 fn save_edit(state: &SubscriptionPageState) {
     let Some(id) = state.edit.id.get() else {
@@ -193,13 +260,14 @@ fn save_edit(state: &SubscriptionPageState) {
     let name = state.edit.name.get();
     let url = state.edit.url.get();
     let user_agent = state.edit.user_agent.get();
+    let profile_id = state.edit.profile_id.get();
     let saved_url = state
         .list
         .get()
         .iter()
         .find(|subscription| subscription.id == id)
         .map(|subscription| subscription.url.clone());
-    match service.update(id, &name, &url, Some(&user_agent)) {
+    match service.update(id, &name, &url, Some(&user_agent), profile_id) {
         Ok(updated) => {
             let url_changed = saved_url.is_some_and(|saved| saved != updated.url);
             state.edit.close();

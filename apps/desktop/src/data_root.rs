@@ -45,6 +45,11 @@ pub(crate) struct DataRoot {
     id: uuid::Uuid,
     // 永不删除此文件：争夺者必须锁定同一个 inode。
     _lock: File,
+    /// 本根全部业务（订阅/覆写模板）清单与配置的串行化锁：同根所有
+    /// 服务共用同一把锁，校验+落盘在同一临界区内完成，杜绝“校验无
+    /// 引用后另一线程完成绑定”的竞争。锁不跨网络 await（刷新在 await
+    /// 前后分别短暂取锁）。
+    business: Mutex<()>,
     #[cfg(windows)]
     _directories: crate::windows_file::DirectoryLocks,
 }
@@ -119,6 +124,7 @@ impl DataRoot {
             path,
             id,
             _lock: lock,
+            business: Mutex::new(()),
             #[cfg(windows)]
             _directories: directories,
         })
@@ -126,6 +132,14 @@ impl DataRoot {
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// 本根业务的串行化锁（见字段说明）：锁中毒（持锁线程 panic）时
+    /// 接管锁，宁可串行继续也不让整个页面失效。
+    pub(crate) fn business_guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.business
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
 
     #[cfg(test)]
