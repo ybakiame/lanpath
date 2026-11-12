@@ -425,7 +425,7 @@ fn source_dialog_shows_the_last_successful_content_read_only() {
 #[test]
 fn refresh_failure_shows_the_real_error_without_fake_success() {
     let server = TestServer::new(vec![TestRoute {
-        path: "/bad.yaml",
+        path: "/bad.yaml".to_owned(),
         status: 500,
         body: String::new(),
         delay: Duration::ZERO,

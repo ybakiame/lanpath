@@ -14,6 +14,7 @@
 - [NSH Desktop 订阅管理验证](testing/2026-11-12-nsh-desktop-subscriptions.md)
 - [NSH Desktop 覆写模板验证](testing/2026-11-12-nsh-desktop-profiles.md)
 - [NSH Desktop 请求设置验证](testing/2026-11-12-nsh-desktop-request-settings.md)
+- [NSH Desktop 配置合成预览验证](testing/2026-11-12-nsh-desktop-config-preview.md)
 - [ADR](adr/README.md)
 - [来源](source-provenance.json)
 - [协议采纳](adoption/adoption-report.md)

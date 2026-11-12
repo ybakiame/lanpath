@@ -2,6 +2,8 @@ use nsh_base::{button, radio, radio_group, theme};
 use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
 
+mod config_composer;
+mod config_view;
 mod data_root;
 mod disk_log_writer;
 mod disk_logs_view;
@@ -26,6 +28,8 @@ use profiles_view::profiles_page;
 use request_settings_view::request_settings_page;
 use subscriptions_view::subscription_page;
 
+use config_view::config_page;
+
 /// Where the appearance page keeps the user's choice between launches.
 const APPEARANCE_KEY: &str = "appearance";
 
@@ -40,6 +44,7 @@ enum Page {
     Subscription,
     RequestSettings,
     Profiles,
+    Config,
     Logs,
     Appearance,
 }
@@ -124,6 +129,7 @@ pub fn App() -> impl IntoElement {
                     request_settings_page,
                 ))
                 .child(when(move || page.get() == Page::Profiles, profiles_page))
+                .child(when(move || page.get() == Page::Config, config_page))
                 .child(when(move || page.get() == Page::Logs, logs_page))
                 .child(when(
                     move || page.get() == Page::Appearance,
@@ -149,6 +155,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
         .child(nav_item(page, Page::Subscription, "订阅"))
         .child(nav_item(page, Page::RequestSettings, "请求设置"))
         .child(nav_item(page, Page::Profiles, "覆写"))
+        .child(nav_item(page, Page::Config, "配置"))
         .child(nav_item(page, Page::Logs, "日志"))
         .child(nav_item(page, Page::Appearance, "外观"))
 }

@@ -4,7 +4,7 @@
 GPUI 对照 `apps/gpui` 并行存在。应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取或迁移
 Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN，仅订阅新增/刷新按需联网。
 
-窗口壳为侧栏导航 + 主内容区。当前实现五个真实页面：
+窗口壳为侧栏导航 + 主内容区。当前实现六个真实页面：
 
 - 请求设置：订阅刷新与远程资源请求的网络请求策略（从 apps/gpui 迁移并适配）。
   四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用
@@ -50,6 +50,27 @@ Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN�
   保存失败保留草稿并显示真实错误，取消有未保存确认。远程覆写地址本页只保存供后续
   配置合成时解析：不下载、不预览、不显示“已生效”。日志只记名称/结果/节点数，不记
   YAML/JS 正文、远程地址或订阅地址。
+- 配置：共享合成预览（从 apps/gpui 的 `business/config.rs` 迁移 sing-box 合成语义）。
+  用户点击“生成配置预览”后在后台线程按已保存配置快照合成完整 sing-box JSON，
+  页面以只读滚动区域展示 pretty JSON、生成警告（配置切片回退、远程覆写降级、缺失
+  规则集等）与真实错误，明确文案“共享合成预览，未进行核心二进制校验”，绝不显示
+  “核心已验证/已启动”。本切片不做核心下载/安装/校验/启停，不启动核心、系统代理或
+  TUN；已保存 `core_type=Mihomo` 明确报暂不支持，不走 sing-box 错误路径。合成前置：
+  当前生效订阅必须存在且启用（共享存储语义）；优先本地节点缓存，无缓存时 Core 请求
+  策略明确拒绝，其余模式用进入网络前固定的 `ClientConfig` 快照联网刷新一次——网络途中
+  设置页的修改不改变本次合成策略（`Subscriptions::refresh_with_config` 与 `refresh`
+  共享同一实现，写回按 id/URL/UA 防 stale，业务锁不跨 await）。关联 Profile 必须真实
+  存在，远程 YAML/JS 经共享 `resolve_remote_overrides_with_context` 与本根
+  `profile_cache` 解析，远程失败按共享降级并展示真实警告；配置切片读取失败按 GPUI
+  回退共享默认值并把真实警告展示给用户。合成链与 GPUI 启动前预览同路径：
+  `build_core_config_v2` + `compose_singbox_config(mixed_port, None)`，规则集走
+  `prepare_missing_rule_sets_warn_only`/`prepare_builtin_rule_sets`/
+  `materialize_rule_sets`，缺失按共享降级并回报 missing tags；`inject_local_override_warn_only`、
+  `apply_panel_features` 后移除 `experimental.clash_api` 的 `external_ui`/
+  `external_ui_download_url`，避免预览触发面板下载。任务模型：busy 单飞（在途重复
+  点击不启动第二个合成，完成后可再生成）；失败保留旧预览并显示真实错误，不伪报新
+  成功；离开页面在途任务随 owner 取消，重进页面不永久 busy。日志只记节点数、警告数
+  与结果，不记配置正文、节点凭据、远程 URL 或代理 URL。
 - 日志：本应用真实运行事件。内存分区是有界缓冲（1000 条、revision 增量快照、
   级别筛选、显示条数选择、2 秒轮询可暂停、行详情、带确认的清空）；采集经 tracing
   全局层只捕获 `lanpath_*` target 的本应用事件。磁盘分区读取本应用数据根 `logs/`
@@ -70,10 +91,11 @@ Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN�
   键 `lanpath_desktop_nsh.data_dir` 预置（优先级低于环境变量）。两者都经过同一套准入检查。
 - 准入拒绝生产/便携 Lanpath 祖先、其他 Lanpath 应用数据根（Tauri/GPUI/apps/nsh）、
   符号链接/junction/硬链接共享文件；损坏的身份标记不会静默重建。不提供便携模式。
-- 订阅、请求设置、覆写模板与日志共用同一条数据根租约与按路径缓存：页面来回切换不重开缓冲，
+- 订阅、请求设置、覆写模板、配置合成与日志共用同一条数据根租约与按路径缓存：页面来回切换不重开缓冲，
   第二进程仍被拒绝。订阅清单（`subscriptions.json`）、覆写模板（`profiles.json`）与请求设置
   （`client.json`）的所有读写共用数据根上的同一把业务锁：校验引用与落盘在同一临界区内完成，
-  不会出现“校验无引用后另一线程完成绑定”的竞争；锁不跨网络 await。
+  不会出现“校验无引用后另一线程完成绑定”的竞争；锁不跨网络 await。配置合成预览经同根
+  `Subscriptions` 句柄复用这把锁与 Weak 缓存，快照刷新与页面操作天然互斥。
 - 订阅原文与节点缓存在数据根 `subscription_cache/`（共享存储层布局）；当前生效订阅
   与请求设置持久化在本应用自己的 `client.json`（`active_subscription_id` 与
   `request_proxy_mode` / `request_proxy_url` / `github_proxy_prefix`），不触碰其他应用的配置。

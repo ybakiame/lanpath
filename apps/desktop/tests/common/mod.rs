@@ -20,25 +20,25 @@ use std::time::Duration;
 
 /// 本地 HTTP 响应描述。
 pub struct TestRoute {
-    pub path: &'static str,
+    pub path: String,
     pub status: u16,
     pub body: String,
     pub delay: Duration,
 }
 
 impl TestRoute {
-    pub fn ok(path: &'static str, body: &str) -> Self {
+    pub fn ok(path: &str, body: &str) -> Self {
         Self {
-            path,
+            path: path.to_owned(),
             status: 200,
             body: body.to_string(),
             delay: Duration::ZERO,
         }
     }
 
-    pub fn delayed(path: &'static str, body: &str, delay: Duration) -> Self {
+    pub fn delayed(path: &str, body: &str, delay: Duration) -> Self {
         Self {
-            path,
+            path: path.to_owned(),
             status: 200,
             body: body.to_string(),
             delay,
@@ -125,7 +125,7 @@ impl Drop for TestServer {
 
 #[derive(Clone)]
 struct Route {
-    path: &'static str,
+    path: String,
     status: u16,
     body: String,
     delay: Duration,
@@ -166,7 +166,11 @@ fn handle_connection(
                 .then(|| value.trim().to_string())
         })
         .filter(|value| !value.is_empty());
-    let route = routes.iter().find(|route| route.path == path);
+    // 直连请求 path 以 "/" 开头；经代理的请求是 absolute-form 完整目标
+    // URL——两者都按精确路径或其末尾匹配（路由路径以 "/" 开头，无歧义）。
+    let route = routes.iter().find(|route| {
+        path == route.path || (!route.path.starts_with("http") && path.ends_with(&route.path))
+    });
     let (status, body, delay) = match route {
         Some(route) => (route.status, route.body.clone(), route.delay),
         None => (404, String::new(), Duration::ZERO),

@@ -1,0 +1,300 @@
+//! 配置合成预览业务：共享 `lanpath-client` 合成链落在 NSH 桌面自己的隔离
+//! 数据根内。从 apps/gpui 的 `business/config.rs`（`build_config_report` 的
+//! sing-box 路径、`panel_features`、`remove_dashboard_download`）迁移语义：
+//! 用户点击后按已保存配置快照合成完整 sing-box JSON，供“配置”页只读展示。
+//!
+//! 本切片只做共享合成预览：不下载/安装/校验核心二进制，不启动核心、系统
+//! 代理或 TUN；预览 JSON 未经过核心二进制校验，UI 不得显示“已验证/已启动”。
+//! 已保存 `core_type = Mihomo` 时明确报暂不支持，不走 sing-box 合成错误路径。
+//!
+//! 合成全程持有进入网络前固定的 `ClientConfig` 快照（业务锁内读出），网络
+//! 途中设置页的修改不改变本次请求策略；业务锁不跨 await，写回仍走
+//! `Subscriptions::refresh_with_config` 的 id/URL/UA 防 stale 实现。
+
+use std::path::Path;
+use std::sync::Arc;
+
+use lanpath_client::config_slices::{ConfigSlices, ConfigSlicesStore};
+use lanpath_client::{
+    EffectiveOverrides, PanelFeatures, ProfileStoreV2, RemoteFetchContext, RequestProxyMode,
+    SubscriptionStore, apply_panel_features, build_core_config_v2, compose_singbox_config,
+    inject_local_override_warn_only, prepare_missing_rule_sets_warn_only,
+    resolve_remote_overrides_with_context,
+};
+use lanpath_common::{CoreType, LanpathError, LanpathResult};
+use serde_json::Value;
+
+use crate::data_root::{DataRoot, open_root, resolve_data_location};
+use crate::request_settings::load_request_config;
+use crate::subscriptions::{RefreshStatus, Subscriptions};
+
+/// 一次合成预览的结果：完整 pretty JSON、节点数、生成警告与缺失规则集 tag。
+/// 警告包含配置切片读取回退与远程覆写降级等共享层真实警告，不静默。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigPreview {
+    json: String,
+    node_count: usize,
+    warnings: Vec<String>,
+    missing_tags: Vec<String>,
+}
+
+impl ConfigPreview {
+    pub(crate) fn json(&self) -> &str {
+        &self.json
+    }
+
+    pub(crate) fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    pub(crate) fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    pub(crate) fn missing_tags(&self) -> &[String] {
+        &self.missing_tags
+    }
+}
+
+/// 配置合成预览业务句柄：与本根订阅业务共享同一句柄（同一把业务锁、同一
+/// Weak 缓存），克隆廉价；所有清单/配置读写在临界区内完成，锁不跨 await。
+#[derive(Clone)]
+pub(crate) struct ConfigComposer {
+    root: Arc<DataRoot>,
+    subscriptions: Arc<Subscriptions>,
+}
+
+impl ConfigComposer {
+    /// 解析本进程数据根并打开合成预览业务（应用启动路径）。
+    pub(crate) fn open() -> LanpathResult<Self> {
+        let location = resolve_data_location()?;
+        Self::for_root(&location.path)
+    }
+
+    /// 指定数据根打开（测试与显式调用路径，同样走完整准入）。
+    pub(crate) fn for_root(path: &Path) -> LanpathResult<Self> {
+        Ok(Self {
+            root: open_root(path)?,
+            subscriptions: Subscriptions::open_service(path)?,
+        })
+    }
+
+    fn store(&self) -> SubscriptionStore {
+        SubscriptionStore::new(self.root.path().to_path_buf())
+    }
+
+    /// 按已保存配置快照合成 sing-box 配置预览（GPUI `build_config_report`
+    /// 的 sing-box 路径语义）。`download_rule_sets = true`：与 GPUI 启动
+    /// 前预览同路径补齐规则集（cache_only 只读缓存，非 Core 用已停止
+    /// 运行时的请求策略），缺失按共享降级并返回 missing tags。
+    ///
+    /// 日志只记节点数、警告数与结果，不记配置正文、节点凭据、远程地址或
+    /// 代理地址。
+    pub(crate) async fn compose(&self) -> LanpathResult<ConfigPreview> {
+        // 快照在进入网络前于业务锁内读出：本次合成的请求策略/端口/active
+        // 全部固定，网络途中设置页的修改不影响本次预览。
+        let config = {
+            let _guard = self.root.business_guard();
+            load_request_config(self.root.path())?
+        };
+        if config.core_type == CoreType::Mihomo {
+            return Err(LanpathError::Client(
+                "当前核心类型为 Mihomo：配置合成预览暂不支持 Mihomo，请切回 sing-box 后再试".into(),
+            ));
+        }
+        let cache_only = config.request_proxy_mode == RequestProxyMode::Core;
+        let mixed_port = config.mixed_port;
+
+        let selected_id = config
+            .active_subscription_id
+            .ok_or_else(|| LanpathError::Client("请先在订阅页选择要使用的订阅".into()))?;
+        // 生效订阅必须存在且启用（与 GPUI 相同的三条前置校验）。
+        let selected = {
+            let _guard = self.root.business_guard();
+            self.store()
+                .load()?
+                .into_iter()
+                .find(|subscription| subscription.id == selected_id)
+                .ok_or_else(|| LanpathError::Client("所选订阅不存在，请重新选择".into()))?
+        };
+        if !selected.enabled {
+            return Err(LanpathError::Client(
+                "所选订阅已停用，请先启用或重新选择".into(),
+            ));
+        }
+
+        // 节点优先取本地缓存（不联网）；无缓存时 Core 策略明确拒绝，
+        // 其余模式用本次快照刷新一次后重读缓存。
+        let nodes = match self.store().load_cached_content(selected.id) {
+            Some(cached) => cached.singbox_nodes,
+            None if cache_only => {
+                return Err(LanpathError::Client(
+                    "核心请求代理尚未就绪，且所选订阅没有可用节点缓存；请先显式选择其他请求策略获取订阅，或导入已有缓存"
+                        .into(),
+                ));
+            }
+            None => {
+                let status = self
+                    .subscriptions
+                    .refresh_with_config(selected.id, &config)
+                    .await?;
+                match self.store().load_cached_content(selected.id) {
+                    Some(cached) => cached.singbox_nodes,
+                    None => {
+                        let detail = match status {
+                            RefreshStatus::Updated { .. } => {
+                                "订阅没有可用的本地节点缓存，请先刷新".to_owned()
+                            }
+                            RefreshStatus::Failed { error } => error,
+                            RefreshStatus::Stale => {
+                                "刷新期间订阅已被修改或删除，结果未写入，请重试".to_owned()
+                            }
+                        };
+                        return Err(LanpathError::Client(detail));
+                    }
+                }
+            }
+        };
+        let node_count = nodes.len();
+
+        let mut warnings = Vec::new();
+        // 配置切片读取失败按 GPUI 回退共享默认值，但把真实警告展示给用户
+        // （共享存储层自身只记 tracing 警告，不区分回退路径）。
+        let slices = load_slices(self.root.path(), &mut warnings);
+        let features = panel_features(self.root.path(), &slices, &config);
+        let requests = if cache_only {
+            RemoteFetchContext::cache_only()
+        } else {
+            RemoteFetchContext::stopped(config.clone())?
+        };
+        let subscription = serde_json::json!({ "outbounds": nodes });
+        // 关联 Profile 必须真实存在；远程 YAML/JS 经共享缓存目录解析，
+        // 远程失败按共享降级为缓存/空并返回警告，不静默。
+        let (effective, remote_warnings) = match selected.profile_id {
+            Some(profile_id) => {
+                let profile = {
+                    let _guard = self.root.business_guard();
+                    ProfileStoreV2::new(self.root.path().to_path_buf())
+                        .load()?
+                        .into_iter()
+                        .find(|profile| profile.id == profile_id)
+                        .ok_or_else(|| {
+                            LanpathError::Client("订阅关联的覆写模板不存在，请重新关联".into())
+                        })?
+                };
+                resolve_remote_overrides_with_context(
+                    &lanpath_client::resource_storage::cache_path(
+                        self.root.path(),
+                        "profile_cache",
+                    ),
+                    &profile,
+                    &requests,
+                )
+                .await
+            }
+            None => (EffectiveOverrides::default(), Vec::new()),
+        };
+        warnings.extend(remote_warnings);
+
+        let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
+        let mut value = compose_singbox_config(&profile_config, mixed_port, None)?;
+        // 与 GPUI 启动前预览同路径：先补齐缺失规则集（进度消息只含 tag，
+        // 不含 URL），再物化内置规则集；全部缺失走共享降级并回报 missing tags。
+        prepare_missing_rule_sets_warn_only(self.root.path(), &value, &requests, &|_message| ())
+            .await;
+        inject_local_override_warn_only(self.root.path(), &mut value);
+        apply_panel_features(&mut value, &features);
+        remove_dashboard_download(&mut value);
+
+        let available = lanpath_client::ruleset_manager::prepare_builtin_rule_sets(
+            self.root.path(),
+            &value,
+            &requests,
+        )
+        .await;
+        let report = lanpath_client::ruleset_manager::materialize_rule_sets(
+            &mut value,
+            self.root.path(),
+            &available,
+        );
+        if !report.missing_tags.is_empty() {
+            warnings.push(format!(
+                "内置规则集缺失 {} 个，相关引用已按共享降级规则合成:{}",
+                report.missing_tags.len(),
+                report.missing_tags.join(", ")
+            ));
+        }
+
+        let json = serde_json::to_string_pretty(&value)?;
+        let warning_count = warnings.len();
+        tracing::info!(target: "lanpath_desktop_nsh::config_composer", "配置合成预览完成：{node_count} 个节点，{warning_count} 条警告，缺失规则集 {} 个", report.missing_tags.len());
+        Ok(ConfigPreview {
+            json,
+            node_count,
+            warnings,
+            missing_tags: report.missing_tags,
+        })
+    }
+}
+
+/// 读取配置切片：共享 `ConfigSlicesStore::load` 对损坏文件只记 tracing
+/// 警告并回退播种默认值，这里把同一回退判定显式化——文件不可读 / 非法
+/// JSON / schema 不匹配都生成用户可见警告（与共享层同一回退结果）。
+fn load_slices(root: &std::path::Path, warnings: &mut Vec<String>) -> ConfigSlices {
+    let path = root.join("config_slices.json");
+    if path.exists() {
+        let unusable = match std::fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|value| serde_json::from_value::<ConfigSlices>(value).ok())
+                .is_none(),
+            Err(_) => true,
+        };
+        if unusable {
+            warnings.push("配置切片读取失败，已回退共享默认值".to_owned());
+        }
+    }
+    ConfigSlicesStore::new(root.to_path_buf())
+        .load()
+        .unwrap_or_default()
+}
+
+/// PanelFeatures 按 GPUI 字段（`config.normalized_rule_mode()`、
+/// `dns_mode_from_slices`），`data_dir` 为本数据根 `cache`。
+fn panel_features(
+    root: &Path,
+    slices: &ConfigSlices,
+    config: &lanpath_client::ClientConfig,
+) -> PanelFeatures {
+    PanelFeatures {
+        tun_enabled: config.tun_enabled,
+        tun_stack: config.tun_stack.clone(),
+        tun_auto_route: config.tun_auto_route,
+        clash_api_enabled: config.clash_api_enabled,
+        clash_api_port: config.clash_api_port,
+        clash_api_secret: config.clash_api_secret.clone(),
+        clash_api_ui: config.clash_api_ui.clone(),
+        rule_mode: config.normalized_rule_mode().to_owned(),
+        ipv6_enabled: config.ipv6_enabled,
+        dns_fakeip_enabled: config.dns_fakeip_enabled,
+        data_dir: root.join("cache").to_string_lossy().into_owned(),
+        dns_mode: lanpath_client::core_config::dns_mode_from_slices(slices),
+        github_proxy_prefix: config.github_proxy_prefix.clone(),
+    }
+}
+
+/// 与 GPUI `remove_dashboard_download` 相同：预览不得携带面板目录/下载地址，
+/// 避免任何消费方据此触发面板下载。
+fn remove_dashboard_download(value: &mut Value) {
+    if let Some(api) = value
+        .pointer_mut("/experimental/clash_api")
+        .and_then(Value::as_object_mut)
+    {
+        api.remove("external_ui");
+        api.remove("external_ui_download_url");
+    }
+}
+
+#[cfg(test)]
+#[path = "config_composer_tests.rs"]
+mod tests;

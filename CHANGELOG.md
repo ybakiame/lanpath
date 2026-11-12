@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+- 扩展 `apps/desktop` 新增真实“配置”页（共享合成预览）：从 apps/gpui 迁移
+  `business/config.rs` 的 sing-box 合成语义（`build_config_report`/`panel_features`/
+  `remove_dashboard_download`），按已保存配置快照在后台线程合成完整 sing-box JSON，
+  页面以只读滚动区域展示 pretty JSON、生成警告与真实错误，明确文案“共享合成预览，
+  未进行核心二进制校验”，绝不显示核心已验证/已启动；本切片不做核心下载/安装/校验/
+  启停，不启动核心、系统代理或 TUN，不做 Mihomo（已保存 `core_type=Mihomo` 明确报
+  暂不支持，不走 sing-box 错误路径）。合成语义：active 订阅必须存在且启用；优先本地
+  节点缓存，无缓存时 Core 请求策略明确拒绝（其余模式按本次固定的 `ClientConfig` 快照
+  联网刷新一次，网络途中设置页修改不改变本次策略；`Subscriptions` 新增
+  `refresh_with_config` 与 `refresh` 共享同一实现，写回仍按 id/URL/UA 防 stale，业务锁
+  不跨 await）。关联 Profile 必须真实存在，远程 YAML/JS 经共享
+  `resolve_remote_overrides_with_context` 与本根 `profile_cache` 解析，远程失败按共享
+  降级并展示真实警告；配置切片读取失败按 GPUI 回退共享默认值并把真实警告展示给用户。
+  `build_core_config_v2` + `compose_singbox_config(mixed_port, None)`，规则集走 GPUI 同
+  路径（`prepare_missing_rule_sets_warn_only`/`prepare_builtin_rule_sets`/
+  `materialize_rule_sets`），缺失按共享降级并回报 missing tags；`inject_local_override_warn_only`、
+  `apply_panel_features` 后移除 `experimental.clash_api` 的 `external_ui`/
+  `external_ui_download_url`，避免预览触发面板下载。任务模型 busy 单飞（在途重复点击
+  不启动第二个合成），失败保留旧预览并显示真实错误、不伪报新成功，离开页面在途任务随
+  owner 取消、重进不永久 busy；日志只记节点数、警告数与结果，不记配置正文、节点凭据、
+  远程 URL 或代理 URL。apps/gpui 仅作迁移来源未改动，apps/nsh 不变；测试全为纯 Rust
+  （`src/` 业务 12 项新用例 + `tests/` headless 6 项新用例，本线程 127.0.0.1 真实 HTTP
+  服务器覆盖：无 active/目标不存在/已停用拒绝、无缓存 Core 拒绝且零请求、有缓存离线
+  合成、缺缓存按快照刷新（在途改保存策略不影响本次）、远程+本地 YAML/JS 覆写真实作用
+  于 JSON、远程覆写 404 降级警告上屏、clash api 面板下载字段剥离、切片损坏回退警告、
+  失效模板引用拒绝、busy 单飞与恢复、失败保留旧预览、离页重进不永久 busy、Mihomo
+  明示拒绝）；规则集镜像下载经本地代理 404 覆盖缺失降级路径，未访问规则集公网；
+  无 TSX/Node 依赖；Windows 原生验收尚待主代理执行。
+
 - 扩展 `apps/desktop` 新增真实“请求设置”页与业务：从 apps/gpui 迁移请求设置
   （`business/request_settings.rs`），适配 NSH 桌面独立数据根与纯 Rust NSH 组件。
   四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用

@@ -57,8 +57,9 @@ impl Subscriptions {
 
     /// 按规范根路径缓存句柄：同根重开（页面切换、测试重开）拿到同一个
     /// `Arc`；所有句柄释放后 Weak 条目自然失效。业务锁在共享数据根上，
-    /// 同根的 Profiles/Subscriptions 操作天然互斥。
-    fn open_service(path: &Path) -> LanpathResult<Arc<Self>> {
+    /// 同根的 Profiles/Subscriptions 操作天然互斥。配置合成等其它业务经
+    /// 它拿到同根订阅句柄，与页面操作共用同一把业务锁。
+    pub(crate) fn open_service(path: &Path) -> LanpathResult<Arc<Self>> {
         let root = open_root(path)?;
         let key = root.path().to_path_buf();
         let mut services = SERVICES
@@ -161,24 +162,39 @@ impl Subscriptions {
 
     /// 按需联网刷新：始终使用已保存的 URL/User-Agent，绝不回写未保存表单；
     /// 网络请求不在 UI 线程执行（由调用方放入后台任务），写回与 UI 线程的
-    /// 同步操作经互斥排队，不并发写坏清单。
+    /// 同步操作经互斥排队，不并发写坏清单。请求策略为读取时已保存配置的
+    /// 快照（由 [`load_request_config`] 在业务锁内读出）。
     ///
     /// 返回前后都重新校验 id/URL/User-Agent：刷新期间被编辑或删除时结果为
     /// [`RefreshStatus::Stale`]，旧响应不会覆盖新状态。
     pub(crate) async fn refresh(&self, id: Uuid) -> LanpathResult<RefreshStatus> {
-        let (subscription, config) = {
+        let config = {
             let _guard = self.root.business_guard();
-            let subscription = self
-                .store()
+            load_request_config(self.root.path())?
+        };
+        self.refresh_with_config(id, &config).await
+    }
+
+    /// 用调用方固定的 `ClientConfig` 快照刷新（配置合成预览等长时间任务使用）：
+    /// 快照在调用方进入网络前已读出，刷新全程使用同一策略，途中设置页的修改
+    /// 不会改变本次请求策略。写回仍按 id/URL/User-Agent 防 stale，与
+    /// [`Subscriptions::refresh`] 完全同一实现。
+    pub(crate) async fn refresh_with_config(
+        &self,
+        id: Uuid,
+        config: &lanpath_client::ClientConfig,
+    ) -> LanpathResult<RefreshStatus> {
+        let subscription = {
+            let _guard = self.root.business_guard();
+            self.store()
                 .load()?
                 .into_iter()
                 .find(|subscription| subscription.id == id)
-                .ok_or_else(|| LanpathError::Client("订阅不存在".into()))?;
-            (subscription, load_request_config(self.root.path())?)
+                .ok_or_else(|| LanpathError::Client("订阅不存在".into()))?
         };
         // 共享请求策略：连接/超时失败自动重试一次，请求自身有 30 秒超时。
         let result = fetch_subscription_for_config(
-            &config,
+            config,
             &subscription.url,
             subscription.user_agent.as_deref(),
         )
