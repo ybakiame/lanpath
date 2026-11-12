@@ -1,11 +1,13 @@
 //! 配置合成预览业务：共享 `lanpath-client` 合成链落在 NSH 桌面自己的隔离
 //! 数据根内。从 apps/gpui 的 `business/config.rs`（`build_config_report` 的
-//! sing-box 路径、`panel_features`、`remove_dashboard_download`）迁移语义：
-//! 用户点击后按已保存配置快照合成完整 sing-box JSON，供“配置”页只读展示。
+//! sing-box 与 Mihomo 两条分支、`panel_features`、移除面板下载字段）迁移语义：
+//! 用户点击后按已保存配置快照合成完整配置，供“配置”页只读展示——sing-box
+//! 输出 pretty JSON，Mihomo 输出 YAML（核心直接消费的格式）。
 //!
 //! 本切片只做共享合成预览：不下载/安装/校验核心二进制，不启动核心、系统
-//! 代理或 TUN；预览 JSON 未经过核心二进制校验，UI 不得显示“已验证/已启动”。
-//! 已保存 `core_type = Mihomo` 时明确报暂不支持，不走 sing-box 合成错误路径。
+//! 代理或 TUN；预览内容未经过核心二进制校验，UI 不得显示“已验证/已启动”。
+//! 核心以 sing-box 为主；Mihomo 现阶段支持订阅配置合成运行（YAML 预览），
+//! 不做 Mihomo 结构化切片编辑——非默认 sing-box 配置切片只警告、不应用。
 //!
 //! 合成全程持有进入网络前固定的 `ClientConfig` 快照（业务锁内读出），网络
 //! 途中设置页的修改不改变本次请求策略；业务锁不跨 await，写回仍走
@@ -28,19 +30,47 @@ use crate::data_root::{DataRoot, open_root, resolve_data_location};
 use crate::request_settings::load_request_config;
 use crate::subscriptions::{RefreshStatus, Subscriptions};
 
-/// 一次合成预览的结果：完整 pretty JSON、节点数、生成警告与缺失规则集 tag。
-/// 警告包含配置切片读取回退与远程覆写降级等共享层真实警告，不静默。
+/// 预览输出格式：sing-box 为 pretty JSON，Mihomo 为 YAML（核心直接消费的
+/// 格式）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviewFormat {
+    Json,
+    Yaml,
+}
+
+impl PreviewFormat {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Json => "JSON",
+            Self::Yaml => "YAML",
+        }
+    }
+}
+
+/// 一次合成预览的结果：输出格式、核心类型、完整正文（JSON/YAML）、节点数、
+/// 生成警告与缺失规则集 tag。警告包含配置切片读取回退、Mihomo 切片未应用
+/// 与远程覆写降级等共享层真实警告，不静默。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigPreview {
-    json: String,
+    format: PreviewFormat,
+    core_type: CoreType,
+    content: String,
     node_count: usize,
     warnings: Vec<String>,
     missing_tags: Vec<String>,
 }
 
 impl ConfigPreview {
-    pub(crate) fn json(&self) -> &str {
-        &self.json
+    pub(crate) fn format(&self) -> PreviewFormat {
+        self.format
+    }
+
+    pub(crate) fn core_type(&self) -> CoreType {
+        self.core_type
+    }
+
+    pub(crate) fn content(&self) -> &str {
+        &self.content
     }
 
     pub(crate) fn node_count(&self) -> usize {
@@ -83,10 +113,11 @@ impl ConfigComposer {
         SubscriptionStore::new(self.root.path().to_path_buf())
     }
 
-    /// 按已保存配置快照合成 sing-box 配置预览（GPUI `build_config_report`
-    /// 的 sing-box 路径语义）。`download_rule_sets = true`：与 GPUI 启动
-    /// 前预览同路径补齐规则集（cache_only 只读缓存，非 Core 用已停止
-    /// 运行时的请求策略），缺失按共享降级并返回 missing tags。
+    /// 按已保存配置快照合成配置预览（GPUI `build_config_report` 的 sing-box
+    /// 与 Mihomo 两条分支语义）：sing-box 输出 pretty JSON，Mihomo 输出
+    /// YAML。sing-box 侧 `download_rule_sets = true`：与 GPUI 启动前预览
+    /// 同路径补齐规则集（cache_only 只读缓存，非 Core 用已停止运行时的
+    /// 请求策略），缺失按共享降级并返回 missing tags。
     ///
     /// 日志只记节点数、警告数与结果，不记配置正文、节点凭据、远程地址或
     /// 代理地址。
@@ -97,11 +128,6 @@ impl ConfigComposer {
             let _guard = self.root.business_guard();
             load_request_config(self.root.path())?
         };
-        if config.core_type == CoreType::Mihomo {
-            return Err(LanpathError::Client(
-                "当前核心类型为 Mihomo：配置合成预览暂不支持 Mihomo，请切回 sing-box 后再试".into(),
-            ));
-        }
         let cache_only = config.request_proxy_mode == RequestProxyMode::Core;
         let mixed_port = config.mixed_port;
 
@@ -167,9 +193,9 @@ impl ConfigComposer {
         } else {
             RemoteFetchContext::stopped(config.clone())?
         };
-        let subscription = serde_json::json!({ "outbounds": nodes });
         // 关联 Profile 必须真实存在；远程 YAML/JS 经共享缓存目录解析，
-        // 远程失败按共享降级为缓存/空并返回警告，不静默。
+        // 远程失败按共享降级为缓存/空并返回警告，不静默。覆写链与核心类型
+        // 无关：sing-box 与 Mihomo 共用同一远程+本地覆写实现。
         let (effective, remote_warnings) = match selected.profile_id {
             Some(profile_id) => {
                 let profile = {
@@ -196,6 +222,46 @@ impl ConfigComposer {
         };
         warnings.extend(remote_warnings);
 
+        // Mihomo 分支（GPUI `build_config_report` 同路径）：现阶段支持订阅
+        // 配置合成运行，输出 YAML。不做 Mihomo 结构化切片编辑——用户定制的
+        // sing-box 配置切片只警告、不应用（切片内容保留，供切回 sing-box）。
+        if config.core_type == CoreType::Mihomo {
+            if slices_customized(&slices) {
+                warnings.push(
+                    "Mihomo 合成预览未应用 sing-box 配置切片（切片内容保留，供切换回 sing-box 使用）"
+                        .to_owned(),
+                );
+            }
+            // 优先原始 Clash 订阅原文提取代理（无损耗往返）；其余格式按共享
+            // 转换逐节点处理，Mihomo 无法表示的协议真实报错。
+            let source = {
+                let _guard = self.root.business_guard();
+                self.store().load_source(selected.id)?
+            };
+            let nodes = lanpath_client::subscription::mihomo_nodes_from_subscription(
+                source.as_ref(),
+                &nodes,
+            )?;
+            let mut profile_config =
+                lanpath_client::build_mihomo_config_v2(&nodes, &effective).await?;
+            lanpath_client::compose_mihomo_config(&mut profile_config, mixed_port, None)?;
+            let mut value = profile_config;
+            lanpath_client::core_config::apply_mihomo_panel_features(&mut value, &features);
+            remove_mihomo_dashboard_download(&mut value);
+            let content = serde_yaml::to_string(&value)?;
+            let warning_count = warnings.len();
+            tracing::info!(target: "lanpath_desktop_nsh::config_composer", "配置合成预览完成：Mihomo YAML，{node_count} 个节点，{warning_count} 条警告");
+            return Ok(ConfigPreview {
+                format: PreviewFormat::Yaml,
+                core_type: CoreType::Mihomo,
+                content,
+                node_count,
+                warnings,
+                missing_tags: Vec::new(),
+            });
+        }
+
+        let subscription = serde_json::json!({ "outbounds": nodes });
         let profile_config = build_core_config_v2(&subscription, &effective, &slices).await?;
         let mut value = compose_singbox_config(&profile_config, mixed_port, None)?;
         // 与 GPUI 启动前预览同路径：先补齐缺失规则集（进度消息只含 tag，
@@ -225,11 +291,13 @@ impl ConfigComposer {
             ));
         }
 
-        let json = serde_json::to_string_pretty(&value)?;
+        let content = serde_json::to_string_pretty(&value)?;
         let warning_count = warnings.len();
-        tracing::info!(target: "lanpath_desktop_nsh::config_composer", "配置合成预览完成：{node_count} 个节点，{warning_count} 条警告，缺失规则集 {} 个", report.missing_tags.len());
+        tracing::info!(target: "lanpath_desktop_nsh::config_composer", "配置合成预览完成：sing-box JSON，{node_count} 个节点，{warning_count} 条警告，缺失规则集 {} 个", report.missing_tags.len());
         Ok(ConfigPreview {
-            json,
+            format: PreviewFormat::Json,
+            core_type: CoreType::SingBox,
+            content,
             node_count,
             warnings,
             missing_tags: report.missing_tags,
@@ -293,6 +361,23 @@ fn remove_dashboard_download(value: &mut Value) {
         api.remove("external_ui");
         api.remove("external_ui_download_url");
     }
+}
+
+/// 与 GPUI `remove_mihomo_dashboard_download` 相同：Mihomo 预览不得携带
+/// 面板目录/下载地址（`external-ui`/`external-ui-url` 为顶层键）。
+fn remove_mihomo_dashboard_download(value: &mut Value) {
+    if let Some(object) = value.as_object_mut() {
+        object.remove("external-ui");
+        object.remove("external-ui-url");
+    }
+}
+
+/// 存储层会把内置分组（proxy/auto）播种进 outbounds 切片，那是默认内容的
+/// 一部分；只有用户自己加过/改过非内置内容，才算“非默认切片”。
+fn slices_customized(slices: &ConfigSlices) -> bool {
+    let mut normalized = slices.clone();
+    normalized.outbounds.items.retain(|item| !item.builtin);
+    normalized != ConfigSlices::default()
 }
 
 #[cfg(test)]

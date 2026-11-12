@@ -1,8 +1,9 @@
 //! 配置页：共享合成预览。用户点击后在后台线程按已保存配置快照合成完整
-//! sing-box JSON，页面以只读滚动区域展示 pretty JSON、生成警告与真实错误。
-//! 明确文案：共享合成预览，未进行核心二进制校验——绝不显示“核心已验证/
-//! 已启动”。本页不下载/安装/校验核心、不启动核心/系统代理/TUN，不做
-//! Mihomo（业务层明确报暂不支持）。
+//! 配置（sing-box 为 pretty JSON，Mihomo 为 YAML），页面以只读滚动区域
+//! 展示正文、生成警告与真实错误。明确文案：共享合成预览，未进行核心
+//! 二进制校验——绝不显示“核心已验证/已启动”。本页不下载/安装/校验核心、
+//! 不启动核心/系统代理/TUN；Mihomo 现阶段支持订阅配置合成运行，不做
+//! Mihomo 结构化切片编辑。
 //!
 //! 任务模型：busy 单飞（在途预览未完成时新的点击不启动，完成后可再生成）；
 //! 合成在 `background`（tokio 线程）执行，Signal 留在 UI 线程 `spawn` 任务
@@ -77,7 +78,7 @@ pub(crate) fn config_page() -> impl IntoElement {
         .gap_4()
         .child(text("配置").text_size(px(24.0)))
         .child(
-            text("共享合成预览，未进行核心二进制校验 · 按当前生效订阅与已保存设置合成 sing-box JSON · 不启动核心/系统代理/TUN")
+            text("共享合成预览，未进行核心二进制校验 · 按当前生效订阅与已保存设置合成 sing-box JSON / Mihomo YAML · 不启动核心/系统代理/TUN")
                 .text_color(move || theme().muted_foreground),
         )
         .child(
@@ -118,7 +119,9 @@ pub(crate) fn config_page() -> impl IntoElement {
                     .get()
                     .map(|preview| {
                         format!(
-                            "上次成功生成：{} 个节点 · {} 条警告 · 缺失规则集 {} 个",
+                            "上次成功生成：{} · {} · {} 个节点 · {} 条警告 · 缺失规则集 {} 个",
+                            preview.core_type(),
+                            preview.format().label(),
                             preview.node_count(),
                             preview.warnings().len(),
                             preview.missing_tags().len(),
@@ -165,8 +168,8 @@ pub(crate) fn config_page() -> impl IntoElement {
                         error_state
                             .preview
                             .get()
-                            .map(|preview| preview.json().to_owned())
-                            .unwrap_or_else(|| "点击「生成配置预览」查看完整 sing-box JSON。".to_owned())
+                            .map(|preview| preview.content().to_owned())
+                            .unwrap_or_else(|| "点击「生成配置预览」查看完整 sing-box JSON / Mihomo YAML。".to_owned())
                     })
                     .selectable(true)
                     .text_size(px(12.0))

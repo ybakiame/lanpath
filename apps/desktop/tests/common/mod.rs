@@ -18,11 +18,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// 本地 HTTP 响应描述。
+/// 本地 HTTP 响应描述。`body` 支持 `{addr}` 占位符（服务时替换为服务器
+/// 实际地址，release JSON 可回指本服务器资产）；二进制归档直接给字节。
 pub struct TestRoute {
     pub path: String,
     pub status: u16,
-    pub body: String,
+    pub body: Vec<u8>,
     pub delay: Duration,
 }
 
@@ -31,7 +32,25 @@ impl TestRoute {
         Self {
             path: path.to_owned(),
             status: 200,
-            body: body.to_string(),
+            body: body.to_string().into_bytes(),
+            delay: Duration::ZERO,
+        }
+    }
+
+    pub fn ok_bytes(path: &str, body: Vec<u8>) -> Self {
+        Self {
+            path: path.to_owned(),
+            status: 200,
+            body,
+            delay: Duration::ZERO,
+        }
+    }
+
+    pub fn with_status(path: &str, status: u16, body: &str) -> Self {
+        Self {
+            path: path.to_owned(),
+            status,
+            body: body.to_string().into_bytes(),
             delay: Duration::ZERO,
         }
     }
@@ -40,7 +59,16 @@ impl TestRoute {
         Self {
             path: path.to_owned(),
             status: 200,
-            body: body.to_string(),
+            body: body.to_string().into_bytes(),
+            delay,
+        }
+    }
+
+    pub fn delayed_bytes(path: &str, body: Vec<u8>, delay: Duration) -> Self {
+        Self {
+            path: path.to_owned(),
+            status: 200,
+            body,
             delay,
         }
     }
@@ -81,13 +109,17 @@ impl TestServer {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_requests = requests.clone();
         let thread_stop = stop.clone();
+        let thread_addr = addr.to_string();
         std::thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let requests = thread_requests.clone();
                         let routes = routes.clone();
-                        std::thread::spawn(move || handle_connection(stream, requests, routes));
+                        let addr = thread_addr.clone();
+                        std::thread::spawn(move || {
+                            handle_connection(stream, requests, routes, addr)
+                        });
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(5)),
                 }
@@ -127,7 +159,7 @@ impl Drop for TestServer {
 struct Route {
     path: String,
     status: u16,
-    body: String,
+    body: Vec<u8>,
     delay: Duration,
 }
 
@@ -135,6 +167,7 @@ fn handle_connection(
     mut stream: TcpStream,
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
     routes: Vec<Route>,
+    addr: String,
 ) {
     let mut head = Vec::new();
     let mut buffer = [0_u8; 4096];
@@ -173,7 +206,12 @@ fn handle_connection(
     });
     let (status, body, delay) = match route {
         Some(route) => (route.status, route.body.clone(), route.delay),
-        None => (404, String::new(), Duration::ZERO),
+        None => (404, Vec::new(), Duration::ZERO),
+    };
+    // release JSON 里的 `{addr}` 回指本服务器资产地址。
+    let body = match std::str::from_utf8(&body) {
+        Ok(text) if text.contains("{addr}") => text.replace("{addr}", &addr).into_bytes(),
+        _ => body,
     };
     requests
         .lock()
@@ -188,10 +226,12 @@ fn handle_connection(
         "ERR"
     };
     let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/octet-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n",
         length = body.len(),
     );
-    let _ = stream.write_all(response.as_bytes());
+    let mut bytes = response.into_bytes();
+    bytes.extend_from_slice(&body);
+    let _ = stream.write_all(&bytes);
 }
 
 /// NSH storage 的内存后端：以预置条目启动并记录写入，测试直接断言其状态。

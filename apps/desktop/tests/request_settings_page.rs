@@ -42,12 +42,16 @@ fn navigating_to_the_request_settings_page_shows_modes_and_scope_notes() {
     }
 }
 
-/// 新装数据根默认直连、只读不写盘：仅打开页面不会创建 client.json。
+/// 新装数据根默认直连：数据根初始化已建 app.toml（统一 TOML 布局），
+/// 页面只读——打开页面不额外改写配置文件字节，也不产生 client.json。
 #[test]
 fn fresh_root_defaults_to_direct_and_never_writes_config_on_read() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
     app.wait_for("尚无订阅。").unwrap();
+    let app_toml = dir.path().join("app.toml");
+    assert!(app_toml.is_file(), "数据根初始化必须已建 app.toml");
+    let before = std::fs::read(&app_toml).unwrap();
     open_request_settings(&mut app);
     let seen = texts(&app);
     assert!(
@@ -55,7 +59,12 @@ fn fresh_root_defaults_to_direct_and_never_writes_config_on_read() {
         "{seen:?}"
     );
     assert!(seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
-    assert!(!dir.path().join("client.json").exists(), "读取页面不得写盘");
+    assert_eq!(
+        std::fs::read(&app_toml).unwrap(),
+        before,
+        "读取页面不得改写配置字节"
+    );
+    assert!(!dir.path().join("client.json").exists());
 }
 
 /// 自定义模式 + 代理地址 + GitHub 前缀保存：提示、已保存摘要更新，
@@ -145,12 +154,15 @@ fn switching_modes_keeps_the_custom_url_draft() {
     assert_eq!(saved.request_proxy_url, "socks5://127.0.0.1:1080");
 }
 
-/// 非法自定义代理：错误不含用户名/密码/完整 URL，草稿保留，新装根不写盘。
+/// 非法自定义代理：错误不含用户名/密码/完整 URL，草稿保留，保存失败
+/// 不改写 app.toml 字节（新装默认仍是最初持久化的直连）。
 #[test]
 fn invalid_custom_proxy_shows_a_redacted_error_and_keeps_the_draft() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
     app.wait_for("尚无订阅。").unwrap();
+    let app_toml = dir.path().join("app.toml");
+    let before = std::fs::read(&app_toml).unwrap();
     open_request_settings(&mut app);
 
     app.press("id:request-mode-custom").unwrap();
@@ -172,11 +184,12 @@ fn invalid_custom_proxy_shows_a_redacted_error_and_keeps_the_draft() {
             "screen leaked {secret}: {seen:?}"
         );
     }
-    // 草稿保留待修改；新装根仍无配置落盘。
+    // 草稿保留待修改；保存失败不改写配置字节，已保存值仍是新装默认直连。
     assert_eq!(
         app.screen().input_text("id:request-custom-url").unwrap(),
         Some(bad_url)
     );
+    assert_eq!(std::fs::read(&app_toml).unwrap(), before);
     assert!(!dir.path().join("client.json").exists());
     assert!(texts(&app).contains(&"已保存：直连（不使用代理） · GitHub 镜像未配置"));
 }

@@ -427,7 +427,7 @@ fn refresh_failure_shows_the_real_error_without_fake_success() {
     let server = TestServer::new(vec![TestRoute {
         path: "/bad.yaml".to_owned(),
         status: 500,
-        body: String::new(),
+        body: Vec::new(),
         delay: Duration::ZERO,
     }]);
     let (_dir, entries) = data_root();

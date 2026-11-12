@@ -25,12 +25,16 @@ fn fresh_install_loads_direct_none_pins_root_and_never_writes_on_read() {
     let temporary = tempfile::tempdir().unwrap();
     let service = RequestSettings::for_root(temporary.path()).unwrap();
 
+    // 数据根初始化已建统一 TOML 布局（app.toml），新装默认直连已持久化；
+    // 页面自身只读，不额外改写文件字节。
+    let app = temporary.path().join("app.toml");
+    assert!(app.is_file());
+    let before = std::fs::read(&app).unwrap();
     let document = service.load().unwrap();
     assert_eq!(document.mode(), RequestProxyMode::None);
     assert!(document.custom_url().is_empty());
     assert!(document.github_prefix().is_empty());
-    // 读取不无故写盘：新装根上 client.json 仍不存在。
-    assert!(!temporary.path().join("client.json").exists());
+    assert_eq!(std::fs::read(&app).unwrap(), before, "读取不得写盘");
 
     // 首次保存写入文件；load_for_requests 立即可读且 data_dir 固定本根。
     service
@@ -170,7 +174,7 @@ fn invalid_custom_proxy_redacts_credentials_and_keeps_prior_saved_document() {
     config.rule_mode = "direct".into();
     config.mitm_enabled = true;
     config.save().unwrap();
-    let file = temporary.path().join("client.json");
+    let file = temporary.path().join("app.toml");
     let prior = std::fs::read(&file).unwrap();
     for url in [
         "http://secret-user:secret-password@127.0.0.1:8080/private",
@@ -211,7 +215,7 @@ fn reads_leave_existing_file_bytes_untouched() {
             "https://mirror.example".into(),
         ))
         .unwrap();
-    let file = temporary.path().join("client.json");
+    let file = temporary.path().join("app.toml");
     let original = std::fs::read(&file).unwrap();
     service.load().unwrap();
     let reopened = RequestSettings::for_root(temporary.path()).unwrap();
@@ -225,8 +229,9 @@ fn reads_leave_existing_file_bytes_untouched() {
 fn corrupt_config_returns_real_error_and_is_never_rewritten_to_defaults() {
     let temporary = tempfile::tempdir().unwrap();
     let service = RequestSettings::for_root(temporary.path()).unwrap();
-    let file = temporary.path().join("client.json");
-    std::fs::write(&file, b"{ not valid json").unwrap();
+    // 统一布局下权威配置是 app.toml：损坏它必须真实报错，绝不重写为默认。
+    let file = temporary.path().join("app.toml");
+    std::fs::write(&file, b"not valid toml =").unwrap();
     let bytes = std::fs::read(&file).unwrap();
 
     let load_error = service.load().err().expect("损坏配置必须返回真实错误");

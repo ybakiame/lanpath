@@ -1,5 +1,6 @@
 //! 请求设置业务：订阅刷新与远程资源请求的网络请求策略（代理模式 +
-//! 自定义代理 URL + GitHub 镜像前缀），读写本应用数据根 `client.json`。
+//! 自定义代理 URL + GitHub 镜像前缀），读写本应用数据根 `app.toml` 的
+//! `[client]` 段（统一 TOML 布局，数据根初始化时创建）。
 //! 从 apps/gpui 的 `business/request_settings.rs` 迁移并适配为 NSH 桌面
 //! 数据根（`load_for_requests` 语义）：不读取/迁移其他应用数据，不启动
 //! 核心、系统代理或 TUN。
@@ -110,22 +111,17 @@ impl RequestSettings {
 }
 
 /// 本应用的网络请求配置：共享 `load_for_requests` 读请求设置，`data_dir`
-/// 由它固定为本应用数据根，不信任文件里的旧路径。已有配置原样保留
+/// 由它固定为本应用数据根，不信任文件里的旧路径。统一 TOML 布局下配置
+/// 固定为 `app.toml`（数据根初始化已建并持久化新装默认：直连 `None`、
+/// `mitm_enabled=false`，与 GPUI 为新配置设定的策略一致，避免环境系统
+/// 代理把订阅地址转发到第三方）。已有配置原样保留
 /// `request_proxy_mode` / `request_proxy_url` / `github_proxy_prefix` 等
-/// 请求字段（active 的保存不改写它们，刷新遵守已保存策略）；只有新装
-/// （数据根还没有 `client.json` / `app.toml`）才设直连 `None`，与 GPUI
-/// 为新配置设定的策略一致，避免环境系统代理把订阅地址转发到第三方。
+/// 请求字段（active 的保存不改写它们，刷新遵守已保存策略）。
 ///
 /// 订阅刷新（`Subscriptions::refresh`）与本页保存共用这一个入口，
 /// 保证新装默认与请求策略读取不分叉。
 pub(crate) fn load_request_config(root: &Path) -> LanpathResult<ClientConfig> {
-    let fresh_install = !root.join("client.json").exists()
-        && !lanpath_client::settings::app_settings_path(root).exists();
-    let mut config = ClientConfig::load_for_requests(root)?;
-    if fresh_install {
-        config.request_proxy_mode = RequestProxyMode::None;
-    }
-    Ok(config)
+    ClientConfig::load_for_requests(root)
 }
 
 #[cfg(test)]

@@ -4,6 +4,9 @@
 //! 链接、所有权、租约和路径安全约束与 GPUI 版本一致，不削弱。GPUI 的便携模式
 //! 依赖可执行文件目录布局，NSH 桌面不提供便携模式：只有默认目录与显式覆盖
 //! （`LANPATH_DESKTOP_DATA_DIR` 环境变量或宿主预置的 NSH storage 键）。
+//! 准入全部通过并持锁后初始化统一 TOML 存储（`app.toml` +
+//! `subscriptions.toml`，见 `storage_init` 模块；breaking change，
+//! 旧 JSON 测试布局明确拒绝）。
 
 use lanpath_common::{LanpathError, LanpathResult};
 use std::collections::HashMap;
@@ -117,6 +120,9 @@ impl DataRoot {
         }
         check_owner(&path)?;
         check_tree(&path)?;
+        // 归属/树/独占锁全部就绪后，先初始化统一 TOML 存储（旧 JSON 测试
+        // 布局明确拒绝，见 storage_init 模块），再建日志/缓存目录与身份。
+        crate::storage_init::initialize(&path)?;
         fs::create_dir_all(path.join("logs"))?;
         fs::create_dir_all(path.join("cache"))?;
         let id = identity::load_or_create(&path)?;

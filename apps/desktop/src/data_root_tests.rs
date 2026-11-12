@@ -27,11 +27,14 @@ fn absent_and_empty_roots_become_canonical_persistent_owned_directories() {
         assert!(path.join(LOCK_FILE).is_file());
         assert!(path.join("logs").is_dir());
         assert!(path.join("cache").is_dir());
-        fs::write(path.join("subscriptions.json"), b"saved source").unwrap();
+        // 统一 TOML 布局随初始化创建。
+        assert!(path.join("app.toml").is_file());
+        assert!(path.join("subscriptions.toml").is_file());
+        fs::write(path.join("profiles.json"), b"saved source").unwrap();
         drop(root);
         let reopened = DataRoot::open(&path).unwrap();
         assert_eq!(
-            fs::read(reopened.path().join("subscriptions.json")).unwrap(),
+            fs::read(reopened.path().join("profiles.json")).unwrap(),
             b"saved source"
         );
     }
@@ -193,20 +196,26 @@ fn contenders_do_not_create_logs_or_cache_before_acquiring_the_lock() {
 }
 
 #[test]
-fn stored_subscription_files_are_preserved_on_reopen() {
+fn business_files_are_preserved_on_reopen() {
     let temporary = tempfile::tempdir().unwrap();
     let root = DataRoot::open(temporary.path()).unwrap();
-    let names = ["subscriptions.json", "cache/subscription_cache/a.json"];
-    for name in names {
-        let path = root.path().join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, name.as_bytes()).unwrap();
+    // 不属于迁移的业务文件（profiles.json / config_slices.json）与统一
+    // TOML 布局文件都必须跨重开原样保留。
+    for name in ["profiles.json", "config_slices.json"] {
+        fs::write(root.path().join(name), name.as_bytes()).unwrap();
     }
+    let app = fs::read(root.path().join("app.toml")).unwrap();
+    let subscriptions = fs::read(root.path().join("subscriptions.toml")).unwrap();
     drop(root);
     let root = DataRoot::open(temporary.path()).unwrap();
-    for name in names {
+    for name in ["profiles.json", "config_slices.json"] {
         assert_eq!(fs::read(root.path().join(name)).unwrap(), name.as_bytes());
     }
+    assert_eq!(fs::read(root.path().join("app.toml")).unwrap(), app);
+    assert_eq!(
+        fs::read(root.path().join("subscriptions.toml")).unwrap(),
+        subscriptions
+    );
 }
 
 #[test]

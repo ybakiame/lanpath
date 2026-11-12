@@ -246,7 +246,8 @@ impl Subscriptions {
         }
     }
 
-    /// 当前生效订阅（持久化在本应用 `client.json` 的 `active_subscription_id`）。
+    /// 当前生效订阅（持久化在本应用 `app.toml` 的 `[client]` 段
+    /// `active_subscription_id`）。
     pub(crate) fn active_id(&self) -> LanpathResult<Option<Uuid>> {
         let _guard = self.root.business_guard();
         Ok(load_request_config(self.root.path())?.active_subscription_id)

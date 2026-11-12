@@ -188,7 +188,7 @@ fn seed_cache(root: &std::path::Path, id: uuid::Uuid) {
         .expect("write cached content");
 }
 
-/// 读改写本根 `client.json`（经共享 `load_for_requests` 语义）。
+/// 读改写本根 `app.toml`（经共享 `load_for_requests` 语义）。
 fn edit_config(root: &std::path::Path, edit: impl FnOnce(&mut ClientConfig)) {
     let mut config = crate::request_settings::load_request_config(root).expect("load config");
     edit(&mut config);
@@ -196,7 +196,7 @@ fn edit_config(root: &std::path::Path, edit: impl FnOnce(&mut ClientConfig)) {
 }
 
 fn parsed_json(preview: &ConfigPreview) -> serde_json::Value {
-    serde_json::from_str(preview.json()).expect("preview is valid JSON")
+    serde_json::from_str(preview.content()).expect("preview is valid JSON")
 }
 
 #[tokio::test]
@@ -244,19 +244,154 @@ async fn compose_rejects_a_disabled_active_subscription() {
     assert!(error.to_string().contains("所选订阅已停用"));
 }
 
+/// 种子 Mihomo 库存核心并保存选择（统一布局 core_type 由 [core].kind
+/// 投影：Mihomo 只能来自 Mihomo 核心选择）。
+fn seed_mihomo_selection(root: &std::path::Path) {
+    let mihomo = root.join("cores/mihomo/1.19.29/mihomo");
+    std::fs::create_dir_all(mihomo.parent().unwrap()).unwrap();
+    std::fs::write(&mihomo, b"inventory fixture").unwrap();
+    edit_config(root, |config| {
+        config.core_binary = mihomo.clone();
+    });
+}
+
+/// Mihomo 订阅配置合成（GPUI Mihomo 分支同路径）：真实 Clash 订阅原文
+/// 提取代理，输出 YAML（不是 JSON）——关键字段、节点、端口真实，面板
+/// 下载字段移除，全程离线（Core 策略 + 本地缓存）。
 #[tokio::test]
-async fn compose_rejects_mihomo_with_an_explicit_unsupported_error() {
+async fn compose_mihomo_subscription_to_yaml_with_key_fields() {
     let temporary = tempfile::tempdir().unwrap();
     let (subscriptions, _, composer) = services(temporary.path());
     let id = add_active(&subscriptions, "Mihomo 订阅", "https://example.com/m.yaml");
     seed_cache(temporary.path(), id);
+    seed_mihomo_selection(temporary.path());
     edit_config(temporary.path(), |config| {
-        config.core_type = CoreType::Mihomo;
+        config.request_proxy_mode = RequestProxyMode::Core;
     });
-    let error = composer.compose().await.expect_err("mihomo unsupported");
-    let message = error.to_string();
-    assert!(message.contains("Mihomo"), "{message}");
-    assert!(message.contains("暂不支持"), "{message}");
+
+    let preview = composer.compose().await.expect("mihomo composes");
+    assert_eq!(preview.format(), super::PreviewFormat::Yaml);
+    assert_eq!(preview.format().label(), "YAML");
+    assert_eq!(preview.core_type(), CoreType::Mihomo);
+    assert_eq!(preview.node_count(), 2);
+    // 输出按 YAML 解析（JSON 解析器也能读 YAML 子集，这里用 serde_yaml
+    // 验证它确实是合法 YAML），并断言关键字段。
+    let value: serde_json::Value =
+        serde_yaml::from_str(preview.content()).expect("YAML preview parses");
+    assert_eq!(value["mixed-port"], 17890);
+    assert_eq!(value["allow-lan"], false);
+    assert_eq!(value["bind-address"], "127.0.0.1");
+    assert_eq!(value["mode"], "rule");
+    assert_eq!(value["external-controller"], "127.0.0.1:9090");
+    assert!(value.get("secret").is_none(), "空密钥不写入 secret");
+    // 两个订阅节点经原始 Clash 原文进入 proxies，代理组真实引用它们。
+    let proxies = value["proxies"].as_array().expect("proxies array");
+    let names: Vec<&str> = proxies
+        .iter()
+        .filter_map(|proxy| proxy["name"].as_str())
+        .collect();
+    assert!(names.contains(&"节点甲"), "{names:?}");
+    assert!(names.contains(&"节点乙"), "{names:?}");
+    let groups = value["proxy-groups"].as_array().expect("proxy-groups");
+    assert!(groups.iter().any(|group| {
+        group["proxies"]
+            .as_array()
+            .is_some_and(|nodes| nodes.len() == 2)
+    }));
+    // 面板目录/下载地址不得出现在预览（避免任何消费方触发面板下载）。
+    assert!(value.get("external-ui").is_none());
+    assert!(value.get("external-ui-url").is_none());
+}
+
+/// 无 Clash 原文时按共享转换逐节点生成 Mihomo 代理（sing-box 缓存路径）。
+#[tokio::test]
+async fn compose_mihomo_falls_back_to_converting_cached_nodes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (subscriptions, _, composer) = services(temporary.path());
+    let id = add_active(&subscriptions, "Mihomo 订阅", "https://example.com/m.yaml");
+    // 只写节点缓存、不写原文：走 sing-box 节点 → Mihomo 代理的共享转换。
+    let store = SubscriptionStore::new(temporary.path().to_path_buf());
+    let fetched = parse_subscription_body(YAML, None).unwrap();
+    store
+        .write_cached_content(
+            id,
+            &CachedSubscriptionContent {
+                format: fetched.format,
+                singbox_nodes: fetched.singbox_nodes,
+            },
+        )
+        .unwrap();
+    seed_mihomo_selection(temporary.path());
+    edit_config(temporary.path(), |config| {
+        config.request_proxy_mode = RequestProxyMode::Core;
+    });
+
+    let preview = composer.compose().await.expect("mihomo composes");
+    let value: serde_json::Value = serde_yaml::from_str(preview.content()).unwrap();
+    let proxies = value["proxies"].as_array().expect("proxies array");
+    let names: Vec<&str> = proxies
+        .iter()
+        .filter_map(|proxy| proxy["name"].as_str())
+        .collect();
+    assert!(names.contains(&"节点甲"), "{names:?}");
+    assert!(names.contains(&"节点乙"), "{names:?}");
+    assert!(
+        proxies
+            .iter()
+            .all(|proxy| proxy["type"] == serde_json::json!("ss"))
+    );
+}
+
+/// 非默认 sing-box 配置切片在 Mihomo 合成中只警告、不应用（切片内容
+/// 保留，供切换回 sing-box）；无定制切片时不出现该警告。
+#[tokio::test]
+async fn compose_mihomo_warns_but_does_not_apply_custom_slices() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (subscriptions, _, composer) = services(temporary.path());
+    let id = add_active(&subscriptions, "Mihomo 订阅", "https://example.com/m.yaml");
+    seed_cache(temporary.path(), id);
+    seed_mihomo_selection(temporary.path());
+    edit_config(temporary.path(), |config| {
+        config.request_proxy_mode = RequestProxyMode::Core;
+    });
+    // 用户定制切片（非内置分组）：写入一个自定义 selector。
+    std::fs::write(
+        temporary.path().join("config_slices.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 2,
+            "outbounds": {
+                "items": [{
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "name": "custom-selector",
+                    "enabled": true,
+                    "type": "selector",
+                    "outbounds": ["slice-auto"],
+                    "default": "slice-auto"
+                }]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let preview = composer.compose().await.expect("mihomo composes");
+    assert!(
+        preview
+            .warnings()
+            .iter()
+            .any(|warning| warning.contains("未应用 sing-box 配置切片")),
+        "{:?}",
+        preview.warnings()
+    );
+    // 切片不被应用：自定义 selector 不出现在 Mihomo 配置里。
+    let value: serde_json::Value = serde_yaml::from_str(preview.content()).unwrap();
+    let groups = value["proxy-groups"].as_array().expect("proxy-groups");
+    assert!(
+        groups
+            .iter()
+            .all(|group| group["name"] != serde_json::json!("slice-custom-selector")),
+        "{groups:?}"
+    );
 }
 
 #[tokio::test]

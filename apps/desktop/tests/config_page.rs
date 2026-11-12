@@ -15,11 +15,11 @@ use lanpath_client::{
 
 const YAML: &str = "proxies:\n  - name: 节点甲\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n  - name: 节点乙\n    type: ss\n    server: 192.0.2.2\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n";
 
-const DISCLAIMER: &str = "共享合成预览，未进行核心二进制校验 · 按当前生效订阅与已保存设置合成 sing-box JSON · 不启动核心/系统代理/TUN";
+const DISCLAIMER: &str = "共享合成预览，未进行核心二进制校验 · 按当前生效订阅与已保存设置合成 sing-box JSON / Mihomo YAML · 不启动核心/系统代理/TUN";
 
-/// 先用应用本身初始化数据根（写归属标记），再落种子数据——直接把
-/// `client.json` 写进未归属目录会被准入当作生产根拒绝（与请求设置页
-/// 测试的预置方式一致）。
+/// 先用应用本身初始化数据根（写归属标记与统一 TOML 布局），再落种子
+/// 数据——直接把配置文件写进未归属目录会被准入当作生产根拒绝（与请求
+/// 设置页测试的预置方式一致）。
 fn init_data_root(entries: &std::collections::BTreeMap<String, String>) {
     let mut app = start_app(entries.clone()).0;
     app.wait_for("尚无订阅。").unwrap();
@@ -93,7 +93,7 @@ fn config_page_opens_with_disclaimer_and_idle_state() {
     assert!(seen.contains(&DISCLAIMER), "{seen:?}");
     assert!(seen.contains(&"生成配置预览"), "{seen:?}");
     assert!(
-        seen.contains(&"点击「生成配置预览」查看完整 sing-box JSON。"),
+        seen.contains(&"点击「生成配置预览」查看完整 sing-box JSON / Mihomo YAML。"),
         "{seen:?}"
     );
 }
@@ -111,8 +111,11 @@ fn composing_renders_the_full_json_summary_and_warnings() {
     let mut app = start_app(entries).0;
     open_config_page(&mut app);
     app.press("生成配置预览").unwrap();
-    app.wait_for_within("text:/上次成功生成：2 个节点/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
     app.wait_for_within("text:/内置规则集缺失/", Duration::from_secs(10))
         .unwrap();
 
@@ -155,8 +158,11 @@ fn busy_is_single_flight_and_recovers_after_completion() {
     // 在途重复点击：不启动第二个合成任务。
     app.press("生成配置预览").unwrap();
     assert!(texts(&app).contains(&"正在合成配置预览…"));
-    app.wait_for_within("text:/上次成功生成：2 个节点/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
 
     let hits = server
         .recorded()
@@ -168,8 +174,11 @@ fn busy_is_single_flight_and_recovers_after_completion() {
 
     // busy 恢复：再次点击立即重新生成（已有缓存，离线完成）。
     app.press("生成配置预览").unwrap();
-    app.wait_for_within("text:/上次成功生成：2 个节点/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
 }
 
 /// 失败保留旧预览：同一会话里第二次合成失败时显示真实错误，上次成功的
@@ -185,8 +194,11 @@ fn failure_keeps_the_previous_preview_and_shows_the_real_error() {
     let mut app = start_app(entries).0;
     open_config_page(&mut app);
     app.press("生成配置预览").unwrap();
-    app.wait_for_within("text:/上次成功生成：2 个节点/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
 
     // 生效订阅在页面外被停用（直接落盘构造“生效但停用”的存量状态）；
     // 预览状态保留在页面内，不随这次外部修改消失。
@@ -209,7 +221,7 @@ fn failure_keeps_the_previous_preview_and_shows_the_real_error() {
     // 旧预览与摘要保留，不伪报新成功。
     assert!(
         seen.iter()
-            .any(|text| text.contains("上次成功生成：2 个节点")),
+            .any(|text| text.contains("上次成功生成：sing-box · JSON · 2 个节点")),
         "{seen:?}"
     );
     let json = json_text(&app).expect("previous preview JSON kept");
@@ -246,31 +258,53 @@ fn leaving_the_page_mid_compose_does_not_stay_busy() {
     // 第二次合成离线完成，busy 只在短时间内闪烁）。
     std::thread::sleep(Duration::from_millis(700));
     app.press("生成配置预览").unwrap();
-    app.wait_for_within("text:/上次成功生成：2 个节点/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
     assert!(!texts(&app).contains(&"正在合成配置预览…"));
 }
 
-/// 已保存 core_type = Mihomo：明确报“暂不支持”，不走 sing-box 错误路径。
+/// 已保存 Mihomo 核心选择：配置页真实合成 Mihomo YAML 预览（GPUI
+/// Mihomo 分支同路径）——摘要显示格式，正文是 YAML 关键字段/节点/端口，
+/// 面板下载字段移除，不伪报 JSON。
 #[test]
-fn mihomo_is_explicitly_unsupported() {
+fn mihomo_selection_composes_a_yaml_preview() {
     let (dir, entries) = data_root();
     init_data_root(&entries);
     let id = seed_active_subscription(dir.path(), "https://example.com/m.yaml");
     seed_cache(dir.path(), id);
     save_request_mode(dir.path(), RequestProxyMode::Core, "");
+    let mihomo = dir.path().join("cores/mihomo/1.19.29/mihomo");
+    std::fs::create_dir_all(mihomo.parent().unwrap()).unwrap();
+    std::fs::write(&mihomo, b"inventory fixture").unwrap();
     let mut config = lanpath_client::ClientConfig::load_for_requests(dir.path()).unwrap();
-    config.core_type = lanpath_common::CoreType::Mihomo;
+    config.core_binary = mihomo;
     config.save().unwrap();
 
     let mut app = start_app(entries).0;
     open_config_page(&mut app);
     app.press("生成配置预览").unwrap();
-    app.wait_for_within("text:/暂不支持 Mihomo/", Duration::from_secs(10))
-        .unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：mihomo · YAML · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
     let seen = texts(&app);
+    let yaml = seen
+        .iter()
+        .find(|text| text.contains("mixed-port"))
+        .expect("YAML preview on screen");
+    assert!(yaml.contains("mixed-port: 17890"), "{yaml}");
+    assert!(yaml.contains("节点甲"), "{yaml}");
+    assert!(yaml.contains("节点乙"), "{yaml}");
+    assert!(yaml.contains("external-controller"), "{yaml}");
+    assert!(!yaml.contains("external-ui"), "面板下载字段必须移除:{yaml}");
     assert!(
-        !seen.iter().any(|text| text.contains("上次成功生成")),
-        "Mihomo 不得伪报成功:{seen:?}"
+        !yaml.contains("\"outbounds\""),
+        "Mihomo 预览不得是 sing-box JSON:{yaml}"
     );
+    // 明确文案始终可见，绝不显示“已验证/已启动”。
+    assert!(texts(&app).contains(&DISCLAIMER));
 }

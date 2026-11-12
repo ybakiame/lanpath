@@ -4,6 +4,8 @@ use nsh_core::storage::Storage;
 
 mod config_composer;
 mod config_view;
+mod core_inventory;
+mod core_view;
 mod data_root;
 mod disk_log_writer;
 mod disk_logs_view;
@@ -16,6 +18,7 @@ mod profiles;
 mod profiles_view;
 mod request_settings;
 mod request_settings_view;
+mod storage_init;
 mod subscriptions;
 mod subscriptions_view;
 #[cfg(windows)]
@@ -29,6 +32,7 @@ use request_settings_view::request_settings_page;
 use subscriptions_view::subscription_page;
 
 use config_view::config_page;
+use core_view::core_page;
 
 /// Where the appearance page keeps the user's choice between launches.
 const APPEARANCE_KEY: &str = "appearance";
@@ -44,6 +48,7 @@ enum Page {
     Subscription,
     RequestSettings,
     Profiles,
+    Core,
     Config,
     Logs,
     Appearance,
@@ -129,6 +134,7 @@ pub fn App() -> impl IntoElement {
                     request_settings_page,
                 ))
                 .child(when(move || page.get() == Page::Profiles, profiles_page))
+                .child(when(move || page.get() == Page::Core, core_page))
                 .child(when(move || page.get() == Page::Config, config_page))
                 .child(when(move || page.get() == Page::Logs, logs_page))
                 .child(when(
@@ -148,13 +154,14 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
         .bg(move || theme().card)
         .child(text("Lanpath NSH Desktop").text_size(px(17.0)))
         .child(
-            text("纯 Rust · NSH 0.5.0 · 仅新增/刷新按需联网，不启动核心/系统代理")
+            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网，不启动核心/系统代理")
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
         .child(nav_item(page, Page::Subscription, "订阅"))
         .child(nav_item(page, Page::RequestSettings, "请求设置"))
         .child(nav_item(page, Page::Profiles, "覆写"))
+        .child(nav_item(page, Page::Core, "核心"))
         .child(nav_item(page, Page::Config, "配置"))
         .child(nav_item(page, Page::Logs, "日志"))
         .child(nav_item(page, Page::Appearance, "外观"))

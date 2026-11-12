@@ -2,13 +2,74 @@
 
 ## [Unreleased]
 
+- 扩展 `apps/desktop` 新增真实“核心”页与业务：核心库存与下载/选择，复用共享
+  `lanpath-client::core_management::CoreManagementService::experimental`（confined
+  策略，与 GPUI 同一共享语义），只管理本数据根 `cores/<binary>/<version>/` 下的
+  真实核心文件。sing-box/Mihomo 库存类型切换（实际选中独立显示，active 为空显示
+  “尚未选择核心”）、稳定/预发布通道（远端仅 stable/prerelease）、查询远端版本、
+  下载指定已查询版本（共享语义：下载 + version probe 验证 + 自动选中 + 按通道
+  保留当前与前一版本）、选择本地真实版本、带确认地删除非 active 版本（共享层拒绝
+  删除 active/越界/链接核心）；Mihomo 文件名/版本规范全走共享函数，不自造规则。
+  页面固定文案“仅管理本数据根 cores/ 下的核心文件，不启动核心/系统代理/TUN”；
+  选 Mihomo 后提示配置页预览暂不支持。远端查询/下载按共享库存现有实现消费已保存
+  ClientConfig 请求策略（`request_client_builder` + GitHub 镜像前缀），GitHub API
+  base 仅测试可注入（storage 键/环境变量），生产仍 GitHub；日志不记 token、完整
+  带凭据 URL 或完整本地路径。busy 全局单飞，失败保留旧列表并显示真实错误，下载
+  进度只显示共享真实阶段不伪造 byte 百分比，操作在 background 执行、Signal 只在
+  UI 线程回写，任务挂页面级 owner（离页取消 UI 轮询、重进不永久 busy）。跨页面
+  mutation 互斥在业务层：同根所有 `CoreInventory` 句柄共享一把 try_acquire 锁，
+  下载/选择/删除在途时其余 mutation 立即报“另一项核心库存操作正在进行，请稍后
+  重试”（绝不排队），锁覆盖整个 mutation（可跨 await），只读查询不加锁；下载不
+  包含 wintun/TUN 资源（confined 策略不取 TUN 附件，TUN 资源将来单独处理）。
+  本切片不启动核心/停止/配置校验，不接核心日志流，不做环境核心覆盖。
+- `apps/desktop` 数据根切换到与 GPUI 一致的统一 TOML 权威布局（breaking
+  change，不提供旧数据迁移）：`app.toml` 承载 `[client]`（请求策略、
+  `active_subscription_id` 等）与 `[core]`（核心选择，由共享
+  `settings`/`core_management` 正常管理），`subscriptions.toml` 承载订阅清单，
+  订阅原文/节点缓存在 `cache/subscriptions/`，覆写模板远程缓存在
+  `cache/profiles/`；`profiles.json`、`config_slices.json`、`logs/` 保持原样。
+  数据根准入（归属/树/独占锁）完成后只做很小的统一存储初始化：新根直接建
+  `app.toml`（`[client]` 新装默认：直连 `request_proxy_mode=none`、
+  `mitm_enabled=false`、`data_dir` 本根）与 `subscriptions.toml`，已有统一根
+  原样保留、绝不重复改写。存在早期切片的 JSON 测试布局（`client.json`/
+  `subscriptions.json`/`subscription_cache`/`profile_cache`）时明确报“旧测试
+  配置布局不受支持，请使用新的数据根”——本应用为无实际用户的本地迭代产品，
+  不迁移、不静默忽略或清空旧文件，也不读取其他应用的数据根。请求设置页
+  “只读不写盘”语义相应明确为：启动初始化已建 `app.toml`，页面自身不额外改写
+  文件字节。共享 `core_management` 保持 `experimental` 原语义（写选择统一
+  `ensure_app_settings` + `app.toml`，无 legacy 分支）；核心库存 wrapper 的
+  新装固化 workaround 随之移除，选择/下载只经共享层写 `app.toml`。
+- `apps/desktop` 配置合成预览支持 Mihomo 订阅配置合成运行（原“已保存
+  `core_type=Mihomo` 明确报暂不支持”作废）：复用 GPUI `business/config.rs`
+  Mihomo 分支——优先原始 Clash 订阅原文经 `mihomo_nodes_from_subscription`
+  提取代理（其余格式按共享转换逐节点处理，无法表示的协议真实报错），
+  `build_mihomo_config_v2` + `compose_mihomo_config(mixed_port, None)` +
+  `apply_mihomo_panel_features`，并移除顶层 `external-ui`/`external-ui-url`；
+  输出为 YAML（核心直接消费的格式），页面按 sing-box JSON / Mihomo YAML
+  展示（摘要含核心类型与格式）。远程+本地覆写链与 sing-box 同一实现；不做
+  Mihomo 结构化切片编辑，用户定制的 sing-box 配置切片只警告、不应用（内置
+  分组播种不算定制）。核心页选中 Mihomo 不再提示“配置预览暂不支持”。
+- 测试：纯 Rust，不依赖互联网。`apps/desktop` 业务 10 项新用例（空列表/类型
+  切换/选择保留配置/新装直连固化/active 删除保护/通道过滤/真实 HTTP release
+  metadata + tar.gz 归档下载解压选择剪枝/失败保留旧选择/Mihomo 共享命名与验证/
+  同根双句柄并发 mutation 拒绝与释放）+ headless 8 项新用例（页面说明与空态、
+  active 独立显示与类型切换、查询+下载真实落盘并固化新装默认、查询失败保留与
+  恢复、busy 单飞与离页恢复（含旧下载在途时新页面再下载被业务层锁立即拒绝、
+  完成后恢复）、删除确认与 active 保护、选择切换保留无关配置、Mihomo 选中摘要）；
+  统一存储初始化 2 项新用例（新根 TOML 默认与重开不改写、旧 JSON 布局逐入口
+  明确拒绝且不删不清）；配置合成 Mihomo 3 项新用例（真实 Clash 订阅→YAML
+  关键字段/节点/端口/面板字段移除、无原文按共享转换逐节点生成、定制切片
+  只警告不应用），headless 配置页 Mihomo YAML 预览 1 项；数据根准入与请求
+  设置/订阅/配置合成既有用例按统一布局调整。`tests/common` TestServer
+  扩展二进制响应体与 `{addr}` 占位符。Windows 原生验收尚待主代理执行。
+
 - 扩展 `apps/desktop` 新增真实“配置”页（共享合成预览）：从 apps/gpui 迁移
   `business/config.rs` 的 sing-box 合成语义（`build_config_report`/`panel_features`/
   `remove_dashboard_download`），按已保存配置快照在后台线程合成完整 sing-box JSON，
   页面以只读滚动区域展示 pretty JSON、生成警告与真实错误，明确文案“共享合成预览，
   未进行核心二进制校验”，绝不显示核心已验证/已启动；本切片不做核心下载/安装/校验/
-  启停，不启动核心、系统代理或 TUN，不做 Mihomo（已保存 `core_type=Mihomo` 明确报
-  暂不支持，不走 sing-box 错误路径）。合成语义：active 订阅必须存在且启用；优先本地
+  启停，不启动核心、系统代理或 TUN（Mihomo 支持见上方统一 TOML 批次：订阅配置
+  合成 YAML 预览）。合成语义：active 订阅必须存在且启用；优先本地
   节点缓存，无缓存时 Core 请求策略明确拒绝（其余模式按本次固定的 `ClientConfig` 快照
   联网刷新一次，网络途中设置页修改不改变本次策略；`Subscriptions` 新增
   `refresh_with_config` 与 `refresh` 共享同一实现，写回仍按 id/URL/UA 防 stale，业务锁
@@ -27,14 +88,14 @@
   服务器覆盖：无 active/目标不存在/已停用拒绝、无缓存 Core 拒绝且零请求、有缓存离线
   合成、缺缓存按快照刷新（在途改保存策略不影响本次）、远程+本地 YAML/JS 覆写真实作用
   于 JSON、远程覆写 404 降级警告上屏、clash api 面板下载字段剥离、切片损坏回退警告、
-  失效模板引用拒绝、busy 单飞与恢复、失败保留旧预览、离页重进不永久 busy、Mihomo
-  明示拒绝）；规则集镜像下载经本地代理 404 覆盖缺失降级路径，未访问规则集公网；
+  失效模板引用拒绝、busy 单飞与恢复、失败保留旧预览、离页重进不永久 busy）；
+  规则集镜像下载经本地代理 404 覆盖缺失降级路径，未访问规则集公网；
   无 TSX/Node 依赖；Windows 原生验收尚待主代理执行。
 
 - 扩展 `apps/desktop` 新增真实“请求设置”页与业务：从 apps/gpui 迁移请求设置
   （`business/request_settings.rs`），适配 NSH 桌面独立数据根与纯 Rust NSH 组件。
   四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用
-  `client.json`；自定义地址与 GitHub 镜像前缀草稿可编辑保存/重开恢复，保存经共享
+  `app.toml` 的 `[client]` 段；自定义地址与 GitHub 镜像前缀草稿可编辑保存/重开恢复，保存经共享
   `validate_request_proxy` 校验（scheme 限制 http/https/socks5/socks5h，拒绝带
   path/query/fragment 与端口 0，错误不回显凭据/完整 URL，非法不落盘、草稿保留）；
   非自定义模式同样保存自定义地址草稿供稍后切回（与 GPUI 一致）。保存时在同一业务锁内
@@ -74,7 +135,7 @@
   parity；使用已保存 URL/User-Agent，不把未保存表单写回；网络错误走共享脱敏路径，不把
   订阅地址写入日志；失败保留旧缓存并显示真实错误；刷新期间被编辑/删除的结果判定过期
   丢弃，不覆盖新状态；清单/配置读写经进程内互斥串行化，刷新全局单飞）、当前生效
-  订阅（持久化到本应用 `client.json` 的 `active_subscription_id`，拒绝停用/不存在项，
+  订阅（持久化到本应用 `app.toml` 的 `active_subscription_id`，拒绝停用/不存在项，
   停用或删除生效项自动清除，`data_dir` 固定本应用数据根）与最后一次成功刷新原文只读
   弹窗（无原文明确提示先刷新）。联网仅在新增/刷新时按需发生：已有配置保留并遵守已保存
   的请求代理策略，新装配置直连不读系统代理；同根句柄经 Weak 缓存共享写锁，刷新全局单飞。

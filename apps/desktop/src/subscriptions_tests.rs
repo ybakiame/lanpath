@@ -193,6 +193,8 @@ fn empty_root_loads_an_empty_subscription_list() {
     let temporary = tempfile::tempdir().unwrap();
     let service = Subscriptions::for_root(temporary.path()).unwrap();
     assert!(service.load().unwrap().is_empty());
+    // 数据根初始化已建统一 TOML 清单；不再产生 legacy subscriptions.json。
+    assert!(temporary.path().join("subscriptions.toml").is_file());
     assert!(!temporary.path().join("subscriptions.json").exists());
 }
 
@@ -241,7 +243,7 @@ fn add_rejects_invalid_input_and_existing_data_is_untouched() {
     let loaded = service.load().unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].id, kept.id);
-    let text = std::fs::read_to_string(temporary.path().join("subscriptions.json")).unwrap();
+    let text = std::fs::read_to_string(temporary.path().join("subscriptions.toml")).unwrap();
     assert!(text.contains("保留"));
     assert!(!text.contains("新订阅"));
 }
@@ -280,17 +282,21 @@ fn save_error_does_not_overwrite_existing_list() {
         .add("保留", "https://example.com/a.yaml", None)
         .unwrap();
 
-    // 把订阅文件设为只读使保存失败：读取仍正常，新增失败，
-    // 已有数据必须原样保留。
-    let file = temporary.path().join("subscriptions.json");
-    let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+    // 使保存失败：统一布局经“临时文件 + rename”落盘——Unix 上只读目录拒绝
+    // 临时文件创建；Windows 上 rename 不能替换只读目标文件。两种平台已有
+    // 数据都必须原样保留，读取不受影响。
+    #[cfg(unix)]
+    let target = temporary.path().to_path_buf();
+    #[cfg(windows)]
+    let target = temporary.path().join("subscriptions.toml");
+    let mut permissions = std::fs::metadata(&target).unwrap().permissions();
     let readonly = permissions.readonly();
     permissions.set_readonly(true);
-    std::fs::set_permissions(&file, permissions).unwrap();
+    std::fs::set_permissions(&target, permissions).unwrap();
     let result = service.add("新订阅", "https://example.com/b.yaml", None);
-    let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+    let mut permissions = std::fs::metadata(&target).unwrap().permissions();
     permissions.set_readonly(readonly);
-    std::fs::set_permissions(&file, permissions).unwrap();
+    std::fs::set_permissions(&target, permissions).unwrap();
 
     assert!(result.is_err());
     let loaded = service.load().unwrap();
@@ -571,7 +577,7 @@ fn set_active_persists_and_validates_enabled_existing_subscription() {
     service.set_active(enabled.id).unwrap();
     assert_eq!(service.active_id().unwrap(), Some(enabled.id));
 
-    // 同一数据根重开后选择仍在（client.json 持久化）。
+    // 同一数据根重开后选择仍在（app.toml 持久化）。
     let path = temporary.path().to_path_buf();
     let reopened = Subscriptions::for_root(&path).unwrap();
     assert_eq!(reopened.active_id().unwrap(), Some(enabled.id));
@@ -608,7 +614,7 @@ fn request_config_pins_proxy_mode_none_and_this_root() {
         .unwrap();
     service.set_active(added.id).unwrap();
 
-    // set_active 已把配置写回本应用 client.json；重新读取时 data_dir 由
+    // set_active 已把配置写回本应用 app.toml；重新读取时 data_dir 由
     // load_for_requests 固定为传入根（不信任文件里的旧路径），请求代理为
     // 本应用固定的直连策略。
     let config = lanpath_client::ClientConfig::load_for_requests(temporary.path()).unwrap();

@@ -3262,6 +3262,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "env_logger",
+ "flate2",
  "lanpath-client",
  "lanpath-common",
  "nsh-base",
@@ -3272,6 +3273,8 @@ dependencies = [
  "nsh-platform-windows",
  "nsh-testing",
  "serde_json",
+ "serde_yaml",
+ "tar",
  "tempfile",
  "tokio",
  "tracing",
