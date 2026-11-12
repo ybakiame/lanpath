@@ -85,8 +85,9 @@ impl Mode {
 
 /// The desktop shell: a sidebar with the app's pages and their content.
 /// Data stays in this app's own identity; nothing of Tauri/GPUI/`apps/nsh`
-/// is read or migrated, and no core, network request, system proxy or VPN
-/// is started.
+/// is read or migrated, and no core, system proxy, TUN or VPN is started.
+/// Subscription add/refresh fetch on demand over the network; nothing else
+/// talks to the network.
 #[component]
 pub fn App() -> impl IntoElement {
     let _log_service = stored(log_service::LogService::open().ok());
@@ -128,7 +129,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
         .bg(move || theme().card)
         .child(text("Lanpath NSH Desktop").text_size(px(17.0)))
         .child(
-            text("纯 Rust · NSH 0.5.0 · 不启动核心或网络请求")
+            text("纯 Rust · NSH 0.5.0 · 仅新增/刷新按需联网，不启动核心/系统代理")
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )

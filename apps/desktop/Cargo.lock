@@ -3272,6 +3272,7 @@ dependencies = [
  "nsh-platform-windows",
  "nsh-testing",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

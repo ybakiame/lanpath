@@ -1,17 +1,275 @@
-//! 订阅页：NSH 桌面独立数据根上的真实订阅列表，以及调用共享
-//! `lanpath-client` 解析固定测试订阅的共享解析验证。与订阅列表无关的
-//! 纯解析检查不发起网络请求。
+//! 订阅页：NSH 桌面独立数据根上的真实订阅列表。新增/编辑持久化到共享
+//! `lanpath-client::SubscriptionStore`；新增成功后自动后台刷新（沿用 GPUI
+//! 行为），也可对每条订阅手动刷新。联网仅在新增/刷新时按需发生，不启动
+//! 核心、系统代理或 TUN；请求使用已保存的地址/User-Agent，不在 UI 线程
+//! 联网，不把未保存表单写回。
+
+mod add_form;
+mod editor;
+mod rows;
+mod source_view;
 
 use std::sync::Arc;
 
 use lanpath_client::{Subscription, node_tags_from_nodes, parse_subscription_body};
-use nsh_base::{button, dialog, input, switch, theme};
+use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
+use uuid::Uuid;
 
-use crate::subscriptions::Subscriptions;
+use crate::subscriptions::{RefreshStatus, Subscriptions};
 
-const FIXTURE: &str = r#"proxies:
+const BUSY_REFRESHING: &str = "正在刷新订阅…";
+
+/// 编辑草稿：与列表数据分离，刷新/启停/删除/设置生效不会清空未保存修改。
+#[derive(Clone)]
+pub(super) struct EditState {
+    id: Signal<Option<Uuid>>,
+    name: Signal<String>,
+    url: Signal<String>,
+    user_agent: Signal<String>,
+    dirty: Signal<bool>,
+    error: Signal<Option<String>>,
+    confirm_discard: Signal<bool>,
+}
+
+impl EditState {
+    fn new() -> Self {
+        Self {
+            id: signal(None),
+            name: signal(String::new()),
+            url: signal(String::new()),
+            user_agent: signal(String::new()),
+            dirty: signal(false),
+            error: signal(None),
+            confirm_discard: signal(false),
+        }
+    }
+
+    fn open(&self, subscription: &Subscription) {
+        self.id.set(Some(subscription.id));
+        self.name.set(subscription.name.clone());
+        self.url.set(subscription.url.clone());
+        self.user_agent
+            .set(subscription.user_agent.clone().unwrap_or_default());
+        self.dirty.set(false);
+        self.error.set(None);
+        self.confirm_discard.set(false);
+    }
+
+    fn close(&self) {
+        self.id.set(None);
+        self.dirty.set(false);
+        self.error.set(None);
+        self.confirm_discard.set(false);
+    }
+
+    /// 取消保护：有未保存修改时先要求确认。
+    fn request_cancel(&self) {
+        if self.dirty.get() {
+            self.confirm_discard.set(true);
+        } else {
+            self.close();
+        }
+    }
+}
+
+/// 只读原文弹窗内容（最后一次成功刷新的原文）。
+#[derive(Clone, PartialEq)]
+pub(super) struct SourceView {
+    name: String,
+    source: lanpath_client::SubscriptionSource,
+}
+
+/// 订阅页状态：全部为句柄（Signal/Arc/Stored），克隆廉价。
+#[derive(Clone)]
+pub(super) struct SubscriptionPageState {
+    service: Option<Arc<Subscriptions>>,
+    list: Signal<Vec<Subscription>>,
+    active: Signal<Option<Uuid>>,
+    list_error: Signal<Option<String>>,
+    form_error: Signal<Option<String>>,
+    notice: Signal<Option<String>>,
+    /// 在途刷新的订阅 id（全局最多一个）：业务层互斥串行化写盘，这里
+    /// 单飞防并发刷新写回与任务句柄竞争，兼作忙碌提示。
+    refreshing: Signal<Vec<Uuid>>,
+    /// 交互序号：每次用户操作/刷新开始递增；晚到的异步结果只在序号未变时
+    /// 张贴，避免覆盖后续操作的反馈。
+    serial: Signal<u64>,
+    pending_remove: Signal<Option<Subscription>>,
+    edit: EditState,
+    source_view: Signal<Option<SourceView>>,
+    task: Stored<Option<Spawned<()>>>,
+}
+
+impl SubscriptionPageState {
+    fn new() -> Self {
+        match Subscriptions::open() {
+            Ok(service) => {
+                let state = Self {
+                    service: Some(service),
+                    list: signal(Vec::new()),
+                    active: signal(None),
+                    list_error: signal(None),
+                    form_error: signal(None),
+                    notice: signal(None),
+                    refreshing: signal(Vec::new()),
+                    serial: signal(0),
+                    pending_remove: signal(None),
+                    edit: EditState::new(),
+                    source_view: signal(None),
+                    task: stored(None),
+                };
+                state.reload();
+                state
+            }
+            Err(error) => Self {
+                service: None,
+                list: signal(Vec::new()),
+                active: signal(None),
+                list_error: signal(Some(format!("打开数据根失败:{error}"))),
+                form_error: signal(None),
+                notice: signal(None),
+                refreshing: signal(Vec::new()),
+                serial: signal(0),
+                pending_remove: signal(None),
+                edit: EditState::new(),
+                source_view: signal(None),
+                task: stored(None),
+            },
+        }
+    }
+
+    /// 从磁盘重读列表与生效订阅；消息通道（notice/list_error）由 post_*
+    /// 独占管理，这里不触碰，避免晚到的刷新重读清掉更新操作的反馈。
+    /// 任何失败都显示真实错误，不伪造成功。
+    fn reload(&self) {
+        let Some(service) = self.service.clone() else {
+            return;
+        };
+        match service.load() {
+            Ok(subscriptions) => self.list.set(subscriptions),
+            Err(error) => self.list_error.set(Some(format!("加载订阅失败:{error}"))),
+        }
+        if let Ok(active) = service.active_id() {
+            self.active.set(active);
+        }
+    }
+
+    /// 是否有刷新在途（忙碌提示与单飞去重用）。
+    fn any_refreshing(&self) -> bool {
+        !self.refreshing.get().is_empty()
+    }
+
+    fn bump_serial(&self) -> u64 {
+        let next = self.serial.get() + 1;
+        self.serial.set(next);
+        next
+    }
+
+    /// 同步操作结果反馈：总是上屏（引擎线程内与异步完成严格有序）。
+    fn post_notice(&self, text: String) {
+        self.list_error.set(None);
+        self.notice.set(Some(text));
+    }
+
+    fn post_error(&self, text: String) {
+        self.notice.set(None);
+        self.list_error.set(Some(text));
+    }
+
+    /// 异步刷新结果的反馈：只在刷新仍是最新交互时张贴。
+    fn post_notice_if_current(&self, token: u64, text: String) {
+        if self.serial.get() == token {
+            self.post_notice(text);
+        }
+    }
+
+    fn post_error_if_current(&self, token: u64, text: String) {
+        if self.serial.get() == token {
+            self.post_error(text);
+        }
+    }
+
+    /// 开始一次刷新；全局只允许一个在途刷新（第二个订阅的刷新需等当前
+    /// 完成后再次触发，不是永久禁用）。开始即递增序号并清空旧消息。
+    fn begin_refresh(&self, id: Uuid) -> Option<u64> {
+        if !self.refreshing.get().is_empty() {
+            return None;
+        }
+        self.refreshing.update(|refreshing| refreshing.push(id));
+        let token = self.bump_serial();
+        self.list_error.set(None);
+        self.notice.set(None);
+        Some(token)
+    }
+
+    fn finish_refreshing(&self, id: Uuid) {
+        self.refreshing
+            .update(|refreshing| refreshing.retain(|candidate| *candidate != id));
+    }
+}
+
+pub(super) fn subscription_page() -> impl IntoElement {
+    let state = SubscriptionPageState::new();
+    let fixture_report = signal(
+        Storage::get_item(FIXTURE_REPORT_KEY).unwrap_or_else(|| "尚未解析共享订阅。".to_owned()),
+    );
+
+    view()
+        .flex_1()
+        .flex_col()
+        .gap_4()
+        .child(text("订阅").text_size(px(24.0)))
+        .child(
+            text("真实订阅列表 · 保存到 NSH 桌面独立数据根 · 仅新增/刷新时按需联网，不启动核心/系统代理")
+                .text_color(move || theme().muted_foreground),
+        )
+        .child(add_form::add_subscription_form(state.clone()))
+        .child(rows::subscription_list(state.clone()))
+        .child(
+            view()
+                .flex_col()
+                .gap_2()
+                .p_3()
+                .rounded(move || theme().radius)
+                .border(px(1.0))
+                .border_color(move || theme().border)
+                .child(text("共享解析验证").text_size(px(15.0)))
+                .child(
+                    text("调用共享 lanpath-client 解析固定测试订阅，与订阅列表数据无关")
+                        .text_size(px(12.0))
+                        .text_color(move || theme().muted_foreground),
+                )
+                .child(
+                    button()
+                        .px_4()
+                        .py_2()
+                        .rounded(move || theme().radius)
+                        .bg(move || theme().secondary)
+                        .on_press(move || {
+                            let report = parse_fixture_report();
+                            let _ = Storage::set_item(FIXTURE_REPORT_KEY, &report);
+                            fixture_report.set(report);
+                        })
+                        .child(
+                            text("解析共享订阅").text_color(move || theme().secondary_foreground),
+                        ),
+                )
+                .child(
+                    text(move || fixture_report.get())
+                        .selectable(true)
+                        .text_size(px(12.0))
+                        .text_color(move || theme().muted_foreground),
+                ),
+        )
+}
+
+const FIXTURE_REPORT_KEY: &str = "fixture_parse_report";
+
+/// 共享解析验证（固定测试订阅）：纯本地解析，不联网。
+fn parse_fixture_report() -> String {
+    const FIXTURE: &str = r#"proxies:
   - name: 东京测试节点
     type: ss
     server: 192.0.2.1
@@ -25,11 +283,6 @@ const FIXTURE: &str = r#"proxies:
     cipher: aes-256-gcm
     password: test-only
 "#;
-
-/// Parses the fixed test subscription with the shared client, the same call
-/// the other targets make. Kept as an independent shared-parse check; the
-/// subscription list below never fetches.
-fn parse_fixture_report() -> String {
     match parse_subscription_body(FIXTURE, None) {
         Ok(result) => {
             let nodes = node_tags_from_nodes(&result.singbox_nodes);
@@ -50,389 +303,62 @@ fn parse_fixture_report() -> String {
     }
 }
 
-/// 订阅页状态：共享存储与两个错误通道（列表加载/操作 vs 表单新增）。
-/// 全部为句柄（Signal/Arc），克隆廉价。
-#[derive(Clone)]
-struct SubscriptionPageState {
-    service: Option<Arc<Subscriptions>>,
-    list: Signal<Vec<Subscription>>,
-    list_error: Signal<Option<String>>,
-    form_error: Signal<Option<String>>,
-    pending_remove: Signal<Option<Subscription>>,
-}
-
-impl SubscriptionPageState {
-    fn new() -> Self {
-        match Subscriptions::open() {
-            Ok(service) => {
-                let (list, list_error) = match service.load() {
-                    Ok(list) => (list, None),
-                    Err(error) => (Vec::new(), Some(format!("加载订阅失败:{error}"))),
-                };
-                Self {
-                    service: Some(service),
-                    list: signal(list),
-                    list_error: signal(list_error),
-                    form_error: signal(None),
-                    pending_remove: signal(None),
-                }
-            }
-            Err(error) => Self {
-                service: None,
-                list: signal(Vec::new()),
-                list_error: signal(Some(format!("打开数据根失败:{error}"))),
-                form_error: signal(None),
-                pending_remove: signal(None),
-            },
-        }
-    }
-
-    fn refresh(&self) {
-        let Some(service) = self.service.clone() else {
-            return;
-        };
-        match service.load() {
-            Ok(subscriptions) => {
-                self.list.set(subscriptions);
-                self.list_error.set(None);
-            }
-            Err(error) => self.list_error.set(Some(format!("加载订阅失败:{error}"))),
-        }
-    }
-}
-
-pub(super) fn subscription_page() -> impl IntoElement {
-    let state = SubscriptionPageState::new();
-    let name = signal(String::new());
-    let url = signal(String::new());
-    let fixture_report = signal(
-        Storage::get_item(FIXTURE_REPORT_KEY).unwrap_or_else(|| "尚未解析共享订阅。".to_owned()),
-    );
-
-    view()
-        .flex_1()
-        .flex_col()
-        .gap_4()
-        .child(text("订阅").text_size(px(24.0)))
-        .child(
-            text("真实订阅列表 · 保存到 NSH 桌面独立数据根 · 不发起网络请求")
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(add_subscription_form(state.clone(), name, url))
-        .child(subscription_list(state))
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("共享解析验证").text_size(px(15.0)))
-                .child(
-                    text("调用共享 lanpath-client 解析固定测试订阅，与订阅列表无关")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().secondary)
-                        .on_press(move || {
-                            // 解析验证结果随 NSH storage 持久化，与订阅列表数据无关。
-                            let report = parse_fixture_report();
-                            let _ = Storage::set_item(FIXTURE_REPORT_KEY, &report);
-                            fixture_report.set(report);
-                        })
-                        .child(
-                            text("解析共享订阅").text_color(move || theme().secondary_foreground),
-                        ),
-                )
-                .child(
-                    text(move || fixture_report.get())
-                        .selectable(true)
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
-}
-
-const FIXTURE_REPORT_KEY: &str = "fixture_parse_report";
-
-fn add_subscription_form(
-    state: SubscriptionPageState,
-    name: Signal<String>,
-    url: Signal<String>,
-) -> impl IntoElement {
-    let submit_state = state.clone();
-    let submit = move || {
-        let Some(service) = submit_state.service.clone() else {
-            return;
-        };
-        match service.add(&name.get(), &url.get()) {
-            Ok(_) => {
-                name.set(String::new());
-                url.set(String::new());
-                submit_state.form_error.set(None);
-                submit_state.refresh();
-            }
-            Err(error) => submit_state
-                .form_error
-                .set(Some(format!("新增订阅失败:{error}"))),
-        }
+/// 手动/自动刷新共用：全局单飞（在途刷新未完成时新的刷新不启动，完成
+/// 后可再刷新）；联网在后台线程执行，结果回到 UI 线程写信号。业务层
+/// 互斥保证写回与同步操作不并发写坏清单。返回是否真正启动。
+pub(super) fn spawn_refresh(state: SubscriptionPageState, id: Uuid) -> bool {
+    let Some(token) = state.begin_refresh(id) else {
+        return false;
     };
-    let error_state = state.clone();
-    view()
-        .flex_col()
-        .gap_2()
-        .child(
-            input()
-                .test_id("subscription-name")
-                .value(name)
-                .placeholder("订阅名称")
-                .on_change(move |text: &str| name.set(text.to_owned()))
-                .p_2()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().input)
-                .bg(move || theme().background),
-        )
-        .child(
-            input()
-                .test_id("subscription-url")
-                .value(url)
-                .placeholder("订阅地址（https://…）")
-                .auto_correct(false)
-                .on_change(move |text: &str| url.set(text.to_owned()))
-                .p_2()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().input)
-                .bg(move || theme().background),
-        )
-        .child(
-            button()
-                .px_4()
-                .py_2()
-                .rounded(move || theme().radius)
-                .items_center()
-                .bg(move || theme().primary)
-                .on_press(submit)
-                .child(text("新增订阅").text_color(move || theme().primary_foreground)),
-        )
-        .child(
-            text(move || error_state.form_error.get().unwrap_or_default())
-                .text_color(move || theme().destructive),
-        )
+    let Some(service) = state.service.clone() else {
+        state.finish_refreshing(id);
+        state.post_error("打开数据根失败".to_owned());
+        return false;
+    };
+    let done = state.clone();
+    state.task.with(|slot| {
+        slot.replace(spawn(async move {
+            let result = background(async move { service.refresh(id).await }).await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => Err(lanpath_common::LanpathError::Client(format!(
+                    "刷新任务中断:{error}"
+                ))),
+            };
+            done.finish_refreshing(id);
+            finish_refresh(done, token, result);
+        }));
+    });
+    true
 }
 
-fn subscription_list(state: SubscriptionPageState) -> impl IntoElement {
-    let count_state = state.clone();
-    let empty_state = state.clone();
-    let error_state = state.clone();
-    let row_state = state.clone();
-    let dialog_state = state.clone();
-    scroll().flex_1().child(
-        view()
-            .flex_col()
-            .gap_2()
-            .child(
-                text(move || format!("共 {} 个订阅", count_state.list.get().len()))
-                    .text_color(move || theme().muted_foreground),
-            )
-            .child(when(
-                move || empty_state.list.get().is_empty() && empty_state.list_error.get().is_none(),
-                || text("尚无订阅。").text_color(move || theme().muted_foreground),
-            ))
-            .child(
-                text(move || error_state.list_error.get().unwrap_or_default())
-                    .text_color(move || theme().destructive),
-            )
-            .child(each(
-                state.list,
-                |subscription: &Subscription| subscription.id,
-                move |item, _index| subscription_row(row_state.clone(), item),
-            ))
-            .child(when(
-                move || dialog_state.pending_remove.get().is_some(),
-                move || delete_dialog(dialog_state.clone()),
-            )),
-    )
-}
-
-fn subscription_row(
+fn finish_refresh(
     state: SubscriptionPageState,
-    item: ReadSignal<Subscription>,
-) -> impl IntoElement {
-    let row_test_id = format!("subscription-row-{}", item.get().name);
-    let toggle_state = state.clone();
-    let delete_state = state;
-    view()
-        .test_id(&row_test_id)
-        .flex_col()
-        .gap_1()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .bg(move || theme().card)
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .child(
-                    view()
-                        .test_id(&format!("subscription-enabled-{}", item.get().name))
-                        .on_press(move || {
-                            let subscription = item.get();
-                            let result = toggle_state.service.as_ref().map(|service| {
-                                service.set_enabled(subscription.id, !subscription.enabled)
-                            });
-                            toggle_state.refresh();
-                            if let Some(Err(error)) = result {
-                                toggle_state
-                                    .list_error
-                                    .set(Some(format!("切换启用状态失败:{error}")));
-                            }
-                        })
-                        .child(
-                            switch()
-                                .track_class(
-                                    "w-9 h-5 rounded-full bg-muted checked:bg-primary p-0.5",
-                                )
-                                .thumb_class(
-                                    "w-4 h-4 rounded-full bg-background checked:translate-x-4",
-                                )
-                                .checked(move || item.get().enabled),
-                        ),
-                )
-                .child(
-                    text(move || item.get().name.clone())
-                        .text_size(px(15.0))
-                        .truncate()
-                        .min_w(px(0.0)),
-                )
-                .child(
-                    text(move || {
-                        if item.get().enabled {
-                            "已启用"
-                        } else {
-                            "已停用"
-                        }
-                    })
-                    .text_size(px(12.0))
-                    .text_color(move || theme().muted_foreground),
-                )
-                .child(view().flex_1())
-                .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().destructive)
-                        .on_press(move || delete_state.pending_remove.set(Some(item.get().clone())))
-                        .child(text("删除").text_color(move || theme().destructive)),
-                ),
-        )
-        .child(
-            text(move || {
-                let subscription = item.get();
-                let mut summary = if subscription.node_count > 0 {
-                    format!("{} 个节点", subscription.node_count)
-                } else {
-                    "未获取节点".to_owned()
-                };
-                if let Some(format) = subscription.format {
-                    summary.push_str(&format!(" · 格式 {format:?}"));
-                }
-                summary
-            })
-            .text_size(px(12.0))
-            .text_color(move || theme().muted_foreground),
-        )
-        .child(when(
-            move || item.get().error.is_some(),
-            move || {
-                text(format!("错误：{}", item.get().error.unwrap_or_default()))
-                    .text_size(px(12.0))
-                    .text_color(move || theme().destructive)
-            },
-        ))
-}
-
-fn delete_dialog(state: SubscriptionPageState) -> AnyElement {
-    match state.pending_remove.get() {
-        Some(target) => {
-            let remove_id = target.id;
-            let service = state.service.clone();
-            let cancel_state = state.clone();
-            let confirm_state = state;
-            dialog()
-                .on_cancel(move || cancel_state.pending_remove.set(None))
-                .child(
-                    view()
-                        .flex_col()
-                        .gap_3()
-                        .w(px(360.0))
-                        .p_4()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().card)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .child(text(format!("删除订阅“{}”？", target.name)))
-                        .child(
-                            text(
-                                "仅移除 NSH 桌面数据根中的记录，不影响 Tauri/GPUI/apps/nsh 数据。",
-                            )
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
-                        )
-                        .child(
-                            view()
-                                .flex_row()
-                                .gap_2()
-                                .justify_end()
-                                .child(
-                                    button()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(move || theme().radius)
-                                        .border(px(1.0))
-                                        .border_color(move || theme().border)
-                                        .on_press(move || cancel_state.pending_remove.set(None))
-                                        .child(text("取消")),
-                                )
-                                .child(
-                                    button()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(move || theme().radius)
-                                        .bg(move || theme().destructive)
-                                        .on_press(move || {
-                                            confirm_state.pending_remove.set(None);
-                                            let result = service
-                                                .as_ref()
-                                                .map(|service| service.remove(remove_id));
-                                            confirm_state.refresh();
-                                            if let Some(Err(error)) = result {
-                                                confirm_state
-                                                    .list_error
-                                                    .set(Some(format!("删除订阅失败:{error}")));
-                                            }
-                                        })
-                                        .child(
-                                            text("确认删除")
-                                                .text_color(move || theme().primary_foreground),
-                                        ),
-                                ),
-                        ),
-                )
-                .into_element()
+    token: u64,
+    result: lanpath_common::LanpathResult<RefreshStatus>,
+) {
+    match result {
+        Ok(RefreshStatus::Updated { node_count, format }) => {
+            state.reload();
+            state.post_notice_if_current(
+                token,
+                format!("刷新完成：{node_count} 个节点（{format:?}）"),
+            );
         }
-        None => view().into_element(),
+        Ok(RefreshStatus::Failed { error }) => {
+            // 真实错误已随记录持久化，重读列表让行内错误可见；只在仍是
+            // 最新交互时张贴，避免覆盖后续操作的反馈。
+            state.reload();
+            state.post_error_if_current(token, format!("刷新订阅失败:{error}"));
+        }
+        Ok(RefreshStatus::Stale) => {
+            state.reload();
+            state
+                .post_notice_if_current(token, "刷新期间订阅已被修改或删除，结果未写入".to_owned());
+        }
+        Err(error) => {
+            state.reload();
+            state.post_error_if_current(token, format!("刷新订阅失败:{error}"));
+        }
     }
 }
