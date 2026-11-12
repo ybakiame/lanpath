@@ -5,11 +5,10 @@
 //! 版本（共享语义：验证 + 自动选中 + 按通道保留当前与前一版本）、选择本地
 //! 版本、删除非 active 版本（共享层保护 active 不可删）。
 //!
-//! 本切片不启动核心、系统代理或 TUN，不做核心配置校验，不提供环境核心
-//! 覆盖，不接核心日志流。选择持久化固定写 `app.toml`（统一 TOML 布局，
-//! 数据根初始化时已建并持久化新装默认：直连 None、`mitm_enabled=false`）：
-//! 共享 persist_selection 读-改-写 `[core]` 段，选择只改
-//! `core_binary`/`core_type` 两个字段，订阅、active 订阅、请求代理等全部保留。
+//! 选择持久化固定写 `app.toml`（统一 TOML 布局，数据根初始化时已建并持久化
+//! 新装默认：直连 None、`mitm_enabled=false`）：共享 persist_selection 读-改-
+//! 写 `[core]` 段，选择只改 `core_binary`/`core_type` 两个字段，订阅、active
+//! 订阅、请求代理等全部保留。
 //!
 //! 跨页面/跨句柄互斥：UI busy 只管本页按钮；离页后新页面的新句柄 busy 为
 //! 假，必须靠业务层按数据根共享的 mutation 锁杜绝并发下载/选择/删除
@@ -19,6 +18,12 @@
 //! 意外操作。锁覆盖整个 mutation（tokio guard 可跨 await）；只读操作
 //! （active/list/remote 查询）不加。`DataRoot::business_guard` 仍是短临界区
 //! 专用、绝不跨网络 await，取锁顺序恒为 mutation → business。
+//!
+//! 与核心运行时的互斥（`crate::core_runtime`）：启动/停止持有同一把 mutation
+//! 锁（在途下载/选择/删除立即 busy）；`select`/`download`/`delete` 在
+//! mutation 锁后真实检查 `CoreRuntime::is_running_sync`（OS 进程身份核验，
+//! 不看 UI 状态），核心运行中（含停止进行中 running 未清）立即拒绝修改
+//! 核心文件或选择——运行中禁止修改核心文件。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -78,7 +83,6 @@ impl CoreInventory {
     }
 
     /// 指定数据根打开（测试与显式调用路径，同样走完整准入）。
-    #[cfg(test)]
     pub(crate) fn for_root(path: &Path) -> LanpathResult<Self> {
         Self::build(path, None)
     }
@@ -107,11 +111,25 @@ impl CoreInventory {
     }
 
     /// 取 mutation 锁；在途时立即拒绝（不排队）。调用方持有 guard 直至
-    /// mutation 完成（tokio guard 可跨 await）。
-    fn try_mutation(&self) -> LanpathResult<tokio::sync::MutexGuard<'_, ()>> {
+    /// mutation 完成（tokio guard 可跨 await）。核心运行时的启动/停止也经
+    /// 这一入口与库存互斥。
+    pub(crate) fn try_mutation(&self) -> LanpathResult<tokio::sync::MutexGuard<'_, ()>> {
         self.mutation
             .try_lock()
             .map_err(|_| LanpathError::Client(MUTATION_BUSY.to_owned()))
+    }
+
+    /// 真实检查核心运行时是否持有运行中的核心（OS 进程身份核验，不看 UI
+    /// 状态）；运行中（含停止进行中 running 未清）拒绝修改核心文件或选择。
+    fn ensure_not_running(&self) -> LanpathResult<()> {
+        if crate::core_runtime::CoreRuntime::cached(self.root.path())
+            .is_some_and(|runtime| runtime.is_running_sync())
+        {
+            return Err(LanpathError::Client(
+                "核心运行期间不可修改核心文件或选择，请先停止核心".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// 实际选中核心，独立于正在浏览的库存类型；尚未选择时 `Ok(None)`，
@@ -155,6 +173,7 @@ impl CoreInventory {
     /// 删除共享同根 mutation 锁，在途时立即拒绝。
     pub(crate) fn select(&self, core_type: CoreType, path: &Path) -> LanpathResult<()> {
         let _mutation = self.try_mutation()?;
+        self.ensure_not_running()?;
         let _guard = self.root.business_guard();
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "选择核心：{core_type}");
         self.service.for_core(core_type).select(path)
@@ -173,6 +192,7 @@ impl CoreInventory {
         progress: &(dyn Fn(CoreDownloadStage) + Send + Sync),
     ) -> LanpathResult<ManagedCore> {
         let _mutation = self.try_mutation()?;
+        self.ensure_not_running()?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心：{core_type} {version}");
         let service = self.service.for_core(core_type);
         let installed = service.download_with_progress(version, progress).await?;
@@ -184,6 +204,7 @@ impl CoreInventory {
     /// 真实错误。与下载/选择共享同根 mutation 锁，在途时立即拒绝。
     pub(crate) fn delete(&self, core_type: CoreType, path: &Path) -> LanpathResult<()> {
         let _mutation = self.try_mutation()?;
+        self.ensure_not_running()?;
         let _guard = self.root.business_guard();
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "删除核心：{core_type}");
         self.service.for_core(core_type).delete(path)

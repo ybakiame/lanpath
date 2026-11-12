@@ -301,3 +301,76 @@ pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
 pub fn texts(app: &Headless) -> Vec<&str> {
     app.screen().texts()
 }
+
+/// 用 `rustc` 把 `tests/fixtures/core_fixture.rs` 编译为真实假核心二进制
+/// （真实进程身份/监听/退出码；与 crates/lanpath-client state tests 的
+/// lifecycle fixture 同一模式，只链接 Cargo 已构建的 serde_json rlib）。
+/// 这是 fixture 核心，不等于真实 sing-box/Mihomo（Windows 真实核心验收由
+/// 主代理执行）。每测试进程编译一次。
+pub fn compiled_core_fixture() -> &'static std::path::Path {
+    static COMPILED: std::sync::LazyLock<(tempfile::TempDir, std::path::PathBuf)> =
+        std::sync::LazyLock::new(|| {
+            let directory = tempfile::tempdir().expect("fixture tempdir");
+            let executable = std::env::current_exe().expect("current test binary");
+            let dependencies = executable.parent().expect("deps directory");
+            let serde_json = std::fs::read_dir(dependencies)
+                .expect("read deps directory")
+                .map(|entry| entry.expect("deps entry").path())
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with("libserde_json-") && name.ends_with(".rlib")
+                        })
+                })
+                .expect("Cargo-built serde_json library");
+            let output = std::process::Command::new("rustc")
+                .args([
+                    "--edition=2024",
+                    "--crate-name=lanpath_desktop_core_fixture",
+                ])
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/core_fixture.rs"
+                ))
+                .arg("--extern")
+                .arg(format!("serde_json={}", serde_json.display()))
+                .arg("-L")
+                .arg(format!("dependency={}", dependencies.display()))
+                .arg("-o")
+                .arg(directory.path().join("core-fixture"))
+                .output()
+                .expect("run rustc for the core fixture");
+            assert!(
+                output.status.success(),
+                "core fixture compile failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let binary = directory.path().join("core-fixture");
+            (directory, binary)
+        });
+    &COMPILED.1
+}
+
+/// 把假核心复制进库存布局 `cores/<binary>/<version>/<文件名>`（共享
+/// on-disk 命名规则），返回二进制路径。
+pub fn seed_fixture_core(
+    root: &std::path::Path,
+    core_type: lanpath_common::CoreType,
+    version: &str,
+) -> std::path::PathBuf {
+    let name = if cfg!(windows) {
+        format!("{}.exe", core_type.binary_name())
+    } else {
+        core_type.binary_name().to_string()
+    };
+    let path = root
+        .join("cores")
+        .join(core_type.binary_name())
+        .join(version)
+        .join(name);
+    std::fs::create_dir_all(path.parent().expect("inventory version directory"))
+        .expect("create inventory directory");
+    std::fs::copy(compiled_core_fixture(), &path).expect("copy fixture into inventory");
+    path
+}

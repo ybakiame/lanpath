@@ -127,7 +127,7 @@ fn composing_renders_the_full_json_summary_and_warnings() {
     let json = json_text(&app).expect("preview JSON on screen");
     assert!(json.contains("\"tag\": \"节点甲\""), "{json}");
     assert!(json.contains("\"tag\": \"节点乙\""), "{json}");
-    assert!(json.contains("\"listen_port\": 17890"), "{json}");
+    assert!(json.contains("\"listen_port\": 17899"), "{json}");
     assert!(
         !json.contains("external_ui"),
         "预览不得携带面板下载字段:{json}"
@@ -296,7 +296,7 @@ fn mihomo_selection_composes_a_yaml_preview() {
         .iter()
         .find(|text| text.contains("mixed-port"))
         .expect("YAML preview on screen");
-    assert!(yaml.contains("mixed-port: 17890"), "{yaml}");
+    assert!(yaml.contains("mixed-port: 17899"), "{yaml}");
     assert!(yaml.contains("节点甲"), "{yaml}");
     assert!(yaml.contains("节点乙"), "{yaml}");
     assert!(yaml.contains("external-controller"), "{yaml}");

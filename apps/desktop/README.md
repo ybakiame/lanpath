@@ -2,8 +2,8 @@
 
 `apps/desktop` 是 NSH Windows 迁移目标（纯 Rust，NSH 0.5.0），与最小验证应用 `apps/nsh`、
 GPUI 对照 `apps/gpui` 并行存在。应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取或迁移
-Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN，仅订阅新增/刷新与核心
-查询/下载按需联网。
+Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用户态 loopback mixed + Clash API，
+不接管系统代理/TUN/VPN，不操作生产进程；仅订阅新增/刷新与核心查询/下载按需联网。
 
 窗口壳为侧栏导航 + 主内容区。当前实现七个真实页面：
 
@@ -66,7 +66,8 @@ Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN�
   字段，active 订阅、请求代理、端口等全部保留；新装默认请求策略——直连 None——
   已由数据根初始化持久化，不会被核心选择改回 System）。core_type 由
   `[core].kind` 投影：Mihomo 类型只能来自 Mihomo 核心选择。页面固定文案
-  “仅管理本数据根 cores/ 下的核心文件，不启动核心/系统代理/TUN”。
+  “管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态
+  loopback 运行，不接管系统代理/TUN”。
   busy 全局单飞（操作按钮 busy 中按下 no-op，完成后恢复）；操作失败保留旧
   列表并显示真实错误；下载进度只显示共享真实阶段（查询资产/下载/解压/验证/
   保存），不伪造 byte 百分比；任务模型：操作在 `background` 执行，Signal 只在
@@ -80,8 +81,28 @@ Tauri/GPUI/NSH 验证应用的数据根；不启动核心、系统代理或 VPN�
   请求策略（`request_client_builder` + GitHub 镜像前缀），GitHub API base 仅
   测试可注入（storage 键 `lanpath_desktop_nsh.core_api_base` / 环境变量
   `LANPATH_DESKTOP_CORE_API_BASE`），生产仍 GitHub。日志只记类型/版本/结果
-  （不记完整路径），不记 token 或完整带凭据 URL。暂不做核心启动/停止/配置
-  校验，不接核心日志流。
+  （不记完整路径），不记 token 或完整带凭据 URL。不接核心日志流。
+  核心运行（同页“运行”卡片）：新增“校验并启动”“停止”。启动固定同一份
+  ClientConfig 快照——拒绝 `tun_enabled`/`system_proxy_enabled`（本切片无
+  授权，设置保留）；必须有 confined 库存选中核心并经
+  `validate_managed_binary`；先预检 mixed/Clash API 端口 loopback 可绑定
+  （新根默认端口为 GPUI 实验值 17899/19090，避免与生产 17890/9090 冲突，
+  已有根保留已保存值）；配置经 `compose_with_config(快照)` 一次合成（不重复
+  联网），由 `ConfigValidator` 先守能力边界（sing-box 仅允许已保存端口的
+  127.0.0.1 mixed inbound，拒绝 tun/`set_system_proxy`/非 loopback/面板下载
+  字段，log/cache/rule_set/certificate 资源路径限根内；Mihomo mixed-port
+  匹配、不得 allow-lan/tun、external-controller 仅 loopback、无面板下载
+  字段），再经真实核心二进制校验（sing-box `check -c 临时文件 -D 根` /
+  Mihomo `-t -d 根 -f 临时文件`，no_window，并行有界 drain，20 秒超时强杀
+  回收）；通过后才启动并等待 mixed 端口真实监听、Clash API 就绪，任何失败
+  回滚 `stop_process`（回滚失败同时报告原错误与回收错误并保留可重试状态）。
+  停止回执展示真实 kind。状态轮询每次真实核验进程活性，能发现核心异常退出；
+  运行状态按根共享（Weak 缓存 + App 级 Stored），跨页一致；GUI 正常退出
+  drop 按记录的 OS 进程身份回收本次子进程，绝不按进程名强杀。启停与库存
+  mutation 共享同根 try_acquire 锁：启动途中下载/选择/删除立即 busy，运行中
+  （含停止进行中 running 未清）业务层真实核验（`is_running_sync`，不看 UI
+  状态）拒绝修改核心文件或选择。日志只记操作/端口/版本/阶段，不记配置正文、
+  节点/代理凭据或完整 URL。核心以 sing-box 为主，Mihomo 只需能运行订阅配置。
 - 配置：共享合成预览（从 apps/gpui 的 `business/config.rs` 迁移 sing-box 与
   Mihomo 两条合成分支）。用户点击“生成配置预览”后在后台线程按已保存配置快照合成
   完整配置——sing-box 输出 pretty JSON，Mihomo 输出 YAML（核心直接消费的格式），

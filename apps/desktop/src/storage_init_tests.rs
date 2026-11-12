@@ -20,11 +20,14 @@ fn fresh_root_initializes_unified_toml_defaults() {
     );
     assert!(!root.path().join("client.json").exists());
     assert!(!root.path().join("subscriptions.json").exists());
-    // 新装默认：直连、MITM 关闭、data_dir 本根。
+    // 新装默认：直连、MITM 关闭、data_dir 本根；独立端口 17899/19090
+    // （GPUI 实验值，避免与生产 17890/9090 冲突）。
     let config = ClientConfig::load(root.path()).unwrap();
     assert_eq!(config.request_proxy_mode, RequestProxyMode::None);
     assert!(!config.mitm_enabled);
     assert_eq!(config.data_dir, root.path());
+    assert_eq!(config.mixed_port, 17899);
+    assert_eq!(config.clash_api_port, 19090);
     assert!(
         SubscriptionStore::new(root.path().to_path_buf())
             .load()

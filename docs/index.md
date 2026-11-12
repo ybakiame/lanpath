@@ -16,6 +16,7 @@
 - [NSH Desktop 请求设置验证](testing/2026-11-12-nsh-desktop-request-settings.md)
 - [NSH Desktop 配置合成预览验证](testing/2026-11-12-nsh-desktop-config-preview.md)
 - [NSH Desktop 核心库存与下载/选择验证](testing/2026-11-12-nsh-desktop-core-inventory.md)
+- [NSH Desktop 核心二进制校验与用户态启停验证](testing/2026-11-12-nsh-desktop-core-runtime.md)
 - [ADR](adr/README.md)
 - [来源](source-provenance.json)
 - [协议采纳](adoption/adoption-report.md)

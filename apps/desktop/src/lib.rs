@@ -3,8 +3,12 @@ use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
 
 mod config_composer;
+mod config_validator;
 mod config_view;
+#[cfg(test)]
+mod core_fixture;
 mod core_inventory;
+mod core_runtime;
 mod core_view;
 mod data_root;
 mod disk_log_writer;
@@ -103,12 +107,17 @@ impl Mode {
 
 /// The desktop shell: a sidebar with the app's pages and their content.
 /// Data stays in this app's own identity; nothing of Tauri/GPUI/`apps/nsh`
-/// is read or migrated, and no core, system proxy, TUN or VPN is started.
-/// Subscription add/refresh fetch on demand over the network; nothing else
-/// talks to the network.
+/// is read or migrated. The core page starts/stops the selected inventory
+/// core in user mode only (loopback mixed listener + loopback Clash API,
+/// after a real binary config check); no system proxy, TUN or VPN is taken
+/// over. Subscription add/refresh fetch on demand over the network; nothing
+/// else talks to the network.
 #[component]
 pub fn App() -> impl IntoElement {
     let _log_service = stored(log_service::LogService::open().ok());
+    // 核心运行时按数据根共享（Weak 缓存）；App 级 Stored 持有到退出——
+    // 正常退出 drop 时按记录的 OS 进程身份回收本次核心子进程。
+    let _core_runtime = stored(crate::core_runtime::CoreRuntime::open().ok());
     let loaded = Mode::load();
     if loaded != Mode::System {
         set_color_scheme(loaded.appearance());
@@ -154,7 +163,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
         .bg(move || theme().card)
         .child(text("Lanpath NSH Desktop").text_size(px(17.0)))
         .child(
-            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网，不启动核心/系统代理")
+            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，不接管系统代理/TUN")
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )

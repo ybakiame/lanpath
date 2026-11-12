@@ -278,11 +278,11 @@ async fn compose_mihomo_subscription_to_yaml_with_key_fields() {
     // 验证它确实是合法 YAML），并断言关键字段。
     let value: serde_json::Value =
         serde_yaml::from_str(preview.content()).expect("YAML preview parses");
-    assert_eq!(value["mixed-port"], 17890);
+    assert_eq!(value["mixed-port"], 17899);
     assert_eq!(value["allow-lan"], false);
     assert_eq!(value["bind-address"], "127.0.0.1");
     assert_eq!(value["mode"], "rule");
-    assert_eq!(value["external-controller"], "127.0.0.1:9090");
+    assert_eq!(value["external-controller"], "127.0.0.1:19090");
     assert!(value.get("secret").is_none(), "空密钥不写入 secret");
     // 两个订阅节点经原始 Clash 原文进入 proxies，代理组真实引用它们。
     let proxies = value["proxies"].as_array().expect("proxies array");
@@ -692,4 +692,46 @@ async fn compose_rejects_a_missing_bound_profile() {
 
     let error = composer.compose().await.expect_err("missing profile");
     assert!(error.to_string().contains("覆写模板不存在"), "{error}");
+}
+
+/// `compose_with_config`（核心启动路径）：合成严格使用调用方固定的快照——
+/// 磁盘上的已保存端口/策略与快照不同也不影响本次合成（启动与校验同一份
+/// 快照，`compose` 只是先读快照的便捷入口）。
+#[tokio::test]
+async fn compose_with_config_uses_the_caller_fixed_snapshot() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (_subscriptions, _profiles, composer) = services(temporary.path());
+    let store = SubscriptionStore::new(temporary.path().to_path_buf());
+    let subscription = store
+        .add("快照订阅", "https://example.com/s.yaml", true, None)
+        .unwrap();
+    seed_cache(temporary.path(), subscription.id);
+    edit_config(temporary.path(), |config| {
+        config.request_proxy_mode = RequestProxyMode::Core;
+        config.active_subscription_id = Some(subscription.id);
+        config.mixed_port = 17890;
+        config.clash_api_port = 9090;
+    });
+
+    // 调用方快照（与磁盘不同）：mixed 18765 / API 18766。
+    let snapshot = {
+        let mut config = crate::request_settings::load_request_config(temporary.path()).unwrap();
+        config.mixed_port = 18765;
+        config.clash_api_port = 18766;
+        config
+    };
+    let preview = composer
+        .compose_with_config(&snapshot)
+        .await
+        .expect("compose with snapshot");
+    let value = parsed_json(&preview);
+    assert_eq!(value["inbounds"][0]["listen_port"], 18765);
+    assert_eq!(
+        value["experimental"]["clash_api"]["external_controller"],
+        "127.0.0.1:18766"
+    );
+    // 磁盘配置不被改写。
+    let on_disk = crate::request_settings::load_request_config(temporary.path()).unwrap();
+    assert_eq!(on_disk.mixed_port, 17890);
+    assert_eq!(on_disk.clash_api_port, 9090);
 }

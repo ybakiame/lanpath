@@ -1,19 +1,21 @@
-//! 核心页：核心库存与下载/选择（共享 `CoreManagementService::experimental`
-//! confined 语义）。支持 sing-box/Mihomo 库存类型切换（实际选中独立显示）、
-//! 稳定/预发布通道、查询远端版本（仅 stable/prerelease）、下载指定已查询
-//! 版本（共享语义：验证 + 自动选中 + 按通道保留当前与前一版本）、选择本地
-//! 真实版本、带确认地删除非 active 版本。active 为空显示“尚未选择核心”，
-//! 不把无核心当崩溃。
+//! 核心页：核心运行（校验并启动/停止，用户态 loopback，不接管系统代理/TUN）
+//! 与核心库存/下载/选择（共享 `CoreManagementService::experimental` confined
+//! 语义）。运行卡片显示真实 running/busy/结果/停止 kind/错误（状态轮询
+//! 能发现核心异常退出，不只记按钮状态）；库存卡片支持 sing-box/Mihomo
+//! 类型切换（实际选中独立显示）、稳定/预发布通道、查询远端版本（仅
+//! stable/prerelease）、下载指定已查询版本、选择本地真实版本、带确认地
+//! 删除非 active 版本。active 为空显示“尚未选择核心”，不把无核心当崩溃。
 //!
-//! 固定文案：仅管理本数据根 `cores/` 下的核心文件，不启动核心/系统代理/TUN。
-//! busy 全局单飞（在途操作防重复，完成后
-//! 恢复）；操作失败保留旧列表并显示真实错误；下载进度只显示共享真实阶段，
-//! 不伪造 byte 百分比。操作在 `background` 执行，Signal 只在 UI 线程的
-//! `spawn` 任务内回写；离开页面在途任务随 owner 取消，重进页面是全新状态，
-//! 不永久 busy。mutation 的跨页面互斥在业务层（同根共享 try_acquire 锁），
-//! 本页 busy 只约束本页按钮。
+//! busy 全局单飞（在途操作防重复，完成后恢复）；操作失败保留旧列表并显示
+//! 真实错误；下载进度只显示共享真实阶段，不伪造 byte 百分比。操作在
+//! `background` 执行，Signal 只在 UI 线程的 `spawn` 任务内回写；离开页面
+//! 在途任务随 owner 取消，重进页面是全新状态，不永久 busy。mutation 的
+//! 跨页面互斥与运行中拒绝在业务层（同根共享 try_acquire 锁 +
+//! `CoreRuntime::is_running_sync` 真实核验），本页 busy 只约束本页按钮。
 
 mod render;
+mod runtime;
+mod runtime_card;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -21,12 +23,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lanpath_client::cores::{CoreChannel, CoreDownloadStage, channel_of_version};
-use lanpath_common::CoreType;
+use lanpath_common::{CoreType, ProcessStopKind};
 use nsh_core::prelude::*;
 
 use crate::core_inventory::{CoreInventory, LocalCoreRow};
+use crate::core_runtime::{CoreRuntime, StartOutcome};
 
 pub(crate) use render::core_page;
+use runtime::{RuntimeView, spawn_status_poll};
 
 const TYPES: [(CoreType, &str); 2] = [
     (CoreType::SingBox, "sing-box"),
@@ -51,6 +55,8 @@ struct WorkSlot {
 enum WorkOutcome {
     Remote(Vec<RemoteRow>),
     Changed,
+    Started(StartOutcome),
+    Stopped(ProcessStopKind),
 }
 
 /// 远端通道行（仅 stable/prerelease）。
@@ -71,6 +77,7 @@ struct ActiveSummary {
 #[derive(Clone)]
 struct CorePageState {
     inventory: Option<CoreInventory>,
+    runtime: Option<Arc<CoreRuntime>>,
     /// 页面级 owner：在页面构建时捕获。spawn 的工作任务挂在它下面——
     /// 弹窗/行的临时 owner 在按下后被销毁（如确认删除先关弹窗），在其下
     /// spawn 会被立即取消；页面 owner 随离开页面才销毁（在途任务随 owner
@@ -89,43 +96,44 @@ struct CorePageState {
     notice: Signal<Option<String>>,
     pending_delete: Signal<Option<(String, PathBuf)>>,
     task: Stored<Option<Spawned<()>>>,
+    /// 运行卡片真实状态（状态轮询写入，跨页共享）。
+    status: Signal<RuntimeView>,
+    start_result: Signal<Option<String>>,
+    stop_result: Signal<Option<String>>,
+    runtime_task: Stored<Option<Spawned<()>>>,
 }
 
 impl CorePageState {
     fn new() -> Self {
-        let state = match CoreInventory::open() {
-            Ok(inventory) => Self {
-                inventory: Some(inventory),
-                owner: Owner::current(),
-                browsing: signal(CoreType::SingBox),
-                channel: signal(CoreChannel::Stable),
-                active: signal(None),
-                local: signal(Vec::new()),
-                remote: signal(Vec::new()),
-                remote_checked: signal(false),
-                busy: signal(false),
-                stage: signal(None),
-                error: signal(None),
-                notice: signal(None),
-                pending_delete: signal(None),
-                task: stored(None),
-            },
-            Err(error) => Self {
-                inventory: None,
-                owner: Owner::current(),
-                browsing: signal(CoreType::SingBox),
-                channel: signal(CoreChannel::Stable),
-                active: signal(None),
-                local: signal(Vec::new()),
-                remote: signal(Vec::new()),
-                remote_checked: signal(false),
-                busy: signal(false),
-                stage: signal(None),
-                error: signal(Some(format!("打开数据根失败:{error}"))),
-                notice: signal(None),
-                pending_delete: signal(None),
-                task: stored(None),
-            },
+        let inventory = CoreInventory::open();
+        let runtime = CoreRuntime::open();
+        let mut error = None;
+        if let Err(failure) = &inventory {
+            error = Some(format!("打开数据根失败:{failure}"));
+        }
+        if let Err(failure) = &runtime {
+            error = Some(format!("打开核心运行时失败:{failure}"));
+        }
+        let state = Self {
+            inventory: inventory.ok(),
+            runtime: runtime.ok(),
+            owner: Owner::current(),
+            browsing: signal(CoreType::SingBox),
+            channel: signal(CoreChannel::Stable),
+            active: signal(None),
+            local: signal(Vec::new()),
+            remote: signal(Vec::new()),
+            remote_checked: signal(false),
+            busy: signal(false),
+            stage: signal(None),
+            error: signal(error),
+            notice: signal(None),
+            pending_delete: signal(None),
+            task: stored(None),
+            status: signal(RuntimeView::default()),
+            start_result: signal(None),
+            stop_result: signal(None),
+            runtime_task: stored(None),
         };
         // 初始载入：先读实际选中（决定浏览类型与通道默认值），再列本地版本。
         if let Some(inventory) = state.inventory.clone() {
@@ -145,12 +153,26 @@ impl CorePageState {
             }
             state.reload_local();
         }
+        // 运行状态轮询：随页面 owner 存活；真实状态（含异常退出）跨页共享。
+        spawn_status_poll(&state);
         state
     }
 
     /// busy 全局单飞：在途操作时不启动新工作（调用方不重入）。
     fn begin_work(&self, label: &'static str) -> bool {
         if self.busy.get() || self.inventory.is_none() {
+            return false;
+        }
+        self.busy.set(true);
+        self.error.set(None);
+        self.notice.set(None);
+        self.stage.set(Some(label.to_owned()));
+        true
+    }
+
+    /// 运行操作（校验并启动/停止）的 busy 单飞：运行时句柄必须可用。
+    fn begin_runtime_work(&self, label: &'static str) -> bool {
+        if self.busy.get() || self.runtime.is_none() {
             return false;
         }
         self.busy.set(true);
@@ -240,55 +262,6 @@ fn stage_label(stage: CoreDownloadStage) -> &'static str {
         CoreDownloadStage::Verifying => "正在探测并校验核心版本",
         CoreDownloadStage::Selecting => "正在保存选中核心",
     }
-}
-
-/// 展示用版本降序（与共享 compare_core_versions 同一语义：数字段数值比较，
-/// 同基数的预发布低于稳定版）；仅影响行顺序，不参与任何校验规则。
-fn compare_versions_desc(left: &str, right: &str) -> std::cmp::Ordering {
-    fn key(version: &str) -> (u64, u64, u64, u8, String) {
-        let (stable_marker, core) = match version.find('-') {
-            Some(index)
-                if !version[..index].is_empty()
-                    && version[..index]
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_digit()) =>
-            {
-                (&version[index + 1..], &version[..index])
-            }
-            _ => ("", version),
-        };
-        let mut segments = core.split('.');
-        let mut number = |default: u64| {
-            segments
-                .next()
-                .and_then(|part| part.parse::<u64>().ok())
-                .unwrap_or(default)
-        };
-        let (major, minor, patch) = (number(0), number(0), number(0));
-        let stable = if stable_marker.is_empty() { 1 } else { 0 };
-        (
-            major,
-            minor,
-            patch,
-            stable,
-            stable_marker.to_ascii_lowercase(),
-        )
-    }
-    key(right).cmp(&key(left))
-}
-
-/// 通道过滤后的本地行（按展示顺序降序）。
-fn filtered_rows(state: &CorePageState) -> Vec<LocalCoreRow> {
-    let channel = supported_channel(state.channel.get());
-    let mut rows: Vec<_> = state
-        .local
-        .get()
-        .into_iter()
-        .filter(|row| supported_channel(channel_of_version(&row.version)) == channel)
-        .collect();
-    rows.sort_by(|a, b| compare_versions_desc(&a.version, &b.version));
-    rows
 }
 
 // ---------- 后台操作 ----------
@@ -456,6 +429,15 @@ fn spawn_work<F>(
                                 done.reload_active();
                                 done.reload_local();
                                 done.notice.set(notice);
+                            }
+                            Some(Ok(WorkOutcome::Started(outcome))) => {
+                                done.error.set(None);
+                                done.start_result.set(Some(runtime::format_start(&outcome)));
+                            }
+                            Some(Ok(WorkOutcome::Stopped(kind))) => {
+                                done.error.set(None);
+                                done.stop_result
+                                    .set(Some(runtime::format_stop(kind).to_owned()));
                             }
                             Some(Err(message)) => {
                                 // 失败保留旧列表与旧选中，只显示真实错误。

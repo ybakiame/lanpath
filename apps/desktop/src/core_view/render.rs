@@ -6,16 +6,18 @@
 use nsh_base::{button, dialog, radio, radio_group, theme};
 use nsh_core::prelude::*;
 
+use super::runtime_card::runtime_card;
 use super::{
-    CHANNELS, CorePageState, LocalCoreRow, TYPES, core_tag, filtered_rows, spawn_check_remote,
-    spawn_delete, spawn_download, spawn_select,
+    CHANNELS, CorePageState, LocalCoreRow, TYPES, core_tag, spawn_check_remote, spawn_delete,
+    spawn_download, spawn_select, supported_channel,
 };
-use lanpath_client::cores::CoreChannel;
+use lanpath_client::cores::{CoreChannel, channel_of_version};
 use lanpath_common::CoreType;
 
 pub(crate) fn core_page() -> impl IntoElement {
     let state = CorePageState::new();
     let selection = state.clone();
+    let runtime_state = state.clone();
     let inventory = state.clone();
     let notice_state = state.clone();
     let error_state = state.clone();
@@ -26,10 +28,11 @@ pub(crate) fn core_page() -> impl IntoElement {
         .gap_4()
         .child(text("核心").text_size(px(24.0)))
         .child(
-            text("仅管理本数据根 cores/ 下的核心文件：下载、选择、删除 · 不启动核心/系统代理/TUN")
+            text("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN")
                 .text_color(move || theme().muted_foreground),
         )
         .child(selection_card(selection))
+        .child(runtime_card(runtime_state))
         .child(inventory_card(inventory))
         .child(
             text(move || notice_state.notice.get().unwrap_or_default())
@@ -414,4 +417,53 @@ fn delete_dialog(state: CorePageState) -> AnyElement {
                 .into_element(),
         )
         .into_element()
+}
+
+/// 展示用版本降序（与共享 compare_core_versions 同一语义：数字段数值比较，
+/// 同基数的预发布低于稳定版）；仅影响行顺序，不参与任何校验规则。
+fn compare_versions_desc(left: &str, right: &str) -> std::cmp::Ordering {
+    fn key(version: &str) -> (u64, u64, u64, u8, String) {
+        let (stable_marker, core) = match version.find('-') {
+            Some(index)
+                if !version[..index].is_empty()
+                    && version[..index]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_digit()) =>
+            {
+                (&version[index + 1..], &version[..index])
+            }
+            _ => ("", version),
+        };
+        let mut segments = core.split('.');
+        let mut number = |default: u64| {
+            segments
+                .next()
+                .and_then(|part| part.parse::<u64>().ok())
+                .unwrap_or(default)
+        };
+        let (major, minor, patch) = (number(0), number(0), number(0));
+        let stable = if stable_marker.is_empty() { 1 } else { 0 };
+        (
+            major,
+            minor,
+            patch,
+            stable,
+            stable_marker.to_ascii_lowercase(),
+        )
+    }
+    key(right).cmp(&key(left))
+}
+
+/// 通道过滤后的本地行（按展示顺序降序）。
+fn filtered_rows(state: &CorePageState) -> Vec<LocalCoreRow> {
+    let channel = supported_channel(state.channel.get());
+    let mut rows: Vec<_> = state
+        .local
+        .get()
+        .into_iter()
+        .filter(|row| supported_channel(channel_of_version(&row.version)) == channel)
+        .collect();
+    rows.sort_by(|a, b| compare_versions_desc(&a.version, &b.version));
+    rows
 }

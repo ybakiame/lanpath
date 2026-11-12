@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+- `apps/desktop` 新增核心运行时切片：核心页“运行”卡片提供“校验并启动”
+  “停止”。启动固定同一份 ClientConfig 快照——拒绝 `tun_enabled`/
+  `system_proxy_enabled`（本切片无授权，设置保留）；必须有 confined 库存
+  选中核心并经 `validate_managed_binary`；先预检 mixed/Clash API 端口
+  loopback 可绑定（新根默认端口改为 GPUI 实验值 mixed 17899 / Clash API
+  19090，避免与生产 17890/9090 冲突；已有统一 TOML 根保留已保存值）；
+  配置经 `ConfigComposer::compose_with_config(快照)` 一次合成（订阅刷新、
+  覆写、规则资源同一快照，不重复联网；`compose` 仍是先读已保存快照的便捷
+  入口），Mihomo YAML 解析回 Value 供引擎。新 `ConfigValidator`（独立文件）
+  先守能力边界——sing-box 仅允许已保存端口的 127.0.0.1 mixed inbound，
+  拒绝 tun/`set_system_proxy`/非 loopback/面板下载字段，log/cache/rule_set/
+  certificate 资源路径限根内；Mihomo mixed-port 匹配、不得 allow-lan/tun、
+  external-controller 仅 loopback、无面板下载字段——再经真实核心二进制
+  校验（sing-box `check -c 临时文件 -D 根` / Mihomo `-t -d 根 -f 临时文件`，
+  no_window，stdout/stderr 并行有界 drain 32 KiB，20 秒超时强杀回收）；
+  通过后才启动并等待 mixed 端口真实监听、Clash API 就绪；任何失败回滚
+  `stop_process`，回滚失败同时报告原错误与回收错误并保留可重试状态。
+  运行状态按数据根共享（Weak 缓存 + App 级 Stored），`status()` 每次真实
+  核验进程活性、能发现核心异常退出；GUI 正常退出 drop 按记录的 OS 进程
+  身份回收本次子进程（另有 spawn 父子绑定兜底），绝不按进程名强杀。
+  启停与库存 mutation 共享同根 try_acquire 锁：启动途中下载/选择/删除
+  立即 busy；运行中（含停止进行中 running 未清）业务层经 `is_running_sync`
+  真实核验拒绝修改核心文件或选择（不看 UI 状态）。启动/停止实现在独立
+  任务中跑到完成，离页取消不留半启动子进程。配置预览页不变：继续单独
+  合成未校验预览，不显示“已验证/已启动”。日志只记操作/端口/版本/阶段，
+  不记配置正文、节点/代理凭据或完整 URL。核心以 sing-box 为主，Mihomo
+  只需能运行订阅配置；不接管系统代理/TUN，不接核心日志流，不做流量/
+  连接页面。测试使用 rustc 现场编译的 fixture 假核心（真实进程/监听/
+  回收），不宣称等同 Windows 真实 sing-box/Mihomo 验收（待主代理）。
 - 扩展 `apps/desktop` 新增真实“核心”页与业务：核心库存与下载/选择，复用共享
   `lanpath-client::core_management::CoreManagementService::experimental`（confined
   策略，与 GPUI 同一共享语义），只管理本数据根 `cores/<binary>/<version>/` 下的

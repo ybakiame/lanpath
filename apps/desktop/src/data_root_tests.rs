@@ -377,3 +377,13 @@ fn lock_contention_child_process() {
         .expect("parent supplies an external witness path");
     fs::write(witness, b"contention refused").unwrap();
 }
+
+#[cfg(windows)]
+#[test]
+fn canonical_windows_alias_reuses_the_same_root_lease() {
+    let temporary = tempfile::tempdir().unwrap();
+    let first = open_root(temporary.path()).unwrap();
+    let canonical = temporary.path().canonicalize().unwrap();
+    let second = open_root(&canonical).unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+}

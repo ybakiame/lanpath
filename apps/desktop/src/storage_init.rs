@@ -43,6 +43,10 @@ pub(crate) fn initialize(root: &Path) -> LanpathResult<()> {
         );
         config.request_proxy_mode = RequestProxyMode::None;
         config.mitm_enabled = false;
+        // 新根默认端口与 GPUI 实验值一致（mixed 17899 / Clash API 19090），
+        // 避免与本机生产实例的 17890/9090 冲突；已有 TOML 根保留已保存值。
+        config.mixed_port = crate::core_runtime::DEFAULT_MIXED_PORT;
+        config.clash_api_port = crate::core_runtime::DEFAULT_CLASH_API_PORT;
         settings::persist_client(
             &settings::app_settings_path(root),
             &serde_json::to_value(&config)?,

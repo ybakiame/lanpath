@@ -18,7 +18,7 @@ const API_BASE_KEY: &str = "lanpath_desktop_nsh.core_api_base";
 
 fn open_core_page(app: &mut nsh_testing::Headless) {
     app.press("核心").unwrap();
-    app.wait_for("仅管理本数据根 cores/ 下的核心文件：下载、选择、删除 · 不启动核心/系统代理/TUN")
+    app.wait_for("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN")
         .unwrap();
 }
 
@@ -148,7 +148,9 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
     app.wait_for("尚未选择核心").unwrap();
     let seen = texts(&app);
     for expected in [
-        "仅管理本数据根 cores/ 下的核心文件：下载、选择、删除 · 不启动核心/系统代理/TUN",
+        "管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN",
+        "校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · 不接管系统代理/TUN",
+        "未运行",
         "此通道尚无本地版本，可切换通道或检查更新后下载。",
         "本地：未安装",
         "远程：尚未检查",
@@ -162,6 +164,9 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
             "missing {expected}: {seen:?}"
         );
     }
+    // 运行卡片按钮存在（fixture 启动用例见下文；这里只验证空态展示）。
+    assert!(seen.contains(&"校验并启动"), "{seen:?}");
+    assert!(seen.contains(&"停止"), "{seen:?}");
 }
 
 /// 已选中的核心独立显示；切到另一库存类型浏览时空列表提示出现，
@@ -418,4 +423,213 @@ fn mihomo_selection_shows_summary_and_config_preview_note() {
     // 浏览 Mihomo 库存：本地行真实列出。
     app.press("id:core-type-mihomo").unwrap();
     app.wait_for("v1.19.29").unwrap();
+}
+
+// ---------- 运行卡片（校验并启动 / 停止） ----------
+//
+// 下列用例使用 rustc 现场编译的 fixture 假核心（真实进程/真实监听/真实
+// 回收），不是真实 sing-box/Mihomo；Windows 真实核心验收由主代理执行。
+
+const CLASH_YAML: &str = "proxies:\n  - name: 节点甲\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n  - name: 节点乙\n    type: ss\n    server: 192.0.2.2\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n";
+
+/// 种子 fixture 核心 + 已启用生效订阅（含原文/缓存）+ 端口与核心选择。
+fn seed_runtime_target(
+    root: &Path,
+    core_type: CoreType,
+    version: &str,
+    mixed: u16,
+    api: u16,
+) -> PathBuf {
+    let binary = common::seed_fixture_core(root, core_type, version);
+    let store = lanpath_client::SubscriptionStore::new(root.to_path_buf());
+    let subscription = store
+        .add("运行订阅", "https://example.com/c.yaml", true, None)
+        .unwrap();
+    let fetched = lanpath_client::parse_subscription_body(CLASH_YAML, None).unwrap();
+    store
+        .write_source(
+            subscription.id,
+            &lanpath_client::SubscriptionSource {
+                format: fetched.format,
+                content: fetched.source.clone(),
+            },
+        )
+        .unwrap();
+    store
+        .write_cached_content(
+            subscription.id,
+            &lanpath_client::CachedSubscriptionContent {
+                format: fetched.format,
+                singbox_nodes: fetched.singbox_nodes,
+            },
+        )
+        .unwrap();
+    let mut config = ClientConfig::load_for_requests(root).unwrap();
+    config.active_subscription_id = Some(subscription.id);
+    config.core_binary = binary.clone();
+    config.mixed_port = mixed;
+    config.clash_api_port = api;
+    config.save().unwrap();
+    binary
+}
+
+/// 校验并启动 → 真实进程/真实监听 → 停止回收：结果文案明确“已完成二进制
+/// 校验”，状态行显示真实版本/端口，停止回执含真实 kind。
+#[test]
+fn start_button_validates_launches_and_stops_core() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18301, 18302);
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    app.wait_for_within("未运行", Duration::from_secs(30))
+        .unwrap();
+
+    app.press("id:core-start").unwrap();
+    app.wait_for_within(
+        "text:/已完成二进制校验并启动：sing-box v1.2.3 · mixed 18301 · API 18302/",
+        Duration::from_secs(45),
+    )
+    .unwrap();
+    app.wait_for_within(
+        "text:/运行中：sing-box v1.2.3 · mixed 18301 · API 18302/",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    // 真实监听：mixed 端口在宿主上可连接。
+    std::net::TcpStream::connect(("127.0.0.1", 18301)).expect("mixed listener is real");
+
+    app.press("id:core-stop").unwrap();
+    app.wait_for_within(
+        "已停止核心（强制终止并回收本次进程）",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    app.wait_for_within("未运行", Duration::from_secs(30))
+        .unwrap();
+    std::net::TcpStream::connect(("127.0.0.1", 18301)).expect_err("停止后端口释放");
+}
+
+/// 二进制校验失败：真实错误上屏（含核心诊断），不进入运行态。
+#[test]
+fn start_failure_shows_real_binary_check_error() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        let binary = seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18311, 18312);
+        std::fs::write(
+            binary.with_extension("behavior"),
+            br#"{"fixture_fail":"ui-check-boom"}"#,
+        )
+        .unwrap();
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    app.press("id:core-start").unwrap();
+    app.wait_for_within("text:/启动核心失败/", Duration::from_secs(45))
+        .unwrap();
+    app.wait_for_within("text:/核心配置校验失败/", Duration::from_secs(5))
+        .unwrap();
+    app.wait_for_within("text:/ui-check-boom/", Duration::from_secs(5))
+        .unwrap();
+    app.wait_for_within("未运行", Duration::from_secs(30))
+        .unwrap();
+}
+
+/// 运行状态跨页共享：启动后切到订阅页再回核心页，仍显示运行中（不是
+/// 页面级按钮状态）；随后停止。
+#[test]
+fn running_state_is_shared_across_page_switches() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18321, 18322);
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    app.press("id:core-start").unwrap();
+    app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
+        .unwrap();
+
+    app.press("订阅").unwrap();
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.press("核心").unwrap();
+    app.wait_for_within(
+        "text:/运行中：sing-box v1.2.3 · mixed 18321/",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+
+    app.press("id:core-stop").unwrap();
+    app.wait_for_within(
+        "已停止核心（强制终止并回收本次进程）",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+}
+
+/// 运行中库存选择被业务层真实拒绝（不是按钮置灰）；停止后恢复可操作。
+#[test]
+fn inventory_select_is_rejected_while_core_is_running() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18331, 18332);
+        common::seed_fixture_core(root, CoreType::SingBox, "1.2.2");
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    app.wait_for("v1.2.2").unwrap();
+    app.press("id:core-start").unwrap();
+    app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
+        .unwrap();
+
+    app.press("id:core-use-sing-box-1.2.2").unwrap();
+    app.wait_for_within(
+        "text:/核心运行期间不可修改核心文件或选择/",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+
+    app.press("id:core-stop").unwrap();
+    app.wait_for_within(
+        "已停止核心（强制终止并回收本次进程）",
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    app.press("id:core-use-sing-box-1.2.2").unwrap();
+    app.wait_for_within("text:/已选中 v1.2.2/", Duration::from_secs(30))
+        .unwrap();
+    let config = ClientConfig::load(dir.path()).unwrap();
+    assert_eq!(
+        config.core_binary,
+        core_binary(dir.path(), CoreType::SingBox, "1.2.2")
+    );
+}
+
+/// 核心异常退出由状态轮询真实发现并上屏（不只记按钮状态）。
+#[test]
+fn unexpected_exit_is_detected_by_the_status_poll() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        let binary = seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18341, 18342);
+        std::fs::write(
+            binary.with_extension("behavior"),
+            br#"{"fixture_exit_after_ms":2500}"#,
+        )
+        .unwrap();
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    app.press("id:core-start").unwrap();
+    app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
+        .unwrap();
+    // fixture 2.5 秒后自行退出；轮询必须发现异常退出而不是继续显示运行中。
+    app.wait_for_within("text:/核心进程异常退出/", Duration::from_secs(45))
+        .unwrap();
+    app.wait_for_within("未运行", Duration::from_secs(30))
+        .unwrap();
 }

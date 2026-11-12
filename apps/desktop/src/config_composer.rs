@@ -128,6 +128,17 @@ impl ConfigComposer {
             let _guard = self.root.business_guard();
             load_request_config(self.root.path())?
         };
+        self.compose_with_config(&config).await
+    }
+
+    /// 以调用方固定的 `ClientConfig` 快照合成（核心启动路径）：订阅刷新、
+    /// 覆写解析、规则资源补齐与端口/API 注入全部使用同一快照——网络途中
+    /// 设置页的修改不改变本次合成，同一次合成不会重复联网。`compose`
+    /// 只是先读已保存快照再调用本方法的便捷入口。
+    pub(crate) async fn compose_with_config(
+        &self,
+        config: &lanpath_client::ClientConfig,
+    ) -> LanpathResult<ConfigPreview> {
         let cache_only = config.request_proxy_mode == RequestProxyMode::Core;
         let mixed_port = config.mixed_port;
 
@@ -162,7 +173,7 @@ impl ConfigComposer {
             None => {
                 let status = self
                     .subscriptions
-                    .refresh_with_config(selected.id, &config)
+                    .refresh_with_config(selected.id, config)
                     .await?;
                 match self.store().load_cached_content(selected.id) {
                     Some(cached) => cached.singbox_nodes,
@@ -187,7 +198,7 @@ impl ConfigComposer {
         // 配置切片读取失败按 GPUI 回退共享默认值，但把真实警告展示给用户
         // （共享存储层自身只记 tracing 警告，不区分回退路径）。
         let slices = load_slices(self.root.path(), &mut warnings);
-        let features = panel_features(self.root.path(), &slices, &config);
+        let features = panel_features(self.root.path(), &slices, config);
         let requests = if cache_only {
             RemoteFetchContext::cache_only()
         } else {

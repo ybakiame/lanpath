@@ -424,15 +424,17 @@ fn invalid(message: impl Into<String>) -> LanpathError {
 static ROOTS: OnceLock<Mutex<HashMap<PathBuf, Arc<DataRoot>>>> = OnceLock::new();
 
 pub(crate) fn open_root(path: &Path) -> LanpathResult<Arc<DataRoot>> {
+    let absolute = std::path::absolute(path)?;
+    let lookup = absolute.canonicalize().unwrap_or_else(|_| absolute.clone());
     let mut roots = ROOTS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if let Some(root) = roots.get(path) {
+    if let Some(root) = roots.get(&lookup) {
         return Ok(root.clone());
     }
-    let root = Arc::new(DataRoot::open(path)?);
-    roots.insert(path.to_path_buf(), root.clone());
+    let root = Arc::new(DataRoot::open(&absolute)?);
+    roots.insert(root.path.clone(), root.clone());
     Ok(root)
 }
 
