@@ -26,8 +26,10 @@ Android 后续仍复用 Kotlin VpnService 与 Go/libbox；NSH 页面运行不等
 
 apps/desktop 为 `nsh-validation` 分支上的 NSH Windows 迁移目标：纯 Rust NSH 0.5.0、独立 Cargo
 项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移 Tauri/GPUI/apps/nsh 数据；
-核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback），与 apps/nsh 相同不接管系统
-代理或 VPN。迁移期内 apps/gpui 保留为 GPUI 对照，不被
+核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback）。Windows 系统代理经本任务授权的
+独立普通权限同映像守护精确接管/恢复（owner 为本数据根 UUID，GUI 侧绝不直写注册表；接管失败
+保留核心与恢复证据，停止先守护恢复再停核心）；不接管 TUN/VPN，不安装服务/启动项，不经 TUN
+helper。迁移期内 apps/gpui 保留为 GPUI 对照，不被
 apps/desktop 替换；生产切换仍以单独决策为前提。
 
 ## 环境和验证

@@ -22,7 +22,7 @@ pub(super) fn runtime_card(state: CorePageState) -> impl IntoElement {
         .border_color(move || theme().border)
         .child(text("运行").text_size(px(15.0)))
         .child(
-            text("校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · 不接管系统代理/TUN")
+            text("校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · TUN/VPN 不接管；系统代理经独立守护接管/恢复（见下方分区）")
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )

@@ -1,29 +1,38 @@
-//! 核心运行时：真实核心二进制的用户态启停（本切片不接管系统代理/TUN）。
+//! 核心运行时：真实核心二进制的用户态启停 + 经独立守护的 Windows 系统
+//! 代理精确接管/恢复（TUN 仍拒绝，不接管 VPN）。
 //!
 //! `CoreRuntime` 按数据根共享：Weak 缓存 + App 启动时 `stored` 持有——同一
 //! 数据根的所有页面/句柄看到同一份真实运行状态；GUI 正常退出时随 `Drop`
-//! 按记录的 OS 进程身份回收本次子进程（另有 spawn 时的 OS 父子绑定兜底），
-//! 绝不按进程名强杀。
+//! 先尽力恢复系统代理、再按记录的 OS 进程身份回收本次子进程（另有 spawn
+//! 时的 OS 父子绑定兜底），绝不按进程名强杀。
 //!
-//! 启动固定同一份 `ClientConfig` 快照：拒绝 `tun_enabled`/`system_proxy_enabled`
-//! （本切片无授权）；confined 库存核心 + `validate_managed_binary`；预检
-//! mixed/API 端口 loopback 可绑定；`compose_with_config(快照)` 一次合成；
-//! `ConfigValidator` 校验后才 `start` 并等待真实监听/API 就绪。spawn 后
-//! 任何失败（start 失败、就绪超时、pid 身份读取失败）都走同一 `rollback`
-//! 显式 `stop_process` 回收（manager drop 在 Unix 只 detach，不得提前返回
-//! 留半截清理）；回滚失败同时报告原错误与回收错误并保留可重试状态（再次
-//! 启动/停止会先重试回收）。
+//! 启动固定同一份 `ClientConfig` 快照：拒绝 `tun_enabled`；confined 库存
+//! 核心 + `validate_managed_binary`；预检 mixed/API 端口 loopback 可绑定；
+//! `compose_with_config(快照)` 一次合成；`ConfigValidator` 校验后才 `start`
+//! 并等待真实监听/API 就绪。配置 `system_proxy_enabled=true` 且平台支持时：
+//! 核心校验/mixed/API 全部就绪后 arm 同映像独立守护并 acquire
+//! `127.0.0.1:mixed_port`；接管失败保留核心与守护证据（不 rollback、不
+//! 先清证据）。启动前先恢复本应用 abandoned journal（同一独立守护完成，
+//! GUI 死亡不能中断其检查点）。正常停止先守护 restore + 确认退出，再停
+//! 核心；通信失败/守护死亡不是恢复证明，只按本应用 owner 精确恢复。
+//! 非 Windows 不接管：已保存偏好不产生运行失败（如实记录日志）。
+//!
+//! spawn 后任何失败（start 失败、就绪超时、pid 身份读取失败）都走同一
+//! `rollback` 显式 `stop_process` 回收（manager drop 在 Unix 只 detach，
+//! 不得提前返回留半截清理）；回滚失败同时报告原错误与回收错误并保留可
+//! 重试状态（再次启动/停止会先重试回收）。
 //!
 //! 与库存的互斥：启动/停止持有 `CoreInventory` 同根 mutation 锁（在途下载/
 //! 选择/删除立即 busy）；运行中（含停止进行中 running 未清）库存 mutation 由
 //! `is_running_sync` 真实核验拒绝。取锁顺序恒为 mutation → lifecycle →
-//! business/active（短临界区），无反向路径，不会死锁。
+//! proxy_guardian → business/active（短临界区，business 只在 arm 守护前
+//! 的读取阶段持有），无反向路径；守护 RPC 绝不持 business 锁，不会死锁。
 //!
 //! 日志只记操作、端口、版本与阶段，不记配置正文、节点/代理凭据或完整 URL。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -36,13 +45,16 @@ use crate::config_validator::{ConfigValidator, ValidatorBindings};
 use crate::core_inventory::CoreInventory;
 use crate::data_root::{DataRoot, open_root, resolve_data_location};
 use crate::request_settings::load_request_config;
+use crate::system_proxy::{ArmedGuardian, GuardianSpawner};
 
 mod manager;
+mod proxy;
+mod status;
 mod types;
 
 use manager::{ActiveManager, parse_preview, read_pid_identity, wait_listener};
 use types::ActiveInfo;
-pub(crate) use types::{CoreStatus, SessionSummary, StartOutcome};
+pub(crate) use types::{CoreStatus, StartOutcome};
 
 /// 新数据根默认 mixed 端口（GPUI 实验值；避免与生产 17890 冲突）。
 pub(crate) const DEFAULT_MIXED_PORT: u16 = 17899;
@@ -79,6 +91,17 @@ pub(crate) struct CoreRuntime {
     unexpected_exit: Mutex<Option<String>>,
     listener_timeout: Duration,
     api_timeout: Duration,
+    /// 系统代理守护日志 owner：本数据根 UUID（跨进程精确身份）。
+    proxy_owner: String,
+    /// 守护装配与只读查询（Windows 真实守护；测试注入 fixture；非 Windows
+    /// 显式不支持）。Mutex 只保护 Arc 交换，任何守护 RPC 都不持此锁。
+    proxy_spawner: Arc<Mutex<Arc<dyn GuardianSpawner>>>,
+    /// 已装配守护（接管失败也保留，直到停止/显式恢复确认）。
+    proxy_guardian: Mutex<Option<Box<dyn ArmedGuardian>>>,
+    /// 一次性显式接管授权（仅进程内，绝不持久化）：仅用户在确认框确认
+    /// 后置位；启动 acquire 时读取并消费（成功或失败都消费），普通
+    /// Acquire 仍 RequireDirect，消费后仅当次 acquire 用 ExplicitTakeover。
+    proxy_takeover_consent: AtomicBool,
     /// 测试注入的校验超时（`None` 用校验器默认 20 秒）。
     #[cfg(test)]
     check_timeout: Option<Duration>,
@@ -143,6 +166,8 @@ impl CoreRuntime {
     fn build(root: Arc<DataRoot>) -> LanpathResult<Self> {
         let inventory = CoreInventory::for_root(root.path())?;
         let composer = ConfigComposer::for_root(root.path())?;
+        let proxy_owner = root.id().to_string();
+        let proxy_spawner = crate::system_proxy::default_spawner(&proxy_owner)?;
         Ok(Self {
             root,
             inventory,
@@ -154,6 +179,10 @@ impl CoreRuntime {
             unexpected_exit: Mutex::new(None),
             listener_timeout: LISTENER_TIMEOUT,
             api_timeout: CLASH_API_TIMEOUT,
+            proxy_owner,
+            proxy_spawner,
+            proxy_guardian: Mutex::new(None),
+            proxy_takeover_consent: AtomicBool::new(false),
             #[cfg(test)]
             check_timeout: None,
         })
@@ -186,6 +215,7 @@ impl CoreRuntime {
 
     /// 启动：校验并启动用户态核心（二进制校验 + 真实进程 + 真实监听）。
     /// 实现整体在独立任务中跑到完成：UI 离页取消只是看不到结果，不会留下
+    /// 半启动子进程或未完成的守护接管。
     pub(crate) async fn start(self: &Arc<Self>) -> LanpathResult<StartOutcome> {
         tracing::info!(target: "lanpath_desktop_nsh::core_runtime", "开始核心启动任务");
         let this = self.clone();
@@ -204,11 +234,15 @@ impl CoreRuntime {
             return Err(LanpathError::Client("核心已运行；请先停止后再启动".into()));
         }
         // 上次失败回滚保留的待回收管理器：启动前先重试回收（可重试语义）。
+        // stop_locked 会先恢复系统代理（守护 shutdown + owner 精确恢复）。
         if slot.is_some() {
             self.stop_locked(&mut slot).await.map_err(|error| {
                 LanpathError::Core(format!("上次启动残留回收失败：{error}；请先停止重试"))
             })?;
         }
+        // 待回收清理后处理 abandoned journal：同一独立守护完成恢复，
+        // 其仍持有本实例 owner 时拒绝启动（需要先停止/显式恢复）。
+        self.recover_proxy_before_start()?;
         self.phase.store(PHASE_STARTING, Ordering::Release);
         let result = self.start_locked(&mut slot).await;
         self.phase.store(PHASE_IDLE, Ordering::Release);
@@ -232,12 +266,7 @@ impl CoreRuntime {
         };
         if config.tun_enabled {
             return Err(LanpathError::Client(
-                "本切片未授权 TUN；设置已保留，请关闭 TUN 后启动（不接管系统代理/TUN）".into(),
-            ));
-        }
-        if config.system_proxy_enabled {
-            return Err(LanpathError::Client(
-                "本切片未授权系统代理；设置已保留，请关闭系统代理后启动".into(),
+                "本切片未授权 TUN；设置已保留，请关闭 TUN 后启动（不接管 TUN/VPN）".into(),
             ));
         }
         self.set_stage("校验核心二进制");
@@ -308,6 +337,14 @@ impl CoreRuntime {
             });
         }
         **slot = Some(manager);
+        // 系统代理接管：核心校验/mixed/API 全部就绪后 arm 独立守护并
+        // acquire 127.0.0.1:mixed_port。接管失败保留核心与守护证据——
+        // 绝不能先 rollback 清掉恢复资源；用户经“停止/显式恢复”完成恢复。
+        if let Err(error) = self.acquire_proxy(config.system_proxy_enabled, config.mixed_port) {
+            tracing::error!(target: "lanpath_desktop_nsh::core_runtime",
+                "系统代理接管失败；核心与恢复资源保留：{error}");
+            return Err(error);
+        }
         tracing::info!(target: "lanpath_desktop_nsh::core_runtime",
             "核心已启动：{core_type} {version} mixed {} api {:?}（已完成二进制校验）",
             config.mixed_port, clash_api_port);
@@ -361,8 +398,9 @@ impl CoreRuntime {
         }
     }
 
-    /// 停止：回收核心子进程并清理本次会话状态；同 `start` 在独立任务中
-    /// 跑到完成（UI 离页不会让停止半途而废）。
+    /// 停止：先恢复系统代理（守护 restore + 确认退出），再回收核心子进程
+    /// 并清理本次会话状态；同 `start` 在独立任务中跑到完成（UI 离页不会让
+    /// 恢复/停止半途而废）。
     pub(crate) async fn stop(self: &Arc<Self>) -> LanpathResult<ProcessStopKind> {
         let this = self.clone();
         tokio::spawn(async move { this.stop_impl().await })
@@ -374,7 +412,7 @@ impl CoreRuntime {
         let _mutation = self.inventory.try_mutation()?;
         let mut slot = self.lifecycle.lock().await;
         self.phase.store(PHASE_STOPPING, Ordering::Release);
-        self.set_stage("停止核心进程");
+        self.set_stage("恢复系统代理并停止核心进程");
         let result = self.stop_locked(&mut slot).await;
         self.phase.store(PHASE_IDLE, Ordering::Release);
         self.clear_stage();
@@ -388,6 +426,10 @@ impl CoreRuntime {
         &self,
         slot: &mut tokio::sync::MutexGuard<'_, Option<ActiveManager>>,
     ) -> LanpathResult<ProcessStopKind> {
+        // 先守护恢复：守护死亡/通信失败不是恢复证明，按 owner 精确恢复。
+        // 恢复失败（Err 提前返回）时 manager 保留：running 未清，库存仍拒绝，
+        // 且可再次停止重试；绝不跳过恢复直接停核心。
+        self.restore_proxy()?;
         let kind = match slot.as_ref() {
             Some(manager) => manager.stop_process().await?,
             None => ProcessStopKind::AlreadyStopped,
@@ -403,75 +445,23 @@ impl CoreRuntime {
         }
         Ok(kind)
     }
-
-    /// 真实状态 poll：每次调用都核验核心进程活性；异常退出在此被发现并
-    /// 记录（不依赖按钮状态）。
-    pub(crate) async fn status(&self) -> CoreStatus {
-        let operation = match self.phase.load(Ordering::Acquire) {
-            PHASE_STARTING => Some("正在启动"),
-            PHASE_STOPPING => Some("正在停止"),
-            _ => None,
-        };
-        let stage = self.stage.lock().ok().and_then(|slot| slot.clone());
-        let Ok(mut slot) = self.lifecycle.try_lock() else {
-            let session = self.session_snapshot();
-            return CoreStatus {
-                operation,
-                stage,
-                running: session.is_some(),
-                session,
-                unexpected_exit: self.exit_snapshot(),
-            };
-        };
-        if let Some(manager) = slot.as_ref()
-            && !manager.is_running().await
-        {
-            let detail = manager.last_error().await;
-            let message = if detail.is_empty() {
-                "核心进程已退出".to_owned()
-            } else {
-                format!("核心进程异常退出：{detail}")
-            };
-            if let Ok(mut exit) = self.unexpected_exit.lock() {
-                *exit = Some(message);
-            }
-            *slot = None;
-            if let Ok(mut active) = self.active.lock() {
-                *active = None;
-            }
-        }
-        let session = self.session_snapshot();
-        CoreStatus {
-            operation,
-            stage,
-            running: session.is_some(),
-            session,
-            unexpected_exit: self.exit_snapshot(),
-        }
-    }
-
-    fn session_snapshot(&self) -> Option<SessionSummary> {
-        self.active.lock().ok().and_then(|active| {
-            active.as_ref().map(|info| SessionSummary {
-                core_type: info.core_type,
-                version: info.version.clone(),
-                mixed_port: info.mixed_port,
-                clash_api_port: info.clash_api_port,
-                uptime_secs: info.started.elapsed().as_secs(),
-            })
-        })
-    }
-
-    fn exit_snapshot(&self) -> Option<String> {
-        self.unexpected_exit
-            .lock()
-            .ok()
-            .and_then(|exit| exit.clone())
-    }
 }
 
 impl Drop for CoreRuntime {
     fn drop(&mut self) {
+        // 应用退出：先尽力安全恢复系统代理（守护 shutdown = restore + 退出
+        // 确认），再回收核心。恢复失败不阻断核心回收：恢复证据（日志/租约）
+        // 保留，GUI 进程句柄与管道断开后独立守护会自行完成恢复；下次启动
+        // 的 abandoned journal 恢复仍可重试。
+        if let Ok(guardian) = self.proxy_guardian.get_mut() {
+            if let Some(armed) = guardian.as_mut()
+                && let Err(error) = armed.shutdown()
+            {
+                tracing::warn!(target: "lanpath_desktop_nsh::core_runtime",
+                    "退出时系统代理守护恢复未完成（守护自行恢复/下次启动重试）：{error}");
+            }
+            *guardian = None;
+        }
         // GUI 正常退出：按记录的 OS 进程身份回收本次子进程（spawn 时的
         // 父子绑定是 OS 级兜底；这里做确定性的显式回收，绝不按进程名强杀）。
         let identity = self

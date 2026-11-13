@@ -1,10 +1,10 @@
-//! 核心页：核心运行（校验并启动/停止，用户态 loopback，不接管系统代理/TUN）
+//! 核心页：核心运行（校验并启动/停止，用户态 loopback，不接管 TUN/VPN）
 //! 与核心库存/下载/选择（共享 `CoreManagementService::experimental` confined
-//! 语义）。运行卡片显示真实 running/busy/结果/停止 kind/错误（状态轮询
-//! 能发现核心异常退出，不只记按钮状态）；库存卡片支持 sing-box/Mihomo
-//! 类型切换（实际选中独立显示）、稳定/预发布通道、查询远端版本（仅
-//! stable/prerelease）、下载指定已查询版本、选择本地真实版本、带确认地
-//! 删除非 active 版本。active 为空显示“尚未选择核心”，不把无核心当崩溃。
+//! 语义），以及“系统代理”分区（经独立守护的 Windows 精确接管/恢复；
+//! 非 Windows 如实显示不支持）。运行卡片显示真实 running/busy/结果/停止
+//! kind/错误（状态轮询能发现核心异常退出，不只记按钮状态）；系统代理
+//! 分区显示守护真实 ownership（未接管/本应用持有/需要恢复/未知错误），
+//! 开关只保存偏好、运行中切换走安全启停，提供仅本应用 owner 的显式恢复。
 //!
 //! busy 全局单飞（在途操作防重复，完成后恢复）；操作失败保留旧列表并显示
 //! 真实错误；下载进度只显示共享真实阶段，不伪造 byte 百分比。操作在
@@ -13,6 +13,7 @@
 //! 跨页面互斥与运行中拒绝在业务层（同根共享 try_acquire 锁 +
 //! `CoreRuntime::is_running_sync` 真实核验），本页 busy 只约束本页按钮。
 
+mod proxy_card;
 mod render;
 mod runtime;
 mod runtime_card;
@@ -57,6 +58,7 @@ enum WorkOutcome {
     Changed,
     Started(StartOutcome),
     Stopped(ProcessStopKind),
+    ProxyRestored,
 }
 
 /// 远端通道行（仅 stable/prerelease）。
@@ -101,6 +103,10 @@ struct CorePageState {
     start_result: Signal<Option<String>>,
     stop_result: Signal<Option<String>>,
     runtime_task: Stored<Option<Spawned<()>>>,
+    /// 已保存的系统代理偏好（页面打开时读一次；切换后立即回写）。
+    proxy_enabled: Signal<bool>,
+    /// 启用系统代理前的一次性确认框（说明仅本次接管/精确归还/授权不保存）。
+    proxy_confirm: Signal<bool>,
 }
 
 impl CorePageState {
@@ -114,6 +120,12 @@ impl CorePageState {
         if let Err(failure) = &runtime {
             error = Some(format!("打开核心运行时失败:{failure}"));
         }
+        // 系统代理偏好：页面打开时读已保存值（运行时未打开时默认关闭）。
+        let state_proxy_enabled = runtime
+            .as_ref()
+            .ok()
+            .and_then(|runtime| runtime.proxy_preference().ok())
+            .unwrap_or(false);
         let state = Self {
             inventory: inventory.ok(),
             runtime: runtime.ok(),
@@ -134,6 +146,8 @@ impl CorePageState {
             start_result: signal(None),
             stop_result: signal(None),
             runtime_task: stored(None),
+            proxy_enabled: signal(state_proxy_enabled),
+            proxy_confirm: signal(false),
         };
         // 初始载入：先读实际选中（决定浏览类型与通道默认值），再列本地版本。
         if let Some(inventory) = state.inventory.clone() {
@@ -438,6 +452,12 @@ fn spawn_work<F>(
                                 done.error.set(None);
                                 done.stop_result
                                     .set(Some(runtime::format_stop(kind).to_owned()));
+                            }
+                            Some(Ok(WorkOutcome::ProxyRestored)) => {
+                                done.error.set(None);
+                                done.notice.set(Some(
+                                    "已按本应用记录恢复系统代理（无遗留记录时无动作）".to_owned(),
+                                ));
                             }
                             Some(Err(message)) => {
                                 // 失败保留旧列表与旧选中，只显示真实错误。

@@ -2,8 +2,9 @@
 
 `apps/desktop` 是 NSH Windows 迁移目标（纯 Rust，NSH 0.5.0），与最小验证应用 `apps/nsh`、
 GPUI 对照 `apps/gpui` 并行存在。应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取或迁移
-Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用户态 loopback mixed + Clash API，
-不接管系统代理/TUN/VPN，不操作生产进程；仅订阅新增/刷新与核心查询/下载按需联网。
+Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用户态 loopback mixed + Clash API；
+Windows 系统代理经独立普通权限同映像守护精确接管/恢复（见核心页“系统代理”分区），GUI 侧
+绝不直写注册表；TUN/VPN 不接管，不安装服务/启动项；仅订阅新增/刷新与核心查询/下载按需联网。
 
 窗口壳为侧栏导航 + 主内容区。当前实现七个真实页面：
 
@@ -20,10 +21,10 @@ Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用�
   已有配置损坏返回真实错误、绝不重写为默认。GitHub 前缀按共享
   `apply_github_proxy_prefix` 语义在使用时拼接（保存值原样保留）。保存后
   `ClientConfig::load_for_requests` 立即可读，订阅刷新经共享 `load_request_config`
-  消费同一策略（无第二处新装默认）。核心代理只指向已保存的 mixed_port：本切片不启动
-  核心，核心未运行时请求真实失败（页面如实说明，不做连接测试、不提供系统代理/TUN
-  开关、不显示假成功）。重置恢复已保存草稿（有未保存修改需确认），日志只记模式不记
-  地址/前缀。
+  消费同一策略（无第二处新装默认）。核心代理只指向已保存的 mixed_port：
+  核心未运行时请求真实失败（页面如实说明，不做连接测试、不显示假成功；
+  系统代理接管开关在核心页“系统代理”分区，不在本页）。重置恢复已保存草稿
+  （有未保存修改需确认），日志只记模式不记地址/前缀。
 - 订阅：真实订阅列表与持久化。复用共享 `lanpath-client::SubscriptionStore` /
   `Subscription` / `SubFormat`，数据写入本应用自己的隔离数据根（所有权标记 +
   进程内文件锁租约 + 生产/链接路径准入，从 apps/gpui 迁移并适配，约束未削弱）。
@@ -67,7 +68,7 @@ Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用�
   已由数据根初始化持久化，不会被核心选择改回 System）。core_type 由
   `[core].kind` 投影：Mihomo 类型只能来自 Mihomo 核心选择。页面固定文案
   “管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态
-  loopback 运行，不接管系统代理/TUN”。
+  loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管”。
   busy 全局单飞（操作按钮 busy 中按下 no-op，完成后恢复）；操作失败保留旧
   列表并显示真实错误；下载进度只显示共享真实阶段（查询资产/下载/解压/验证/
   保存），不伪造 byte 百分比；任务模型：操作在 `background` 执行，Signal 只在
@@ -83,8 +84,8 @@ Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用�
   `LANPATH_DESKTOP_CORE_API_BASE`），生产仍 GitHub。日志只记类型/版本/结果
   （不记完整路径），不记 token 或完整带凭据 URL。不接核心日志流。
   核心运行（同页“运行”卡片）：新增“校验并启动”“停止”。启动固定同一份
-  ClientConfig 快照——拒绝 `tun_enabled`/`system_proxy_enabled`（本切片无
-  授权，设置保留）；必须有 confined 库存选中核心并经
+  ClientConfig 快照——拒绝 `tun_enabled`（TUN 仍不授权，设置保留）；
+  必须有 confined 库存选中核心并经
   `validate_managed_binary`；先预检 mixed/Clash API 端口 loopback 可绑定
   （新根默认端口为 GPUI 实验值 17899/19090，避免与生产 17890/9090 冲突，
   已有根保留已保存值）；配置经 `compose_with_config(快照)` 一次合成（不重复
@@ -103,6 +104,26 @@ Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用�
   （含停止进行中 running 未清）业务层真实核验（`is_running_sync`，不看 UI
   状态）拒绝修改核心文件或选择。日志只记操作/端口/版本/阶段，不记配置正文、
   节点/代理凭据或完整 URL。核心以 sing-box 为主，Mihomo 只需能运行订阅配置。
+  系统代理（同页“系统代理”分区，仅 Windows）：开关只保存偏好（同一业务锁内
+  读最新配置只改 `system_proxy_enabled` 一个字段）；首次启用弹一次性确认框
+  （“若已有其他代理，仅本次接管，停止/退出精确归还；授权不保存”），确认才
+  保存偏好并授予进程内一次性接管授权（AtomicBool，不持久化、重启即失效；
+  停用即清除；启动 acquire 时读取并消费，成功或失败都只影响当次），取消
+  不写配置。运行中切换走安全启停周期（停止含守护恢复，启动按新偏好接管），
+  绝不绕守护直写注册表。接管语义迁移自 apps/gpui `proxy_guardian`：同映像
+  独立普通权限守护进程（管道身份 `LanpathNSH-Proxy-<uuid>`，参数有界版本化，
+  SID/session/logon/elevation/映像/进程身份全核验，不继承 Job、不安装服务），
+  核心校验/mixed/API 就绪后 arm 并 acquire `127.0.0.1:mixed_port`（普通
+  Acquire 恒共享 RequireDirect，外来活动代理拒绝；仅用户确认后以独立
+  `AcquireTakeover` 形态经共享 `acquire_with_policy(..., ExplicitTakeover)`
+  接管并精确归还），接管失败保留核心与恢复证据；启动前恢复本应用
+  abandoned journal；停止先守护 restore 再停核心，守护死亡/通信失败只按
+  本应用 owner（数据根 UUID）精确恢复；界面显示未接管/本应用持有/需要
+  恢复/未知错误，并提供仅本应用 owner 的显式“恢复系统代理”。复用共享
+  `lanpath-client::sysproxy` 会话与 DPAPI 日志，不复制不修改。非 Windows
+  显示“仅 Windows 支持”并隐藏恢复操作（偏好开关仍可见可保存），已保存
+  偏好不产生运行失败。真实 WinINet 验收待主代理（自动化测试全部为
+  fixture）。
 - 配置：共享合成预览（从 apps/gpui 的 `business/config.rs` 迁移 sing-box 与
   Mihomo 两条合成分支）。用户点击“生成配置预览”后在后台线程按已保存配置快照合成
   完整配置——sing-box 输出 pretty JSON，Mihomo 输出 YAML（核心直接消费的格式），

@@ -11,14 +11,16 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use common::{TestRoute, TestServer, data_root, start_app, texts};
-use lanpath_client::{ClientConfig, RequestProxyMode};
+use lanpath_client::ClientConfig;
+#[cfg(unix)]
+use lanpath_client::RequestProxyMode;
 use lanpath_common::CoreType;
 
 const API_BASE_KEY: &str = "lanpath_desktop_nsh.core_api_base";
 
 fn open_core_page(app: &mut nsh_testing::Headless) {
     app.press("核心").unwrap();
-    app.wait_for("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN")
+    app.wait_for("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管")
         .unwrap();
 }
 
@@ -37,14 +39,14 @@ fn core_binary(root: &Path, core_type: CoreType, version: &str) -> PathBuf {
 
 /// 种子一个库存核心：Unix 为可真实 version probe 的脚本核心，其他平台为
 /// 仅用于列表/删除路径的元数据文件（选择/下载的 probe 原生验收由主代理做）。
-fn seed_core(root: &Path, core_type: CoreType, version: &str, reported: &str) -> PathBuf {
+fn seed_core(root: &Path, core_type: CoreType, version: &str, _reported: &str) -> PathBuf {
     let path = core_binary(root, core_type, version);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     #[cfg(unix)]
     {
         let output = match core_type {
-            CoreType::SingBox => format!("sing-box version {reported}"),
-            CoreType::Mihomo => format!("Mihomo Meta v{reported} linux amd64"),
+            CoreType::SingBox => format!("sing-box version {_reported}"),
+            CoreType::Mihomo => format!("Mihomo Meta v{_reported} linux amd64"),
         };
         std::fs::write(&path, format!("#!/bin/sh\necho '{output}'\n")).unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -148,8 +150,8 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
     app.wait_for("尚未选择核心").unwrap();
     let seen = texts(&app);
     for expected in [
-        "管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN",
-        "校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · 不接管系统代理/TUN",
+        "管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管",
+        "校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · TUN/VPN 不接管；系统代理经独立守护接管/恢复（见下方分区）",
         "未运行",
         "此通道尚无本地版本，可切换通道或检查更新后下载。",
         "本地：未安装",
@@ -158,10 +160,46 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
         "Mihomo",
         "稳定版",
         "预发布版",
+        // 系统代理分区如实展示（支持性取决于平台，见下方分支断言）。
+        "系统代理",
     ] {
         assert!(
             seen.iter().any(|text| text.contains(expected)),
             "missing {expected}: {seen:?}"
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        // 非 Windows：如实显示不支持；恢复操作隐藏，但开关可见
+        // （只保存偏好，本机不接管），确认框流程可交互。
+        let seen = texts(&app);
+        assert!(
+            seen.iter()
+                .any(|text| text.contains("系统代理接管仅支持 Windows")),
+            "missing unsupported note: {seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|text| text.contains("恢复系统代理")),
+            "接管操作必须隐藏: {seen:?}"
+        );
+        assert!(
+            seen.iter()
+                .any(|text| text.contains("核心运行时代理系统代理")),
+            "偏好开关仍应可见: {seen:?}"
+        );
+    }
+    #[cfg(windows)]
+    {
+        // Windows：分区提供接管开关与显式恢复（真实 WinINet 验收由主代理）。
+        let seen = texts(&app);
+        assert!(
+            seen.iter()
+                .any(|text| text.contains("核心运行时代理系统代理")),
+            "missing takeover switch: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|text| text.contains("恢复系统代理")),
+            "missing restore action: {seen:?}"
         );
     }
     // 运行卡片按钮存在（fixture 启动用例见下文；这里只验证空态展示）。
@@ -632,4 +670,55 @@ fn unexpected_exit_is_detected_by_the_status_poll() {
         .unwrap();
     app.wait_for_within("未运行", Duration::from_secs(30))
         .unwrap();
+}
+
+/// 启用系统代理前的一次性确认框：取消不写配置、不授权，开关保持关闭。
+#[test]
+fn cancelling_proxy_enable_confirmation_writes_nothing() {
+    let (_dir, entries) = data_root();
+    let mut app = start_app(entries.clone()).0;
+    app.wait_for("尚无订阅。").unwrap();
+    open_core_page(&mut app);
+    let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
+    let before = std::fs::read(&config).expect("read app.toml");
+
+    app.press("id:proxy-toggle").unwrap();
+    app.wait_for("启用系统代理接管？").unwrap();
+    let seen = texts(&app);
+    for expected in ["仅本次接管", "精确归还", "不保存", "重新确认"] {
+        assert!(
+            seen.iter().any(|text| text.contains(expected)),
+            "missing {expected}: {seen:?}"
+        );
+    }
+    app.press("id:proxy-confirm-cancel").unwrap();
+
+    // 取消：配置字节不变（含默认 system_proxy_enabled=false 不被重写）。
+    assert_eq!(std::fs::read(&config).expect("reread"), before);
+    // 开关仍关：再次按下重新弹确认框。
+    app.press("id:proxy-toggle").unwrap();
+    app.wait_for("启用系统代理接管？").unwrap();
+}
+
+/// 确认后保存偏好并授予进程内一次性授权；授权不持久化（app.toml 字节
+/// 只反映偏好字段本身）。
+#[test]
+fn confirming_proxy_enable_saves_preference_only() {
+    let (_dir, entries) = data_root();
+    let mut app = start_app(entries.clone()).0;
+    app.wait_for("尚无订阅。").unwrap();
+    open_core_page(&mut app);
+    let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
+
+    app.press("id:proxy-toggle").unwrap();
+    app.wait_for("启用系统代理接管？").unwrap();
+    app.press("id:proxy-confirm-accept").unwrap();
+    app.wait_for_within("text:/系统代理偏好已保存/", Duration::from_secs(10))
+        .unwrap();
+
+    let saved = String::from_utf8(std::fs::read(&config).expect("read app.toml")).unwrap();
+    assert!(
+        saved.contains("system_proxy_enabled = true"),
+        "偏好已保存: {saved}"
+    );
 }

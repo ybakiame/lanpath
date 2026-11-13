@@ -34,6 +34,12 @@ pub(crate) struct CoreStatus {
     pub(crate) session: Option<SessionSummary>,
     /// 核心异常退出说明（下次成功启动或手动停止时清除）。
     pub(crate) unexpected_exit: Option<String>,
+    /// 系统代理守护是否受支持（Windows 真实守护；测试 fixture 可声明）。
+    pub(crate) proxy_supported: bool,
+    /// 系统代理 ownership 探测（守护真实状态；不支持为 `None`）。
+    /// `Err` 如实上报查询失败（界面显示“未知错误”），不伪造成未接管。
+    pub(crate) proxy_ownership:
+        Option<Result<lanpath_client::sysproxy::SystemProxyOwnership, String>>,
 }
 
 /// 启动成功回执（真实校验 + 真实进程 + 真实监听后的摘要）。

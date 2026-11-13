@@ -43,8 +43,7 @@ const FORBIDDEN_ANCESTORS: &[&str] = &[
 
 pub(crate) struct DataRoot {
     path: PathBuf,
-    /// 根身份 UUID：后续切片（激活/导入归属校验）使用；当前仅测试断言。
-    #[allow(dead_code)]
+    /// 根身份 UUID：系统代理守护日志的 owner（跨进程精确身份）。
     id: uuid::Uuid,
     // 永不删除此文件：争夺者必须锁定同一个 inode。
     _lock: File,
@@ -148,7 +147,7 @@ impl DataRoot {
             .unwrap_or_else(|error| error.into_inner())
     }
 
-    #[cfg(test)]
+    /// 本根身份 UUID（系统代理守护日志 owner；也用于测试断言）。
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.id
     }

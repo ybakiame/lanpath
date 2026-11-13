@@ -10,7 +10,12 @@ use nsh_platform_macos as platform;
 use nsh_platform_windows as platform;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-fn main() -> impl std::process::Termination {
+fn main() -> std::process::ExitCode {
+    // 独立系统代理守护分派：必须在任何 NSH/GUI/存储/env_logger 初始化前
+    // 完成；失败非 0 退出且不留新 GUI（非 Windows 明确不支持）。
+    if let Some(code) = lanpath_desktop_nsh::proxy_guardian::dispatch_from_env() {
+        return std::process::ExitCode::from(code as u8);
+    }
     env_logger::init();
     let tokens = nsh_base::Theme::from_json(include_str!("../theme.json"))
         .expect("embedded NSH theme must be valid")
@@ -25,7 +30,8 @@ fn main() -> impl std::process::Termination {
             size: (960, 640),
             ..Default::default()
         },
-    )
+    );
+    std::process::ExitCode::SUCCESS
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

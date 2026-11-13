@@ -145,9 +145,9 @@ async fn start_requires_a_selected_core() {
     assert!(!core.root.join("sing-box.pid").exists());
 }
 
-/// 本切片未授权 TUN / 系统代理：已保存设置直接拒绝，设置保留。
+/// TUN 仍拒绝；系统代理偏好在非 Windows 不产生运行失败（如实忽略，不接管）。
 #[tokio::test]
-async fn start_rejects_tun_and_system_proxy() {
+async fn start_rejects_tun_and_ignores_proxy_pref_off_windows() {
     let core = test_core();
     seed_subscription(&core.root);
     seed_singbox(&core, 18121, 18122);
@@ -158,8 +158,16 @@ async fn start_rejects_tun_and_system_proxy() {
         config.tun_enabled = false;
         config.system_proxy_enabled = true;
     });
-    let error = core.runtime.start().await.expect_err("sysproxy rejected");
-    assert!(error.to_string().contains("未授权系统代理"), "{error}");
+    // 非 Windows：已保存偏好不接管也不失败；支持性如实上报。
+    let outcome = core
+        .runtime
+        .start()
+        .await
+        .expect("proxy preference ignored off windows");
+    assert_eq!(outcome.mixed_port, 18121);
+    assert!(!core.runtime.proxy_supported());
+    assert!(core.runtime.status().await.proxy_ownership.is_none());
+    core.runtime.stop().await.expect("stop");
 }
 
 /// 端口被占用：预检真实报错（含端口），不产生任何核心进程。

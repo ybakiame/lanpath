@@ -6,6 +6,7 @@
 use nsh_base::{button, dialog, radio, radio_group, theme};
 use nsh_core::prelude::*;
 
+use super::proxy_card::{proxy_card, proxy_confirm_dialog};
 use super::runtime_card::runtime_card;
 use super::{
     CHANNELS, CorePageState, LocalCoreRow, TYPES, core_tag, spawn_check_remote, spawn_delete,
@@ -21,6 +22,8 @@ pub(crate) fn core_page() -> impl IntoElement {
     let inventory = state.clone();
     let notice_state = state.clone();
     let error_state = state.clone();
+    let proxy_state = state.clone();
+    let proxy_dialog_state = state.clone();
     let dialog_state = state;
     view()
         .flex_1()
@@ -28,11 +31,12 @@ pub(crate) fn core_page() -> impl IntoElement {
         .gap_4()
         .child(text("核心").text_size(px(24.0)))
         .child(
-            text("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行，不接管系统代理/TUN")
+            text("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管")
                 .text_color(move || theme().muted_foreground),
         )
         .child(selection_card(selection))
         .child(runtime_card(runtime_state))
+        .child(proxy_card(proxy_state))
         .child(inventory_card(inventory))
         .child(
             text(move || notice_state.notice.get().unwrap_or_default())
@@ -42,6 +46,10 @@ pub(crate) fn core_page() -> impl IntoElement {
             text(move || error_state.error.get().unwrap_or_default())
                 .text_color(move || theme().destructive),
         )
+        .child(when(
+            move || proxy_dialog_state.proxy_confirm.get(),
+            move || proxy_confirm_dialog(proxy_dialog_state.clone()),
+        ))
         .child(when(
             move || dialog_state.pending_delete.get().is_some(),
             move || delete_dialog(dialog_state.clone()),

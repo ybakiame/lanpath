@@ -149,6 +149,43 @@ impl UserSid {
     }
 }
 
+/// 普通权限准入（从 apps/gpui 的 `windows_gui.rs` 移植并改 NSH 文案）：
+/// 应用与系统代理守护都必须以普通用户权限运行；提权会改变 ACL/注册表
+/// 写入身份，恢复语义不再属于当前用户会话。
+pub(crate) fn ensure_unelevated() -> lanpath_common::LanpathResult<()> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    let mut raw = ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) } == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    if raw.is_null() || raw == INVALID_HANDLE_VALUE {
+        return Err(lanpath_common::LanpathError::Config(
+            "invalid current process token".into(),
+        ));
+    }
+    let token = unsafe { OwnedHandle::from_raw_handle(raw) };
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut returned = 0;
+    if unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error().into());
+    }
+    if returned != size_of::<TOKEN_ELEVATION>() as u32 || elevation.TokenIsElevated != 0 {
+        return Err(lanpath_common::LanpathError::Config(
+            "Lanpath NSH Desktop 与系统代理守护必须以普通用户权限运行。请关闭此窗口，从资源管理器正常启动 Lanpath NSH Desktop，不要使用“以管理员身份运行”。".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn private_root(path: &Path) -> io::Result<DirectoryLocks> {
     let user = UserSid::current()?;
     let sid = user.text()?;

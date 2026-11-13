@@ -66,12 +66,14 @@ struct Route {
 
 /// 最小 HTTP/1.1 服务器：按路径后缀路由、`{addr}` 占位符替换为实际地址
 /// （release JSON 里回指本服务器资产）、记录请求路径、`Connection: close`。
+#[allow(dead_code)]
 struct FixtureServer {
     addr: std::net::SocketAddr,
     requests: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
 }
 
+#[allow(dead_code)]
 impl FixtureServer {
     fn new(routes: Vec<Route>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -222,6 +224,7 @@ fn singbox_asset_name(version: &str) -> String {
     )
 }
 
+#[cfg(unix)]
 fn release_json(asset_name: &str) -> String {
     format!(
         "{{\"assets\":[{{\"name\":\"{asset_name}\",\"browser_download_url\":\"http://{{addr}}/asset\"}}]}}"

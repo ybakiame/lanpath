@@ -25,10 +25,15 @@ mod request_settings_view;
 mod storage_init;
 mod subscriptions;
 mod subscriptions_view;
+mod system_proxy;
 #[cfg(windows)]
 mod windows_access;
 #[cfg(windows)]
 mod windows_file;
+
+/// 独立系统代理守护的入口分派（`--proxy-guardian`）；必须是 crate 公开
+/// 接口以便二进制在任何 NSH/GUI/存储初始化前调用。
+pub mod proxy_guardian;
 
 use logs_view::logs_page;
 use profiles_view::profiles_page;
@@ -109,8 +114,10 @@ impl Mode {
 /// Data stays in this app's own identity; nothing of Tauri/GPUI/`apps/nsh`
 /// is read or migrated. The core page starts/stops the selected inventory
 /// core in user mode only (loopback mixed listener + loopback Clash API,
-/// after a real binary config check); no system proxy, TUN or VPN is taken
-/// over. Subscription add/refresh fetch on demand over the network; nothing
+/// after a real binary config check); Windows system proxy is taken over
+/// and precisely restored through an independent ordinary-user guardian
+/// (never by writing the registry from the GUI); TUN/VPN stays refused.
+/// Subscription add/refresh fetch on demand over the network; nothing
 /// else talks to the network.
 #[component]
 pub fn App() -> impl IntoElement {
@@ -163,7 +170,7 @@ fn sidebar(page: Signal<Page>) -> impl IntoElement {
         .bg(move || theme().card)
         .child(text("Lanpath NSH Desktop").text_size(px(17.0)))
         .child(
-            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，不接管系统代理/TUN")
+            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，系统代理经独立守护精确接管（仅 Windows），TUN/VPN 不接管")
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )

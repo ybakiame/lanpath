@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+- `apps/desktop` 新增系统代理守护与精确恢复切片（仅 Windows；TUN/VPN
+  仍拒绝）：核心页“系统代理”分区提供接管开关（只保存偏好，运行中切换
+  走安全启停周期，绝不绕守护直写注册表）、守护真实 ownership 展示
+  （未接管/本应用持有/需要恢复/未知错误）与仅本应用 owner 的显式
+  “恢复系统代理”。新增 `proxy_guardian`：同映像独立普通权限守护进程
+  （`--proxy-guardian` 在 NSH/GUI/存储/env_logger 初始化前分派，失败非
+  0 退出且不留新 GUI；非 Windows 明确不支持），有界版本化参数协议，
+  管道身份 `LanpathNSH-Proxy-<uuid>`（ACL 限定当前用户/BA/SY、拒绝远程
+  客户端、peer_pid+绑定进程句柄、同映像、SID/session/logon/elevation
+  非提权校验全保留），CREATE_BREAKAWAY_FROM_JOB + 自验不继承 Job，不
+  安装服务/启动项；线协议严格序列号与帧界，断流/乱序不是回执。CoreRuntime
+  经 `GuardianSpawner`/`ArmedGuardian` 抽象装配守护（owner 为本数据根
+  UUID，owner_label 为 `com.ybakiame.lanpath.desktop.nsh`）：核心校验/
+  mixed/API 全部就绪后 arm+acquire `127.0.0.1:mixed_port`，接管失败保留
+  核心与守护证据；启动前恢复本应用 abandoned journal；停止先守护
+  restore+确认退出再停核心，守护死亡/通信失败不是恢复证明，只按 owner
+  精确恢复；Drop 先尽力守护恢复再回收核心。复用共享
+  `lanpath-client::sysproxy` 的 `SystemProxySession`/DPAPI 日志/精确类型
+  值恢复，不复制不修改。偏好保存为配置合并（只改 `system_proxy_enabled`
+  一个字段）。非 Windows 不产生运行失败（偏好如实忽略，页面显示仅
+  Windows 支持并隐藏接管操作）。接管外来活动代理需共享
+  `AcquisitionPolicy::ExplicitTakeover`：新增进程内一次性接管授权
+  （AtomicBool，默认 false、绝不持久化、重启即失效）——仅启用确认框
+  确认后置位、停用即清除，启动 acquire 时读取并消费（成功或失败都只
+  影响当次），消费后仅当次以独立 `AcquireTakeover` 请求形态（普通
+  `Acquire` 形态上不可伪造为授权）经共享 `acquire_with_policy(...,
+  ExplicitTakeover)` 发起；未确认时 foreign 仍被 RequireDirect 拒绝。
+  UI 首次启用弹确认框（文案：仅本次接管、停止/退出精确归还、授权不
+  保存），确认才保存偏好并授权，取消不写配置。测试共 35 项新增
+  （guardian protocol/wire/rpc/service、配置合并、运行时编排与
+  consent fake spanner、headless 平台分支与确认框），全部使用
+  fixture，不宣称 Windows 真实 WinINet 验收（待主代理）。
 - `apps/desktop` 新增核心运行时切片：核心页“运行”卡片提供“校验并启动”
   “停止”。启动固定同一份 ClientConfig 快照——拒绝 `tun_enabled`/
   `system_proxy_enabled`（本切片无授权，设置保留）；必须有 confined 库存
