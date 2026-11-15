@@ -6,6 +6,7 @@
 - [运维与发布](operations.md)
 - [品牌](brand-guidelines.md)
 - [GPUI 桌面设计](desktop-design.md)
+- [NSH Desktop 产品与交互设计](../apps/desktop/DESIGN.md)
 - [GPUI 桌面重设计验证](testing/2026-11-07-gpui-desktop-redesign.md)
 - [NSH 跨平台验证](testing/2026-11-11-nsh-validation.md)
 - [NSH Desktop 首个切片验证](testing/2026-11-11-nsh-desktop-first-slice.md)
