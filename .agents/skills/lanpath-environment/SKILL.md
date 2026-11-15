@@ -11,7 +11,6 @@ description: 准备或排查 Lanpath 本地开发环境，涵盖 Nix/devenv、�
 工具及命令以 [devenv.nix](../../../devenv.nix)、[devenv.yaml](../../../devenv.yaml)、[nix](../../../nix/) 和唯一环境锁文件 [devenv.lock](../../../devenv.lock) 为准；不要把本 skill 中的示例当成版本来源。
 
 检查工作区状态、当前平台、Nix 是否可用，以及任务需要桌面还是 Android。不读取或输出私钥、个人配置和完整环境变量。
-公开源码构建可跳过私有协议子模块；不要把无法访问协议仓库误判为构建依赖缺失。
 
 ## 准备所需环境
 

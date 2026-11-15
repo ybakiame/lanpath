@@ -11,10 +11,8 @@ Windows 提供 x64/arm64 安装版与 Portable；Android 提供 arm64 release �
 ## 开发
 
 本地构建、运行和资源生成统一使用本仓 standalone devenv（底层为 Nix）。先按 [环境指南](devenv.md) 安装固定的 devenv 2.4.0；Windows CI 原生工具链例外由维护者明确授权，版本锁定。
-协议子模块为私有治理资源，维护者需单独访问权限；公开源码编译可跳过下面的子模块初始化。
 
 ~~~bash
-git submodule update --init --recursive
 devenv shell
 bun install --frozen-lockfile
 bun run --filter lanpath-app verify
@@ -54,10 +52,10 @@ Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，�
 不等于已公开发布或获得其他平台运行证明。脚本支持边界见[开发指南](docs/development.md)。
 
 本仓可独立构建，不需要 ProxyPanel 检出，不作为其 submodule。
-[文档索引](docs/index.md) · [代理指南](AGENTS.md) · [来源记录](docs/source-provenance.json)。
+[文档索引](docs/index.md) · [代理指南](AGENTS.md)。
 
 ## 许可与来源
 
 AGPL-3.0-or-later，保留 ProxyPanel 与 Lanpath 贡献者归属。源码由 ProxyPanel 客户端整理而来；
-服务端历史保留于原仓，来源基线与工作区变更记录见来源记录。
+服务端历史保留于原仓。
 sing-box、wintun 等第三方组件的许可资产继续随分发保留。

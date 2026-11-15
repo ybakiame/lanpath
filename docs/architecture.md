@@ -20,7 +20,7 @@ Android 经 Kotlin VpnPlugin 和 com.ybakiame.lanpath.core.libbox 运行内嵌 G
 Windows 的同一二进制分发为 NSIS 与 Portable ZIP，便携模式禁用安装器 updater，手动保留 data 更新。
 数据目录移动只在内存中重定位托管核心和证书路径，不自动迁移旧用户目录。见 [ADR-0002](adr/0002-desktop-portable-storage.md)。
 
-首次公开 beta 使用独立 updater 公钥与 Android release 证书，CI 不检出私有协议子模块。
+首次公开 beta 使用独立 updater 公钥与 Android release 证书。
 Windows native 构建例外保持锁定版本，Linux/Android 与发布验签使用项目 Nix；beta/rc 手动更新，稳定版使用签名 latest.json。
 见 [ADR-0003](adr/0003-first-public-release.md)。
 

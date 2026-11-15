@@ -1,4 +1,0 @@
-[submodule ".protocol/agent-development-protocol"]
-	path = .protocol/agent-development-protocol
-	url = https://github.com/ybakiame/agent-development-protocol.git
-	branch = main

@@ -4,8 +4,7 @@ Agent 可按任务读取仓库内的 [环境准备 skill](../.agents/skills/lanp
 [构建验证 skill](../.agents/skills/lanpath-build-verify/SKILL.md)。入口见 AGENTS.md，工具未自动发现时可直接读取。
 Skills 只组织既有流程；命令以 nix/commands.nix、包脚本和构建脚本为准，项目约束仍以 AGENTS 与本文为准。
 
-先 git submodule update --init --recursive，再从仓库根进入 `devenv shell`；根目录运行 lanpath-install。非交互命令使用 `devenv shell -- COMMAND ...`。
-协议子模块为私有治理资源，维护者需有访问权限；普通公开源码构建不依赖该子模块，可跳过其初始化。
+从仓库根进入 `devenv shell`，再运行 lanpath-install。非交互命令使用 `devenv shell -- COMMAND ...`。
 本仓使用独立的 standalone devenv 配置，避免使用宿主工具链；Windows CI 例外见 ADR，GPUI 本机实验例外见下节。
 主 nixpkgs 保持 nixos-26.05 的 `a033e66ab94a6bedf2c3d58d93a36319d3cbbbaf` 快照，Android SDK 输入保持 `b3c4566d2d946a76082ce9be34640d24f7eec477`；均由 devenv.yaml 声明并由唯一项目环境锁 devenv.lock 固定，迁移不升级输入。Bun 1.4.2 通过官方归档与 SHA256 固定，Rust 仍由 rust-toolchain.toml 固定。输入升级须单独授权：先明确修改 devenv.yaml 中的目标 revision，再用 `devenv update nixpkgs` 等定向更新锁文件；不以无参数 `devenv update` 顺带更新全部输入。随后执行受影响目标的完整验证，见 [环境指南](../devenv.md)。
 CLI 固定为 devenv 2.4.0：`nix profile add --accept-flake-config github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv`。配置入口为 devenv.nix，工具、桌面、Android 和共用命令位于 nix/；可用 direnv allow 启用已提交的 .envrc。进入 shell 仅初始化环境，不安装项目依赖、不构建 AAR、不启动代理。入口与锁定机制取代关系见 [ADR-0015](adr/0015-standalone-devenv.md)。
@@ -724,7 +723,6 @@ ADB 已连接设备的选择、按授权安装、日志采集和原生行为验�
 | bugfix   | 既有行为错误 | 复现、定位根因，列回归路径               | 最小修复、真实可用的回归检查               | 记录根因与验证边界，复查无旁支变更   |
 | refactor | 结构改变     | 确认基线、行为不变目标                   | 分步重构、相关 gates                       | 更新路径/架构，核对输出语义          |
 | docs     | 说明变更     | 核对实现和命令证据                       | 修改并验证链接/命令                        | 消除冲突，复查权威与措辞             |
-| adoption | 协议采纳     | 读 ADOPT，Pass 1 inventory/mapping/audit | 无决策冲突后 Pass 2 生成、协调、验证       | schema/conformance/项目检查与 report |
 
 全部工作流按 AGENTS 完成定义验收；冲突、未经授权的架构/门禁/数据变更和未知验收标准
 触发 AGENTS 停止条件。适用能力由项目事实决定，不生成无用途的 Agent/MCP/Prompt 工作流。

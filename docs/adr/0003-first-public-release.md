@@ -12,7 +12,6 @@
 - Android arm64 经项目 Nix 编译 Go AAR、Rust/Kotlin/资源，再用专用 keystore 签名 APK并验证；PR/debug CI 不接触发布密钥。
 - 发布前要求同一 commit 的 CI 成功、两种架构 updater 签名验证成功、Android 签名 APK 构建成功，再生成摘要并发布 Release。
 - 稳定版更新清单为 latest.json；测试版为 prerelease.json，测试版应用通过发布列表手动更新，Portable 仍保留 data 手动更新。
-- 公开构建不读取私有协议子模块。普通开发的协议维护仍按既有 AGENTS 与采纳记录，本次不修改协议子模块。
 
 ## 后果
 

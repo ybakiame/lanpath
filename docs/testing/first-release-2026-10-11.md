@@ -6,7 +6,6 @@
 
 用户确认公开仓库及生成 Lanpath 专用 updater / Android release 密钥。
 私钥与密码仅在受限本机目录和 GitHub Secrets；提交公钥，未提交私钥、keystore 或密码。
-协议子模块私有，不参与公开 CI 检出；云端构建不依赖协议内容。
 
 本地检查均经项目 nix develop：
 
