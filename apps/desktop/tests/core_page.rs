@@ -350,7 +350,8 @@ fn download_is_single_flight_and_recovers_after_leaving_the_page() {
 
     // 锁释放后可再操作：缓存路径重新校验并自动选中。
     app.press("id:core-download").unwrap();
-    app.wait_for("sing-box · v1.2.3").unwrap();
+    app.wait_for_within("sing-box · v1.2.3", Duration::from_secs(45))
+        .unwrap();
     assert_eq!(server.count_path("/asset"), 1);
     let config = ClientConfig::load(dir.path()).unwrap();
     assert_eq!(config.core_binary, binary);

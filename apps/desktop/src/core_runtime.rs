@@ -24,9 +24,10 @@
 //!
 //! 与库存的互斥：启动/停止持有 `CoreInventory` 同根 mutation 锁（在途下载/
 //! 选择/删除立即 busy）；运行中（含停止进行中 running 未清）库存 mutation 由
-//! `is_running_sync` 真实核验拒绝。取锁顺序恒为 mutation → lifecycle →
-//! proxy_guardian → business/active（短临界区，business 只在 arm 守护前
-//! 的读取阶段持有），无反向路径；守护 RPC 绝不持 business 锁，不会死锁。
+//! `is_running_sync` 真实核验拒绝。取锁顺序恒为 activity（启动持读，备份恢复
+//! 准备持写）→ mutation → lifecycle → proxy_guardian → business/active
+//! （短临界区，business 只在 arm 守护前的读取阶段持有），无反向路径；
+//! 守护 RPC 绝不持 business 锁，不会死锁。
 //!
 //! 日志只记操作、端口、版本与阶段，不记配置正文、节点/代理凭据或完整 URL。
 
@@ -225,6 +226,11 @@ impl CoreRuntime {
     }
 
     async fn start_impl(self: &Arc<Self>) -> LanpathResult<StartOutcome> {
+        // 活动读保护覆盖整个启动：备份恢复准备（写保护）会等启动真正结束，
+        // 绝不只凭页面 busy；恢复已准备（待重启）时直接拒绝。内部配置合成
+        // 走无保护的 inner 变体（读保护已由本路径持有）。
+        let _activity = self.root.activity().read().await;
+        self.root.ensure_writable()?;
         // 与库存 mutation 互斥：启动全程持有，在途下载/选择/删除立即 busy。
         let _mutation = self.inventory.try_mutation()?;
         let mut slot = self.lifecycle.lock().await;

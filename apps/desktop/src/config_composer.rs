@@ -119,9 +119,12 @@ impl ConfigComposer {
     /// 同路径补齐规则集（cache_only 只读缓存，非 Core 用已停止运行时的
     /// 请求策略），缺失按共享降级并返回 missing tags。
     ///
-    /// 日志只记节点数、警告数与结果，不记配置正文、节点凭据、远程地址或
-    /// 代理地址。
+    /// 全程持有活动读保护：备份恢复准备（写保护）会等本次合成真正结束；
+    /// 恢复已准备（待重启）时直接拒绝。日志只记节点数、警告数与结果，
+    /// 不记配置正文、节点凭据、远程地址或代理地址。
     pub(crate) async fn compose(&self) -> LanpathResult<ConfigPreview> {
+        let _activity = self.root.activity().read().await;
+        self.root.ensure_writable()?;
         // 快照在进入网络前于业务锁内读出：本次合成的请求策略/端口/active
         // 全部固定，网络途中设置页的修改不影响本次预览。
         let config = {
@@ -135,6 +138,10 @@ impl ConfigComposer {
     /// 覆写解析、规则资源补齐与端口/API 注入全部使用同一快照——网络途中
     /// 设置页的修改不改变本次合成，同一次合成不会重复联网。`compose`
     /// 只是先读已保存快照再调用本方法的便捷入口。
+    ///
+    /// 调用方必须已持有本根活动读保护并已过 pending 门（[`ConfigComposer::compose`]
+    /// 与核心启动路径负责）；内部订阅刷新用无保护的 inner 变体，避免在
+    /// 已持读保护时重复获取读锁（写者排队时会死锁）。
     pub(crate) async fn compose_with_config(
         &self,
         config: &lanpath_client::ClientConfig,
@@ -171,9 +178,11 @@ impl ConfigComposer {
                 ));
             }
             None => {
+                // 外层长任务（compose/核心启动）已持本根活动读保护：刷新
+                // 用 inner 变体，重复获取读锁在写者排队时会死锁。
                 let status = self
                     .subscriptions
-                    .refresh_with_config(selected.id, config)
+                    .refresh_with_config_inner(selected.id, config)
                     .await?;
                 match self.store().load_cached_content(selected.id) {
                     Some(cached) => cached.singbox_nodes,

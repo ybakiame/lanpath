@@ -52,6 +52,11 @@ pub(crate) struct DataRoot {
     /// 引用后另一线程完成绑定”的竞争。锁不跨网络 await（刷新在 await
     /// 前后分别短暂取锁）。
     business: Mutex<()>,
+    /// 异步活动屏障：跨 await 的长任务（订阅刷新写回、配置合成、核心
+    /// 下载、核心启动）持读保护直到完成；备份恢复准备取写保护并等待
+    /// 全部读者清零，持写期间新读者排队。business 锁不跨 await 的约束
+    /// 不变——活动屏障只为“准备恢复前让在途任务安静”服务。
+    activity: Arc<tokio::sync::RwLock<()>>,
     #[cfg(windows)]
     _directories: crate::windows_file::DirectoryLocks,
 }
@@ -119,6 +124,11 @@ impl DataRoot {
         }
         check_owner(&path)?;
         check_tree(&path)?;
+        // 启动恢复事务：数据根独占锁内、任何业务初始化之前，先原子应用
+        // 待恢复备份（prepare 阶段落下的 .backup-pending）。共享事务保证
+        // 要么全部落地、要么原配置保留；恢复日志含糊（崩溃中断）时真实
+        // 失败，绝不带着半恢复状态继续启动。
+        lanpath_client::backup::apply_pending_at_startup(&path)?;
         // 归属/树/独占锁全部就绪后，先初始化统一 TOML 存储（旧 JSON 测试
         // 布局明确拒绝，见 storage_init 模块），再建日志/缓存目录与身份。
         crate::storage_init::initialize(&path)?;
@@ -130,6 +140,7 @@ impl DataRoot {
             id,
             _lock: lock,
             business: Mutex::new(()),
+            activity: Arc::new(tokio::sync::RwLock::new(())),
             #[cfg(windows)]
             _directories: directories,
         })
@@ -145,6 +156,33 @@ impl DataRoot {
         self.business
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// 异步活动屏障（见字段说明）：跨 await 的长任务持读保护，备份恢复
+    /// 准备取写保护并等待在途任务清零。调用方按“activity → mutation →
+    /// business”的固定顺序取锁，无反向路径。
+    pub(crate) fn activity(&self) -> &Arc<tokio::sync::RwLock<()>> {
+        &self.activity
+    }
+
+    /// 是否已有待恢复的备份（`.backup-pending` 存在）。文件由共享准备
+    /// 事务在业务锁内落盘、由重启后的启动事务清除；检查方在同一把业务
+    /// 锁内读取——准备落盘与写路径检查互斥，无 TOCTOU。
+    pub(crate) fn is_restore_pending(&self) -> bool {
+        self.path.join(".backup-pending").exists()
+    }
+
+    /// 写路径的恢复待定门：准备恢复后至重启应用前，订阅/覆写/请求设置/
+    /// 核心库存/核心启动等一切业务写拒绝（读不受限），防止变更被重启
+    /// 后的恢复覆盖。调用方须已持有本根业务锁——准备路径在同一锁内落
+    /// `.backup-pending`，检查与落盘互斥，杜绝 TOCTOU。
+    pub(crate) fn ensure_writable(&self) -> LanpathResult<()> {
+        if self.is_restore_pending() {
+            return Err(LanpathError::Client(
+                "已准备恢复备份，重启应用前不可修改；重启完成前如需放弃，请先重启应用".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// 本根身份 UUID（系统代理守护日志 owner；也用于测试断言）。

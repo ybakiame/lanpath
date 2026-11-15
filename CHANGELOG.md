@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+- `apps/desktop` 新增“加密备份与原子恢复”切片（备份页）：复用共享
+  `lanpath-client::backup`（age 加密 zip、一次性预览缓存、启动事务），
+  不复制加密/事务实现。导出：密码输入恒掩码、至少 12 字符或一键生成
+  共享强密码（24 位），NSH 原生保存对话框选定目标后写出真实
+  `.zip.age`——`create_new` 绝不覆盖已有文件、失败清理半成品，成功后
+  清空密码输入；弱口令/对话框不可用/写出错误真实上屏不伪成功。导入：
+  原生打开对话框选文件（16 MiB 上限），解密预览展示版本/时间/平台/
+  订阅数/覆写数/文件数/字节；preview_id 一次性、300 秒过期（过期/二次
+  消费共享层拒绝），修改文件或密码立即 discard；密码与明文不落日志/
+  storage。恢复确认：弹窗明确停止核心（系统代理按原值恢复）+ 生成加密
+  回滚 + 需重启；确认后先消费一次性授权，再取数据根新增异步活动屏障
+  （`tokio::sync::RwLock`）写保护——订阅刷新/配置合成/核心下载/核心
+  启动等跨 await 长任务全程持读保护，准备写保护等待在途任务真正结束
+  （不只靠页面 busy），持写期间新长任务排队、拿到读保护后仍先过
+  pending 门；随后停止核心（含守护恢复），最后在业务锁内生成加密回滚
+  （`backup-history/Lanpath-rollback-*.zip.age`）并落 `.backup-pending`
+  （回滚捕获与 pending 落盘和全部写路径在同一业务锁内互斥，防 TOCTOU）。
+  成功后至重启一切业务写被拒：订阅/覆写/请求设置/系统代理偏好/核心
+  库存/核心启动在业务锁内过根级 pending 门（`.backup-pending` 文件），
+  读仍允许；在途刷新写回前再查 pending、落下即按 Stale 丢弃结果，绝不
+  覆盖待恢复配置。重启入口为 NSH 可靠重启 API（旧进程退出后才拉起新
+  进程，新进程启动事务应用恢复）；失败提示手动重启，不伪装已重启。
+  启动事务：`DataRoot::open` 独占锁内、storage_init 与任何业务之前先
+  `apply_pending_at_startup` 原子应用（共享事务保证提交/回滚；恢复
+  日志含糊即真实失败——App 级启动门全窗错误、不进业务页，半恢复状态
+  绝不暴露）。备份页展示 `.backup-applied.json` 恢复摘要（用户确认后
+  才 acknowledge 清除）与 `.backup-failed` 真实错误（原配置保留，可
+  重新导入）。失败 prepare 不遗留 pending，可重新解密重试；重复 prepare
+  拒绝。外观按本页格式固定 `None`（NSH 外观 storage 不属于备份格式）。
+  取锁顺序统一为 activity → mutation → lifecycle → proxy_guardian →
+  business，无反向路径；合成内订阅刷新改用无保护 inner 变体，杜绝已持
+  读保护时重复获取读锁的死锁。日志只记文件名/计数/字节/本根路径，不记
+  密码/明文/订阅正文。测试新增 17 项（业务 9：真实 age 往返/错误密码/
+  一次性预览与 discard/弱口令/写出不覆盖与清理/导入限长/屏障等待在途
+  刷新/运行中核心停止/pending 写门与启动应用/失败重试/损坏 pending 真
+  实失败；headless 8：导航/导出真实 age 文件与弱口令/生成强密码/不覆盖/
+  导入摘要与改密码丢弃/端到端待重启与写拒绝/restored 摘要 acknowledge/
+  .backup-failed 横幅），保存对话框与打开对话框经 headless 注入，跨
+  进程重启与 Windows 原生 Open/SaveDialog 验收待主代理。
 - `apps/desktop` 新增系统代理守护与精确恢复切片（仅 Windows；TUN/VPN
   仍拒绝）：核心页“系统代理”分区提供接管开关（只保存偏好，运行中切换
   走安全启停周期，绝不绕守护直写注册表）、守护真实 ownership 展示

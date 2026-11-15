@@ -152,6 +152,7 @@ pub(crate) fn load_preference(root: &DataRoot) -> LanpathResult<bool> {
 /// 核心选择、端口、请求代理、MITM 等无关字段原样保留。
 pub(crate) fn save_preference(root: &DataRoot, enabled: bool) -> LanpathResult<()> {
     let _guard = root.business_guard();
+    root.ensure_writable()?;
     let mut config = crate::request_settings::load_request_config(root.path())?;
     config.system_proxy_enabled = enabled;
     config.save()?;

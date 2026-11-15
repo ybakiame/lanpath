@@ -97,6 +97,7 @@ impl RequestSettings {
         settings: &RequestSettingsDocument,
     ) -> LanpathResult<RequestSettingsDocument> {
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         let mut config = load_request_config(self.root.path())?;
         config.request_proxy_mode = settings.mode;
         config.request_proxy_url.clone_from(&settings.custom_url);

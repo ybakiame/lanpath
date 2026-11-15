@@ -96,6 +96,7 @@ impl Subscriptions {
         let url = normalize_resource_url(url.trim());
         validate_subscription_url(&url).map_err(LanpathError::Validation)?;
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         let subscription = self
             .store()
             .add(&name, &url, true, normalized_text(user_agent))?;
@@ -119,6 +120,7 @@ impl Subscriptions {
         let url = normalize_resource_url(url.trim());
         validate_subscription_url(&url).map_err(LanpathError::Validation)?;
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         let store = self.store();
         if let Some(profile_id) = profile_id {
             validate_profile_reference_locked(self.root.path(), profile_id)?;
@@ -136,6 +138,7 @@ impl Subscriptions {
     /// 停用当前生效订阅时同时取消其生效状态；不影响覆写模板绑定。
     pub(crate) fn set_enabled(&self, id: Uuid, enabled: bool) -> LanpathResult<()> {
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         self.store().set_enabled(id, enabled)?;
         if !enabled {
             self.clear_active_if_matches_locked(id)?;
@@ -148,6 +151,7 @@ impl Subscriptions {
     /// 同时取消其生效状态。
     pub(crate) fn remove(&self, id: Uuid) -> LanpathResult<()> {
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         self.store().remove(id)?;
         self.clear_active_if_matches_locked(id)?;
         tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "删除订阅：{id}");
@@ -165,6 +169,9 @@ impl Subscriptions {
     /// 同步操作经互斥排队，不并发写坏清单。请求策略为读取时已保存配置的
     /// 快照（由 [`load_request_config`] 在业务锁内读出）。
     ///
+    /// 全程持有活动读保护：备份恢复准备（写保护）会等本次刷新真正结束，
+    /// 绝不只凭页面 busy；恢复已准备（待重启）时直接拒绝。
+    ///
     /// 返回前后都重新校验 id/URL/User-Agent：刷新期间被编辑或删除时结果为
     /// [`RefreshStatus::Stale`]，旧响应不会覆盖新状态。
     pub(crate) async fn refresh(&self, id: Uuid) -> LanpathResult<RefreshStatus> {
@@ -175,11 +182,28 @@ impl Subscriptions {
         self.refresh_with_config(id, &config).await
     }
 
-    /// 用调用方固定的 `ClientConfig` 快照刷新（配置合成预览等长时间任务使用）：
+    /// 用调用方固定的 `ClientConfig` 快照刷新（页面刷新与长时间任务使用）：
     /// 快照在调用方进入网络前已读出，刷新全程使用同一策略，途中设置页的修改
     /// 不会改变本次请求策略。写回仍按 id/URL/User-Agent 防 stale，与
-    /// [`Subscriptions::refresh`] 完全同一实现。
+    /// [`Subscriptions::refresh`] 完全同一实现。自身获取活动读保护；
+    /// 已持读保护的外层长任务（配置合成）必须改调
+    /// [`Subscriptions::refresh_with_config_inner`]——重复获取读锁在写者
+    /// 排队时会死锁。
     pub(crate) async fn refresh_with_config(
+        &self,
+        id: Uuid,
+        config: &lanpath_client::ClientConfig,
+    ) -> LanpathResult<RefreshStatus> {
+        let _activity = self.root.activity().read().await;
+        self.root.ensure_writable()?;
+        self.refresh_with_config_inner(id, config).await
+    }
+
+    /// 刷新的实际实现：调用方必须已持有本根活动读保护并已过入口 pending
+    /// 门（[`Subscriptions::refresh`] / [`Subscriptions::refresh_with_config`]）。
+    /// 写回前在业务锁内再查一次恢复待定——准备恢复落下后，在途结果一律按
+    /// Stale 丢弃，绝不覆盖待恢复配置（防 TOCTOU 的纵深一层）。
+    pub(crate) async fn refresh_with_config_inner(
         &self,
         id: Uuid,
         config: &lanpath_client::ClientConfig,
@@ -201,8 +225,11 @@ impl Subscriptions {
         .await;
 
         // 写回前重新读取并比对：id 消失（被删除）或 URL/UA 变化（被编辑）
-        // 都丢弃本次结果。
+        // 都丢弃本次结果；恢复准备已落下时同样丢弃，绝不能覆盖待恢复配置。
         let _guard = self.root.business_guard();
+        if self.root.is_restore_pending() {
+            return Ok(RefreshStatus::Stale);
+        }
         let store = self.store();
         let mut subscriptions = store.load()?;
         let Some(target) = subscriptions
@@ -256,6 +283,7 @@ impl Subscriptions {
     /// 设置当前生效订阅：拒绝不存在或已停用的订阅。
     pub(crate) fn set_active(&self, id: Uuid) -> LanpathResult<()> {
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         let selected = self
             .store()
             .load()?

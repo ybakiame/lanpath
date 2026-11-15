@@ -175,6 +175,7 @@ impl CoreInventory {
         let _mutation = self.try_mutation()?;
         self.ensure_not_running()?;
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "选择核心：{core_type}");
         self.service.for_core(core_type).select(path)
     }
@@ -191,6 +192,11 @@ impl CoreInventory {
         version: &str,
         progress: &(dyn Fn(CoreDownloadStage) + Send + Sync),
     ) -> LanpathResult<ManagedCore> {
+        // 活动读保护覆盖整个下载（跨网络 await）：备份恢复准备（写保护）
+        // 会等下载真正结束，绝不只凭页面 busy；恢复已准备（待重启）时
+        // 直接拒绝。
+        let _activity = self.root.activity().read().await;
+        self.root.ensure_writable()?;
         let _mutation = self.try_mutation()?;
         self.ensure_not_running()?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心：{core_type} {version}");
@@ -206,6 +212,7 @@ impl CoreInventory {
         let _mutation = self.try_mutation()?;
         self.ensure_not_running()?;
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "删除核心：{core_type}");
         self.service.for_core(core_type).delete(path)
     }

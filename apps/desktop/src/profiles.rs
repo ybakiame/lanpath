@@ -70,6 +70,7 @@ impl Profiles {
         let yaml_url = normalize_optional_url(yaml_url);
         let js_url = normalize_optional_url(js_url);
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         let mut profiles = self.store().load()?;
         if profiles
             .iter()
@@ -106,6 +107,7 @@ impl Profiles {
     /// 拒绝（须先在订阅侧解除绑定），不静默解除引用。
     pub(crate) fn remove(&self, id: Uuid) -> LanpathResult<()> {
         let _guard = self.root.business_guard();
+        self.root.ensure_writable()?;
         if SubscriptionStore::new(self.root.path().to_path_buf())
             .load()?
             .iter()
