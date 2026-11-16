@@ -183,7 +183,39 @@ Windows 系统代理经独立普通权限同映像守护精确接管/恢复（�
   pending，可重新解密重试。外观不属于本格式（NSH 外观 storage），导出/恢复
   固定传 `None`。日志只记文件名、计数、字节与本根路径，绝不记密码/明文/订阅
   正文。
-- 外观：浅色 / 深色 / 跟随系统切换，真实调用 `set_color_scheme`，选择持久化到 NSH storage。
+- 外观：13 组命名主题（amethyst 默认，indigo/ocean/forest/sand/rose/
+  graphite/cyan/orange/teal/crimson/gold/slate，各含完整浅色/深色配对，
+  浅色保持高亮微色相、正文与主色对比度 ≥4.5:1，由单测逐项断言）+
+  浅色 / 深色 / 跟随系统模式 + 界面语言（简体中文 / English / 跟随系统）+
+  动效偏好（跟随系统 / 减少动效）。全部真实接入运行时切换：`set_tokens`
+  换主题 token、`set_color_scheme` 换模式、`set_locale` 换语言（`t!`
+  响应式读取），切换不重建组件树与业务运行状态；选择持久化到 NSH
+  storage（`theme` / 沿用既有 `appearance` / `language` / `reduce_motion`），
+  启动时 `prefs().install()` 恢复。界面缩放是明确的不支持项：NSH 0.5.0
+  的 `font_scale` 仅平台可读、无应用级覆盖 API，外观页只展示当前系统
+  文本缩放，不提供存而不生效的选项。
+
+## 组件层与画廊（阶段 0）
+
+`src/ui/` 为语义组件层（DESIGN.md 5）：Button/IconButton（variant ×
+size × loading/disabled，press 缩放 0.97/0.95）、Input/Field（invalid
+态）、Select/Switch/Checkbox/RadioRow/TabBar、Badge/Spinner/Skeleton/
+Empty/StatusBar/Toast、Surface/Separator/ListItem/Toolbar、ConfirmDialog/
+Tooltip、DataTable 薄封装与 ThemePreview。组件只按语义 token 取色，
+功能页不传颜色/圆角/局部字体；颜色字面量仅存在于 `src/ui/theme.rs` 的
+调色板构建。动效 token（instant 120ms / fast 180ms / base 240ms /
+slow 360ms / slower 500ms、距离 4/8/16pt）集中在 `src/ui/motion.rs`，
+减少动效（系统或偏好）时过渡时长归零、内容立即可读。
+
+组件画廊仅开发验收：`cargo run -- --ui-gallery`（普通用户导航没有
+入口），覆盖各 variant/size、交互状态、13 主题（点击应用并持久化）、
+明暗、语言与 reduced motion；在系统缩放场景下同样可读（NSH 0.5.0
+无应用级缩放 API，无应用内缩放控件）。供 Windows UIA 与截图验收。
+
+翻译集中在 `locales/zh-CN.yml` 与 `locales/en.yml`（意图稳定 key，
+参数 `%{name}`），编译期嵌入经根组件注入；zh-TW 结构预留（运行时
+回退链 `zh-Hant-TW → zh → en` 已可用，新增语言只需加 yml）。导航与
+外观基础设施已接入 i18n，业务页翻译随后续阶段迁移。
 
 订阅页底部保留“共享解析验证”卡片：调用共享 `lanpath-client::parse_subscription_body`
 解析固定测试订阅，作为独立的共享解析验证，与订阅列表数据无关。
@@ -226,6 +258,7 @@ Windows 系统代理经独立普通权限同映像守护精确接管/恢复（�
 ```sh
 cargo test --locked      # 全部测试：单元/数据根准入（src）+ 纯 Rust headless（tests/）
 cargo run                # 本机原生后端直接运行 Rust 根组件
+cargo run -- --ui-gallery  # 组件画廊（仅开发验收，普通导航无入口）
 ```
 
 测试不依赖 QuickJS/TSX：headless 场景在 `tests/` 下用 `nsh_testing::Headless`
@@ -246,5 +279,22 @@ mixed_port 指向本机闲置端口，断言刷新真实连接拒绝、错误落
 真实文件 + 本线程延迟服务器覆盖；跨进程重启（可靠重启 API 与启动事务在真机的完整链路）
 待主代理 Windows 原生验收。
 
-`nsh.json` 命名根组件，`src/lib.rs` 是 UI，`theme.json` 沿用 `apps/nsh` 的浅色/深色
-令牌。NSH 生成的文件在 `.nsh/`，Cargo 构建目录为 `target/`。
+阶段 0 基础（`src/ui/`、locales、画廊）测试：主题单测断言 13 组配对
+完整性、浅色背景高亮不脏灰、正文/主色对比度 ≥4.5:1 与圆角 token；
+locales 单测断言中英文 key 集合与 `%{参数}` 占位一致。headless 外观
+场景（`tests/appearance.rs`）覆盖导航、主题/模式/语言/动效的真实切换
+与持久化、启动恢复、语言切换不重建业务状态（存储语言预置 zh-CN，
+翻译前中文断言不变）；画廊场景（`tests/ui_gallery.rs`）用与
+`--ui-gallery` 同一条 `gallery_root()` 构建链断言分区完整性、按钮
+loading 禁用态、确认对话框回调、列表行选中、引擎级 reduced motion
+下内容立即可读与存储语言偏好生效。
+
+Windows 原生验收已在隔离数据根完成：1180×800 下主题网格 4 列、960×640
+下 2 列并可滚动；检查 amethyst/ocean 明暗画面、英文长文本、下拉当前值、
+语言切换后的字段提示、减少动效，以及对话框 Escape 关闭与焦点返回触发按钮。
+Windows Debug 构建和严格 all-target Clippy 通过；没有启动核心或修改系统代理。
+应用内 75–150% 缩放仍不受 NSH 0.5.0 支持，本轮也未改宿主系统缩放设置。
+
+`nsh.json` 命名根组件，`src/lib.rs` 是 UI；主题令牌集中由 `src/ui/theme.rs`
+注册（13 组命名主题，运行时 `set_tokens` 切换），翻译在 `locales/`。
+NSH 生成的文件在 `.nsh/`，Cargo 构建目录为 `target/`。

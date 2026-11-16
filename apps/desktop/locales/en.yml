@@ -1,0 +1,101 @@
+_version: 1
+
+app.title: Lanpath NSH Desktop
+app.tagline: Pure Rust · NSH 0.5.0 · Network access only for subscription add/refresh and core query/download; the core validates and starts in user-mode loopback only, the system proxy is taken over and precisely restored by an independent guardian (Windows only), TUN/VPN is never touched
+
+nav.subscriptions: Subscriptions
+nav.request_settings: Request Settings
+nav.profiles: Overrides
+nav.core: Core
+nav.config: Config
+nav.logs: Logs
+nav.backup: Backup
+nav.appearance: Appearance
+
+common.cancel: Cancel
+common.confirm: Confirm
+common.close: Close
+common.save: Save
+common.selected: "Selected: %{name}"
+common.current: "Effective now: %{name}"
+
+appearance.title: Appearance
+appearance.subtitle: Theme, appearance mode, language and motion · changes apply immediately and are saved
+appearance.section.theme: Theme
+appearance.section.mode: Appearance Mode
+appearance.section.language: Language
+appearance.section.motion: Motion
+appearance.mode.system: System
+appearance.mode.light: Light
+appearance.mode.dark: Dark
+appearance.language.system: System
+appearance.language.zh_cn: Simplified Chinese
+appearance.language.en: English
+appearance.motion.system: System
+appearance.motion.reduce: Reduce motion
+appearance.theme.default_mark: Default
+appearance.scale_note: UI scale follows the system text scale (now %{percent}%); NSH 0.5.0 has no app-level scale override, so no non-functional option is offered here
+appearance.hover_preview: Point at a theme to preview; click to apply and save
+
+gallery.title: Component Gallery
+gallery.subtitle: Development acceptance only (--ui-gallery) · no entry in normal user navigation
+gallery.section.buttons: Buttons
+gallery.section.inputs: Input / Field
+gallery.section.selection: Select / Switch / Checkbox / Radio / Tabs
+gallery.section.feedback: Badge / Spinner / Empty / Skeleton / Toast
+gallery.section.overlays: Dialog / Tooltip / Popover / Menu
+gallery.section.data: ListItem / DataTable / StatusBar
+gallery.section.theme: ThemePreview
+gallery.section.motion: MotionTokens
+gallery.variant.primary: Primary
+gallery.variant.secondary: Secondary
+gallery.variant.outline: Outline
+gallery.variant.ghost: Ghost
+gallery.variant.destructive: Destructive
+gallery.size.sm: Small
+gallery.size.md: Medium
+gallery.size.lg: Large
+gallery.state.normal: Normal
+gallery.state.disabled: Disabled
+gallery.state.loading: Loading
+gallery.state.invalid: Invalid
+gallery.action.press_me: Press me
+gallery.action.open_dialog: Open dialog
+gallery.action.show_toast: Show toast
+gallery.action.open_menu: Open menu
+gallery.action.open_popover: Open popover
+gallery.action.submit: Submit
+gallery.action.delete: Delete
+gallery.action.refresh: Refresh
+gallery.field.name: Name
+gallery.field.name_hint: Use intent-stable keys; test IDs are never translated
+gallery.field.name_placeholder: Enter a name
+gallery.field.error_required: Name must not be empty
+gallery.badge.default: Default
+gallery.badge.success: Success
+gallery.badge.warning: Warning
+gallery.badge.destructive: Error
+gallery.badge.outline: Outline
+gallery.empty.title: Nothing here yet
+gallery.empty.description: Real content appears after you add a subscription
+gallery.list.item_title: List item %{index}
+gallery.list.item_subtitle: A stable row, identical to its business identity
+gallery.menu.item_one: Action one
+gallery.menu.item_two: Action two
+gallery.menu.delete: Delete (destructive)
+gallery.tooltip.content: A tooltip, colored by semantic tokens
+gallery.popover.content: Popover content · fades in from the trigger, moving 4pt, at slow
+gallery.dialog.title: Confirm action
+gallery.dialog.description: A development-acceptance dialog; the backdrop fades in and the content rises 8pt
+gallery.toast.message: Saved (gallery demo)
+gallery.motion.demo: Motion demo (enter / press / loop)
+gallery.motion.instant: instant 120ms
+gallery.motion.fast: fast 180ms
+gallery.motion.base: base 240ms
+gallery.motion.slow: slow 360ms
+gallery.motion.slower: slower 500ms
+gallery.motion.distance: Distance 4 / 8 / 16pt
+gallery.motion.press: Press scale 0.97 / 0.95
+gallery.motion.reduced_on: Rendered with reduced motion (immediately readable)
+gallery.motion.spinning: Spinning (loop playing)
+gallery.theme.pick: Click to apply a theme; point to preview

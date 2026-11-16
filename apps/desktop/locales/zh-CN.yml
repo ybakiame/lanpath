@@ -1,0 +1,101 @@
+_version: 1
+
+app.title: Lanpath NSH Desktop
+app.tagline: 纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，系统代理经独立守护精确接管（仅 Windows），TUN/VPN 不接管
+
+nav.subscriptions: 订阅
+nav.request_settings: 请求设置
+nav.profiles: 覆写
+nav.core: 核心
+nav.config: 配置
+nav.logs: 日志
+nav.backup: 备份
+nav.appearance: 外观
+
+common.cancel: 取消
+common.confirm: 确认
+common.close: 关闭
+common.save: 保存
+common.selected: 已选择：%{name}
+common.current: 当前生效：%{name}
+
+appearance.title: 外观
+appearance.subtitle: 主题、外观模式、界面语言与动效 · 选择立即生效并保存
+appearance.section.theme: 主题
+appearance.section.mode: 外观模式
+appearance.section.language: 界面语言
+appearance.section.motion: 动效
+appearance.mode.system: 跟随系统
+appearance.mode.light: 浅色
+appearance.mode.dark: 深色
+appearance.language.system: 跟随系统
+appearance.language.zh_cn: 简体中文
+appearance.language.en: English
+appearance.motion.system: 跟随系统
+appearance.motion.reduce: 减少动效
+appearance.theme.default_mark: 默认
+appearance.scale_note: 界面缩放跟随系统文本缩放（当前 %{percent}%）；NSH 0.5.0 不提供应用级缩放覆盖，不在此提供不生效的选项
+appearance.hover_preview: 指向主题可预览，点击应用并保存
+
+gallery.title: 组件画廊
+gallery.subtitle: 仅开发验收使用（--ui-gallery）· 普通用户导航没有此入口
+gallery.section.buttons: 按钮 Button
+gallery.section.inputs: 输入与字段 Input / Field
+gallery.section.selection: 选择控件 Select / Switch / Checkbox / Radio / Tabs
+gallery.section.feedback: 反馈 Badge / Spinner / Empty / Skeleton / Toast
+gallery.section.overlays: 浮层 Dialog / Tooltip / Popover / Menu
+gallery.section.data: 数据展示 ListItem / DataTable / StatusBar
+gallery.section.theme: 主题 ThemePreview
+gallery.section.motion: 动效 MotionTokens
+gallery.variant.primary: 主要
+gallery.variant.secondary: 次要
+gallery.variant.outline: 描边
+gallery.variant.ghost: 幽灵
+gallery.variant.destructive: 危险
+gallery.size.sm: 小
+gallery.size.md: 中
+gallery.size.lg: 大
+gallery.state.normal: 常规
+gallery.state.disabled: 禁用
+gallery.state.loading: 加载中
+gallery.state.invalid: 无效
+gallery.action.press_me: 点我
+gallery.action.open_dialog: 打开对话框
+gallery.action.show_toast: 显示 Toast
+gallery.action.open_menu: 打开菜单
+gallery.action.open_popover: 打开 Popover
+gallery.action.submit: 提交
+gallery.action.delete: 删除
+gallery.action.refresh: 刷新
+gallery.field.name: 名称
+gallery.field.name_hint: 使用意图稳定的 key，不翻译测试 ID
+gallery.field.name_placeholder: 输入名称
+gallery.field.error_required: 名称不能为空
+gallery.badge.default: 默认
+gallery.badge.success: 成功
+gallery.badge.warning: 警告
+gallery.badge.destructive: 错误
+gallery.badge.outline: 描边
+gallery.empty.title: 暂无数据
+gallery.empty.description: 添加订阅后，这里会显示真实内容
+gallery.list.item_title: 列表行 %{index}
+gallery.list.item_subtitle: 与业务身份一致的稳定行
+gallery.menu.item_one: 操作一
+gallery.menu.item_two: 操作二
+gallery.menu.delete: 删除（危险）
+gallery.tooltip.content: 这是一个 Tooltip，来自语义 token
+gallery.popover.content: Popover 内容 · 从触发点以 slow 淡入并移动 4pt
+gallery.dialog.title: 确认操作
+gallery.dialog.description: 这是一个开发验收对话框，遮罩淡入、内容上升 8pt
+gallery.toast.message: 已保存（画廊演示）
+gallery.motion.demo: 动效演示（进入 / 按下 / 循环）
+gallery.motion.instant: instant 120ms
+gallery.motion.fast: fast 180ms
+gallery.motion.base: base 240ms
+gallery.motion.slow: slow 360ms
+gallery.motion.slower: slower 500ms
+gallery.motion.distance: 距离 4 / 8 / 16pt
+gallery.motion.press: 按下缩放 0.97 / 0.95
+gallery.motion.reduced_on: 已按减少动效渲染（立即可读）
+gallery.motion.spinning: 旋转中（循环播放）
+gallery.theme.pick: 点击应用主题，指向预览

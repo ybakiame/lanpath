@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- `apps/desktop` 阶段 0 设计基础：`src/ui/` 语义组件层（Button/
+  IconButton、Input/Field、Select/Switch/Checkbox/RadioRow/TabBar、
+  Badge/Spinner/Skeleton/Empty/StatusBar/Toast、Surface/Separator/
+  ListItem/Toolbar、ConfirmDialog/Tooltip、DataTable 薄封装、
+  ThemePreview），组件只按语义 token 取色，功能页不传颜色/圆角/
+  局部字体；动效 token（instant/fast/base/slow/slower、距离 4/8/16pt、
+  press 0.97/0.95）集中在 `src/ui/motion.rs`，减少动效时过渡归零。
+  13 组命名主题（amethyst 默认）完整浅色/深色配对，集中注册于
+  `src/ui/theme.rs`，经 `set_tokens` 运行时切换；外观页重构为主题
+  网格 + 外观模式 + 界面语言（zh-CN/en/跟随系统，zh-TW 结构预留）
+  + 动效偏好，全部持久化（`theme`/`appearance`/`language`/
+  `reduce_motion`）并经 `prefs().install()` 启动恢复；界面缩放为
+  诚实的不支持项（NSH 0.5.0 `font_scale` 仅平台可读），不提供存而
+  不生效的选项。翻译集中 `locales/`（编译期嵌入、根注入、`set_locale`
+  切换、key 意图稳定），导航与外观基础设施已 i18n 化。组件画廊仅
+  开发验收：`cargo run -- --ui-gallery`，普通用户导航无入口。测试：
+  主题完整性/亮度/对比度单测、locales 结构单测、外观页持久化与
+  运行时切换 headless、画廊交互/reduced motion headless。删除旧
+  `theme.json`（由主题注册表取代），`nsh.json` 移除 `theme` 键并
+  声明 `locales`。
+
 - `apps/desktop` 新增“加密备份与原子恢复”切片（备份页）：复用共享
   `lanpath-client::backup`（age 加密 zip、一次性预览缓存、启动事务），
   不复制加密/事务实现。导出：密码输入恒掩码、至少 12 字符或一键生成

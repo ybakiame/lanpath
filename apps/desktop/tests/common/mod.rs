@@ -6,7 +6,6 @@
 
 #![allow(dead_code)]
 
-use nsh_core::element::Root;
 use nsh_core::storage::{StorageBackend, StorageChange};
 use nsh_core::{Points, Size};
 use nsh_engine::EngineConfig;
@@ -274,19 +273,34 @@ impl StorageBackend for MemoryStorage {
 }
 
 /// 以给定 storage 预置在桌面视口（1100×800，与原生窗口同量级；行内含
-/// 开关/删除按钮，默认 390pt 手机视口过窄）启动应用。
+/// 开关/删除按钮，默认 390pt 手机视口过窄）启动应用：与生产同一条
+/// `root()` 构建链（翻译 + 默认主题 token 注入）。
 pub fn start_app(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStorage>) {
     let storage = MemoryStorage::new(entries);
     let config = EngineConfig {
         viewport: Size::new(Points(1100.0), Points(800.0)),
         storage: Some(storage.clone()),
-        ..EngineConfig::new(Root::of::<lanpath_desktop_nsh::App>())
+        ..EngineConfig::new(lanpath_desktop_nsh::root())
     };
     let app = Headless::start(config).expect("start the headless app");
     (app, storage)
 }
 
+/// 以给定 storage 预置启动组件画廊（`--ui-gallery` 的同一根构建链）。
+pub fn start_gallery(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStorage>) {
+    let storage = MemoryStorage::new(entries);
+    let config = EngineConfig {
+        viewport: Size::new(Points(1100.0), Points(800.0)),
+        storage: Some(storage.clone()),
+        ..EngineConfig::new(lanpath_desktop_nsh::gallery_root())
+    };
+    let app = Headless::start(config).expect("start the headless gallery");
+    (app, storage)
+}
+
 /// 每个场景独立的临时数据根：经 storage 键注入，走与生产一致的数据根准入。
+/// 预置界面语言 zh-CN：既有业务页用例以中文文案驱动（与翻译前的
+/// 断言一致）；翻译相关用例自行覆盖该预置。
 pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
     let dir = tempfile::tempdir().expect("create a temporary data root");
     let mut entries = BTreeMap::new();
@@ -294,6 +308,7 @@ pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
         "lanpath_desktop_nsh.data_dir".to_owned(),
         dir.path().to_string_lossy().into_owned(),
     );
+    entries.insert("language".to_owned(), "zh-CN".to_owned());
     (dir, entries)
 }
 

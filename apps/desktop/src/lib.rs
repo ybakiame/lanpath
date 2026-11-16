@@ -1,6 +1,6 @@
-use nsh_base::{button, radio, radio_group, theme};
+use nsh_base::theme;
+use nsh_core::element::Root;
 use nsh_core::prelude::*;
-use nsh_core::storage::Storage;
 
 mod backup;
 mod backup_view;
@@ -15,6 +15,7 @@ mod core_view;
 mod data_root;
 mod disk_log_writer;
 mod disk_logs_view;
+mod i18n;
 mod log_buffer;
 mod log_capture;
 mod log_service;
@@ -28,6 +29,7 @@ mod storage_init;
 mod subscriptions;
 mod subscriptions_view;
 mod system_proxy;
+pub mod ui;
 #[cfg(windows)]
 mod windows_access;
 #[cfg(windows)]
@@ -46,12 +48,22 @@ use backup_view::backup_page;
 use config_view::config_page;
 use core_view::core_page;
 
-/// Where the appearance page keeps the user's choice between launches.
-const APPEARANCE_KEY: &str = "appearance";
+/// 应用根：注入编译期嵌入的翻译与默认主题 token；持久化的主题/模式/
+/// 语言由 App 启动时经 `prefs().install()` 应用到运行时（`set_tokens`/
+/// `set_color_scheme`/`set_locale`），无需重建组件树。
+pub fn root() -> Root {
+    let translations = i18n::translations().expect("embedded locales must parse");
+    Root::of::<App>()
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Amethyst))
+        .translations(translations)
+}
 
-#[native_module("lanpath-desktop-nsh/native")]
-fn native(registry: &mut Registry) {
-    registry.register::<App>();
+/// 组件画廊根：仅 `--ui-gallery` 启动；普通用户导航没有入口。
+pub fn gallery_root() -> Root {
+    let translations = i18n::translations().expect("embedded locales must parse");
+    Root::of::<ui::gallery::Gallery>()
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Amethyst))
+        .translations(translations)
 }
 
 /// The sidebar's pages: only what this slice implements is listed.
@@ -67,49 +79,31 @@ enum Page {
     Appearance,
 }
 
-/// The appearance the user asks for, one of the page's three radios.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    Light,
-    Dark,
-    System,
-}
-
-impl Mode {
-    /// The label the radios and the summary show.
-    fn label(self) -> &'static str {
+impl Page {
+    /// 导航项的 i18n key（意图稳定，不随语言变化）。
+    fn label_key(self) -> &'static str {
         match self {
-            Mode::Light => "浅色",
-            Mode::Dark => "深色",
-            Mode::System => "跟随系统",
+            Page::Subscription => "nav.subscriptions",
+            Page::RequestSettings => "nav.request_settings",
+            Page::Profiles => "nav.profiles",
+            Page::Core => "nav.core",
+            Page::Config => "nav.config",
+            Page::Logs => "nav.logs",
+            Page::Backup => "nav.backup",
+            Page::Appearance => "nav.appearance",
         }
     }
 
-    /// The value kept in storage.
-    fn storage_value(self) -> &'static str {
+    fn test_id(self) -> &'static str {
         match self {
-            Mode::Light => "light",
-            Mode::Dark => "dark",
-            Mode::System => "system",
-        }
-    }
-
-    /// What NSH is asked for; the resolved colors follow the system while
-    /// `System`.
-    fn appearance(self) -> Appearance {
-        match self {
-            Mode::Light => Appearance::Light,
-            Mode::Dark => Appearance::Dark,
-            Mode::System => Appearance::System,
-        }
-    }
-
-    /// The stored choice, `System` when none or not one of the three.
-    fn load() -> Self {
-        match Storage::get_item(APPEARANCE_KEY).as_deref() {
-            Some("light") => Mode::Light,
-            Some("dark") => Mode::Dark,
-            _ => Mode::System,
+            Page::Subscription => "nav-subscriptions",
+            Page::RequestSettings => "nav-request-settings",
+            Page::Profiles => "nav-profiles",
+            Page::Core => "nav-core",
+            Page::Config => "nav-config",
+            Page::Logs => "nav-logs",
+            Page::Backup => "nav-backup",
+            Page::Appearance => "nav-appearance",
         }
     }
 }
@@ -151,6 +145,7 @@ pub fn App() -> impl IntoElement {
         .flex_row()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
+        .child(ui::feedback::toast_host())
         .child(when(
             move || failure_state.get().is_some(),
             move || startup_failure(failure_state),
@@ -158,10 +153,9 @@ pub fn App() -> impl IntoElement {
         .child(when(
             move || main_state.get().is_none(),
             move || {
-                let loaded = Mode::load();
-                if loaded != Mode::System {
-                    set_color_scheme(loaded.appearance());
-                }
+                // 外观安装：把持久化的主题/模式/语言应用到运行时。
+                // 只改 token/外观/locale，组件树与业务运行状态不重建。
+                ui::prefs::prefs().install();
                 view().flex_1().flex_row().child(sidebar(page)).child(
                     view()
                         .flex_1()
@@ -182,7 +176,7 @@ pub fn App() -> impl IntoElement {
                         .child(when(move || page.get() == Page::Backup, backup_page))
                         .child(when(
                             move || page.get() == Page::Appearance,
-                            appearance_page,
+                            ui::appearance_page::appearance_page,
                         )),
                 )
             },
@@ -213,111 +207,75 @@ fn startup_failure(error: Signal<Option<String>>) -> impl IntoElement {
 
 fn sidebar(page: Signal<Page>) -> impl IntoElement {
     view()
-        .w(px(208.0))
+        .w(px(216.0))
         .flex_none()
         .flex_col()
         .p_4()
         .gap_2()
-        .bg(move || theme().card)
-        .child(text("Lanpath NSH Desktop").text_size(px(17.0)))
+        .bg(move || theme().sidebar)
+        .border_r(px(1.0))
+        .border_color(move || theme().sidebar_border)
+        .text_color(move || theme().sidebar_foreground)
         .child(
-            text("纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，系统代理经独立守护精确接管（仅 Windows），TUN/VPN 不接管")
+            text(|| t!("app.title"))
+                .text_size(px(17.0))
+                .font_weight(FontWeight::MEDIUM),
+        )
+        .child(
+            text(|| t!("app.tagline"))
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
-        .child(nav_item(page, Page::Subscription, "订阅"))
-        .child(nav_item(page, Page::RequestSettings, "请求设置"))
-        .child(nav_item(page, Page::Profiles, "覆写"))
-        .child(nav_item(page, Page::Core, "核心"))
-        .child(nav_item(page, Page::Config, "配置"))
-        .child(nav_item(page, Page::Logs, "日志"))
-        .child(nav_item(page, Page::Backup, "备份"))
-        .child(nav_item(page, Page::Appearance, "外观"))
+        .child(ui::layout::separator())
+        .child(nav_item(page, Page::Subscription))
+        .child(nav_item(page, Page::RequestSettings))
+        .child(nav_item(page, Page::Profiles))
+        .child(nav_item(page, Page::Core))
+        .child(nav_item(page, Page::Config))
+        .child(nav_item(page, Page::Logs))
+        .child(nav_item(page, Page::Backup))
+        .child(nav_item(page, Page::Appearance))
 }
 
-fn nav_item(page: Signal<Page>, target: Page, label: &'static str) -> impl IntoElement {
+fn nav_item(page: Signal<Page>, target: Page) -> impl IntoElement {
     let selected = move || page.get() == target;
-    button()
-        .px_3()
-        .py_2()
+    let label_key = target.label_key();
+    let el = nsh_base::button()
+        .selected(selected)
+        .px(px(12.0))
+        .py(px(8.0))
         .rounded(move || theme().radius)
         .items_center()
+        .cursor_pointer()
+        .transition_colors()
         .bg(move || {
             if selected() {
-                theme().primary
+                theme().sidebar_accent
             } else {
-                theme().card
+                transparent_black().into()
+            }
+        })
+        .text_color(move || {
+            if selected() {
+                theme().sidebar_accent_foreground
+            } else {
+                theme().sidebar_foreground
             }
         })
         .on_press(move || page.set(target))
-        .child(text(label).text_color(move || {
-            if selected() {
-                theme().primary_foreground
-            } else {
-                theme().foreground
-            }
-        }))
-}
-
-fn appearance_page() -> impl IntoElement {
-    let mode = signal(Mode::load());
-    view()
-        .flex_1()
-        .flex_col()
-        .gap_4()
-        .child(text("外观").text_size(px(24.0)))
-        .child(
-            text("窗口浅色 / 深色 · 选择立即生效并保存")
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            radio_group()
-                .flex_col()
-                .gap_2()
-                .child(mode_radio(mode, Mode::Light))
-                .child(mode_radio(mode, Mode::Dark))
-                .child(mode_radio(mode, Mode::System)),
-        )
-        .child(text(move || format!("已选择：{}", mode.get().label())))
-        .child(
-            text(move || format!("当前生效：{}", if dark() { "深色" } else { "浅色" }))
-                .text_color(move || theme().muted_foreground),
-        )
-}
-
-fn mode_radio(mode: Signal<Mode>, target: Mode) -> impl IntoElement {
-    let checked = move || mode.get() == target;
-    radio()
-        .checked(checked)
-        .on_change(move |_: &bool| {
-            mode.set(target);
-            set_color_scheme(target.appearance());
-            let _ = Storage::set_item(APPEARANCE_KEY, target.storage_value());
-        })
         .child(
             view()
-                .test_id(match target {
-                    Mode::Light => "appearance-light",
-                    Mode::Dark => "appearance-dark",
-                    Mode::System => "appearance-system",
-                })
                 .flex_row()
                 .items_center()
-                .gap_3()
-                .child(
+                .gap_2()
+                .child(when(selected, || {
                     view()
-                        .size(px(16.0))
+                        .size(px(6.0))
                         .rounded_full()
-                        .border(px(1.0))
-                        .border_color(move || theme().muted_foreground)
-                        .bg(move || {
-                            if checked() {
-                                theme().primary
-                            } else {
-                                theme().card
-                            }
-                        }),
-                )
-                .child(text(target.label())),
+                        .bg(move || theme().sidebar_primary)
+                }))
+                .child(text(move || t!(label_key)).text_size(px(14.0))),
         )
+        .into_element();
+    view().test_id(target.test_id()).child(el).into_element()
 }

@@ -17,10 +17,13 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(code as u8);
     }
     env_logger::init();
-    let tokens = nsh_base::Theme::from_json(include_str!("../theme.json"))
-        .expect("embedded NSH theme must be valid")
-        .into_tokens();
-    let root = platform::Root::of::<lanpath_desktop_nsh::App>().tokens(tokens);
+    // `--ui-gallery`：仅开发验收的组件画廊（普通用户导航没有入口）。
+    let gallery = std::env::args().any(|arg| arg == "--ui-gallery");
+    let root = if gallery {
+        lanpath_desktop_nsh::gallery_root()
+    } else {
+        lanpath_desktop_nsh::root()
+    };
     platform::run_app(
         platform::AppSource::Rust(root),
         platform::AppOptions {
