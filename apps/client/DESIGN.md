@@ -1,10 +1,4 @@
-# 岚径 · Lanpath 品牌
-
-中文岚径，英文 Lanpath；双端展示岚径 · Lanpath，Android 启动器短名岚径。
-正式产品名 Lanpath，应用标识 com.ybakiame.lanpath；域名与应用商店名称可用性未完成核验。
-图标为深靛蓝 #292D63 底、白色抽象路径 L。源在 apps/client/public/brand。
-在 Nix 中进入 apps/client 后运行 bun run tauri icon public/brand/icons.json 可生成各平台图标。
-单色 Android 通知矢量与前景保持同形；自适应图标有独立前景、背景和 monochrome 图层。
+# Lanpath tauri 产品与交互设计
 
 ## 客户端外观
 
@@ -26,12 +20,6 @@
 深色纯黑背景偏好保存为 `lanpath-ui-oled-black`。旧风格键停止读取，不改写或删除已有用户数据。
 首帧脚本与 React Provider 使用相同值域及平台默认值，非法值回落默认；存储不可用时支持会话内切换。
 颜色在 `packages/ui/src/appearance.css` 中集中定义，组件使用语义令牌，外观偏好不写入核心配置。
-
-## GPUI 实验桌面
-
-独立桌面遵循 [桌面设计说明](desktop-design.md)：雾灰／炭灰背景、清晰的不透明内容层、
-Windows 可选亚克力材质、紧凑导航和统一表单。品牌标识直接嵌入现有 SVG，保持原有颜色；
-界面图标使用 GPUI Kit 的 Lucide 图标族。外观写入本机 `app.toml`，不读取 WebView 存储键。
 
 ## 图标
 
