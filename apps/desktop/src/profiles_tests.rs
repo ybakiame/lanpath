@@ -1,12 +1,11 @@
-//! 覆写模板业务测试：CRUD、重名拒绝、非法 YAML/JS/URL 不落盘、删除被
+//! 覆写模板业务测试：CRUD、重名拒绝、非法 TS/URL 不落盘、删除被
 //! 订阅引用时拒绝、解绑后删除、同根并发绑定/删除不残留悬空引用。
 //! 不联网：远程覆写地址只保存不下载。
 
 use super::*;
 use crate::subscriptions::Subscriptions;
 
-const VALID_YAML: &str = "dns:\n  enabled: true\n";
-const VALID_JS: &str = "function main(config) {\n  return config;\n}\n";
+const VALID_JS: &str = "function main(config: Record<string, unknown>) {\n  return config;\n}\n";
 
 #[test]
 fn empty_root_loads_an_empty_profile_list() {
@@ -24,20 +23,15 @@ fn save_creates_and_reopen_restores_everything() {
         .save(
             None,
             " 东京模板 ",
-            VALID_YAML.to_string(),
             VALID_JS.to_string(),
-            Some(" https://example.com/y.yaml ".to_string()),
             Some("".to_string()),
         )
         .unwrap();
     // 名称 trim、空白 URL 归一化为 None、多行内容原样保留。
     assert_eq!(saved.name, "东京模板");
-    assert_eq!(
-        saved.yaml_url.as_deref(),
-        Some("https://example.com/y.yaml")
-    );
+    assert!(saved.yaml_url.is_none());
     assert_eq!(saved.js_url, None);
-    assert_eq!(saved.yaml_override, VALID_YAML);
+    assert!(saved.yaml_override.is_empty());
     assert_eq!(saved.js_override, VALID_JS);
 
     // 同一数据根上的“重开”：释放业务句柄后重新打开。
@@ -46,7 +40,7 @@ fn save_creates_and_reopen_restores_everything() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].id, saved.id);
     assert_eq!(loaded[0].name, "东京模板");
-    assert_eq!(loaded[0].yaml_override, VALID_YAML);
+    assert!(loaded[0].yaml_override.is_empty());
     assert_eq!(loaded[0].js_url, None);
 }
 
@@ -55,7 +49,7 @@ fn empty_overrides_and_urls_are_allowed() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = Profiles::for_root(temporary.path()).unwrap();
     let saved = profiles
-        .save(None, "空白模板", String::new(), String::new(), None, None)
+        .save(None, "空白模板", String::new(), None)
         .unwrap();
     assert_eq!(saved.yaml_override, "");
     assert_eq!(saved.js_override, "");
@@ -67,34 +61,23 @@ fn empty_overrides_and_urls_are_allowed() {
 fn duplicate_name_is_rejected_except_when_editing_itself() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = Profiles::for_root(temporary.path()).unwrap();
-    let first = profiles
-        .save(None, "一号", String::new(), String::new(), None, None)
-        .unwrap();
-    profiles
-        .save(None, "二号", String::new(), String::new(), None, None)
-        .unwrap();
+    let first = profiles.save(None, "一号", String::new(), None).unwrap();
+    profiles.save(None, "二号", String::new(), None).unwrap();
 
     let error = profiles
-        .save(None, "一号", String::new(), String::new(), None, None)
+        .save(None, "一号", String::new(), None)
         .unwrap_err();
     assert!(error.to_string().contains("已存在"), "{error}");
 
     // 编辑自身（不改名）允许；trim 后与自身相同的名称也允许。
     profiles
-        .save(
-            Some(first.id),
-            " 一号 ",
-            VALID_YAML.to_string(),
-            String::new(),
-            None,
-            None,
-        )
+        .save(Some(first.id), " 一号 ", String::new(), None)
         .unwrap();
     let loaded = profiles.load().unwrap();
     assert_eq!(loaded.len(), 2);
     let edited = loaded.iter().find(|p| p.id == first.id).unwrap();
     assert_eq!(edited.name, "一号");
-    assert_eq!(edited.yaml_override, VALID_YAML);
+    assert!(edited.yaml_override.is_empty());
 }
 
 #[test]
@@ -103,9 +86,7 @@ fn empty_and_whitespace_names_are_rejected() {
     let profiles = Profiles::for_root(temporary.path()).unwrap();
     for name in ["", "   ", "\t\n"] {
         assert!(
-            profiles
-                .save(None, name, String::new(), String::new(), None, None)
-                .is_err(),
+            profiles.save(None, name, String::new(), None).is_err(),
             "accepted {name:?}"
         );
     }
@@ -117,38 +98,16 @@ fn empty_and_whitespace_names_are_rejected() {
 fn invalid_yaml_js_and_urls_are_rejected_without_persisting() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = Profiles::for_root(temporary.path()).unwrap();
-    profiles
-        .save(None, "保留", String::new(), String::new(), None, None)
-        .unwrap();
+    profiles.save(None, "保留", String::new(), None).unwrap();
 
-    // YAML 非 mapping、JS 缺 main、远程 URL 非 http(s)。
-    let cases: [(&str, &str, Option<String>, Option<String>); 6] = [
-        ("- a\n- b\n", "", None, None),
-        ("plain scalar", "", None, None),
-        ("", "console.log(1)", None, None),
-        ("", "", Some("ftp://example.com/y.yaml".to_string()), None),
-        ("", "", None, Some("not-a-url".to_string())),
-        (
-            "dns:\n  enabled: true\n",
-            "",
-            Some("https://example.com/y.yaml".to_string()),
-            Some("ftp://example.com/j.js".to_string()),
-        ),
+    let cases = [
+        ("console.log(1)", None),
+        ("function main(c: ) { return c; }", None),
+        ("", Some("not-a-url".to_owned())),
+        ("", Some("ftp://example.com/override.ts".to_owned())),
     ];
-    for (yaml, js, yaml_url, js_url) in &cases {
-        assert!(
-            profiles
-                .save(
-                    None,
-                    "坏模板",
-                    yaml.to_string(),
-                    js.to_string(),
-                    yaml_url.clone(),
-                    js_url.clone(),
-                )
-                .is_err(),
-            "accepted {yaml:?} {js:?} {yaml_url:?} {js_url:?}"
-        );
+    for (ts, url) in cases {
+        assert!(profiles.save(None, "坏模板", ts.to_owned(), url).is_err());
     }
 
     let loaded = profiles.load().unwrap();
@@ -163,16 +122,12 @@ fn invalid_yaml_js_and_urls_are_rejected_without_persisting() {
 fn edit_updates_fields_and_keeps_id() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = Profiles::for_root(temporary.path()).unwrap();
-    let created = profiles
-        .save(None, "原名", String::new(), String::new(), None, None)
-        .unwrap();
+    let created = profiles.save(None, "原名", String::new(), None).unwrap();
     let edited = profiles
         .save(
             Some(created.id),
             "新名",
-            VALID_YAML.to_string(),
             VALID_JS.to_string(),
-            None,
             Some("https://example.com/remote.js".to_string()),
         )
         .unwrap();
@@ -185,14 +140,7 @@ fn edit_updates_fields_and_keeps_id() {
 
     // 编辑不存在的模板报错且不动清单。
     let missing = profiles
-        .save(
-            Some(Uuid::new_v4()),
-            "幽灵",
-            String::new(),
-            String::new(),
-            None,
-            None,
-        )
+        .save(Some(Uuid::new_v4()), "幽灵", String::new(), None)
         .unwrap_err();
     assert!(missing.to_string().contains("不存在"), "{missing}");
     assert_eq!(profiles.load().unwrap().len(), 1);
@@ -204,7 +152,7 @@ fn removing_a_bound_profile_is_rejected_until_unbound() {
     let profiles = Profiles::for_root(temporary.path()).unwrap();
     let subscriptions = Subscriptions::for_root(temporary.path()).unwrap();
     let profile = profiles
-        .save(None, "被绑模板", String::new(), String::new(), None, None)
+        .save(None, "被绑模板", String::new(), None)
         .unwrap();
     let subscription = subscriptions
         .add("绑定者", "https://example.com/a.yaml", None)
@@ -268,7 +216,7 @@ fn binding_validates_that_the_profile_exists() {
     std::fs::write(temporary.path().join("profiles.json"), "{broken").unwrap();
     let profiles = Profiles::for_root(temporary.path()).unwrap();
     let profile = profiles
-        .save(None, "恢复模板", String::new(), String::new(), None, None)
+        .save(None, "恢复模板", String::new(), None)
         .unwrap();
     std::fs::write(temporary.path().join("profiles.json"), "{broken").unwrap();
     let error = subscriptions
@@ -306,7 +254,7 @@ fn concurrent_bind_and_remove_never_leaves_a_dangling_reference() {
         .add("并发订阅", "https://example.com/c.yaml", None)
         .unwrap();
     let profile = profiles
-        .save(None, "并发模板", String::new(), String::new(), None, None)
+        .save(None, "并发模板", String::new(), None)
         .unwrap();
 
     let mut handles = Vec::new();

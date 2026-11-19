@@ -1,7 +1,7 @@
 _version: 1
 
 app.title: Lanpath NSH Desktop
-app.tagline: Pure Rust · NSH 0.5.0 · Network access only for subscription add/refresh and core query/download; the core validates and starts in user-mode loopback only, the system proxy is taken over and precisely restored by an independent guardian (Windows only), TUN/VPN is never touched
+app.tagline: Follow the path. Keep every route clear.
 
 nav.subscriptions: Subscriptions
 nav.request_settings: Request Settings
@@ -11,13 +11,175 @@ nav.config: Config
 nav.logs: Logs
 nav.backup: Backup
 nav.appearance: Appearance
+nav.overview: Overview
+nav.group.workspace: Workspace
+nav.group.core_config: Core Config
+nav.group.tools: Tools & Recovery
+nav.group.settings: Settings
 
+status.summary: "Subscription: %{subscription} · Core: %{core}"
+status.none: None
+
+overview.title: Overview
+overview.subtitle: "Main path: current subscription → core → validate & start → real status; only real status and the next actionable step"
+overview.subscription.title: Current Subscription
+overview.subscription.none: No effective subscription yet
+overview.subscription.nodes: "%{count} nodes"
+overview.subscription.nodes_unknown: No nodes fetched
+overview.subscription.format: "Format: %{format}"
+overview.subscription.manage: Manage subscriptions…
+overview.core.title: Core
+overview.core.none: No core selected yet
+overview.core.choose: Choose core…
+overview.runtime.title: Runtime Status
+overview.runtime.start: Validate & Start
+overview.runtime.stop: Stop
+overview.steps.title: Before You Begin
+overview.steps.add: Add a subscription
+overview.steps.refresh: Refresh nodes
+overview.steps.core: Choose a core
+overview.steps.start: Validate & Start
+overview.steps.done: Done
+overview.steps.go_subscriptions: Go to Subscriptions
+overview.steps.go_core: Go to Core
+overview.proxy.confirm_at_core: Complete the one-time system proxy confirmation on the Core page
+overview.proxy.go_core: Go to Core
+
+subscription.more: More
+subscription.refreshing: Refreshing…
+subscription.delete_confirm: Delete
+
+subscription.title: Subscriptions
+subscription.subtitle: Real subscription list · saved to the NSH desktop data root · network only on add/refresh; never starts the core/system proxy
+subscription.count: "%{count} subscriptions"
+subscription.empty: No subscriptions yet.
+subscription.load_failed: "Failed to load subscriptions: %{error}"
+subscription.profiles_load_failed: "Failed to load override templates: %{error}"
+subscription.adding_refreshing: Subscription added, refreshing…
+subscription.added_refresh_busy: Subscription added; a refresh is in flight, please refresh manually in a moment
+subscription.add_failed: "Failed to add subscription: %{error}"
+subscription.refreshing_busy: Refreshing subscription…
+subscription.refresh_done: "Refresh complete: %{count} nodes (%{format})"
+subscription.refresh_failed: "Failed to refresh subscription: %{error}"
+subscription.refresh_stale: The subscription changed during refresh; the result was discarded
+subscription.refresh_other_in_progress: Another refresh is already running; try again when it finishes
+subscription.root_unavailable: Failed to open the data root
+subscription.unknown: Unknown subscription
+subscription.active_mark: Active
+subscription.enabled_on: Enabled
+subscription.enabled_off: Disabled
+subscription.nodes: "%{count} nodes"
+subscription.nodes_unknown: No nodes fetched
+subscription.format: Format %{format}
+subscription.error_prefix: "Error: %{error}"
+subscription.binding: "Override: %{name}"
+subscription.binding_invalid: Override template reference is invalid; rebind it
+subscription.action.refresh: Refresh
+subscription.action.edit: Edit
+subscription.action.source: Source
+subscription.action.activate: Set active
+subscription.action.delete: Delete
+subscription.delete_title: Delete subscription "%{name}"?
+subscription.delete_description: Removes only this app's record and local cache; Tauri/GPUI/apps/nsh data is untouched.
+subscription.delete_done: Subscription and local cache deleted
+subscription.delete_failed: "Failed to delete subscription: %{error}"
+subscription.enabled_updated: Subscription availability updated
+subscription.enable_failed: "Failed to toggle availability: %{error}"
+subscription.activate_done: Set as the active subscription
+subscription.activate_failed: "Failed to set active subscription: %{error}"
+subscription.enabled_a11y: Enable subscription %{name}
+subscription.name_placeholder: Subscription name
+subscription.url_placeholder: Subscription URL (https://…)
+subscription.ua_placeholder: User-Agent (optional; empty uses the shared clash.meta default)
+subscription.add: Add subscription
+subscription.edit_title: Edit subscription "%{name}"
+subscription.edit_url_hint: Changing the URL clears the cached source; refresh after saving
+subscription.binding_label: Override template (applied when composing)
+subscription.cancel: Cancel
+subscription.save: Save changes
+subscription.discard_title: Discard unsaved changes?
+subscription.discard_description: Your changes are not saved; discarding loses them.
+subscription.discard_confirm: Discard
+subscription.discard_cancel: Keep editing
+subscription.bind_none: No override
+subscription.save_failed: "Failed to save changes: %{error}"
+subscription.url_changed_notice: Saved; the URL changed, refresh to fetch new content
+subscription.saved_notice: Changes saved
+subscription.source_title: "Subscription source (read-only): %{name}"
+subscription.source_format: "Format: %{format}"
+subscription.source_missing: "%{name} has no saved source yet; refresh first"
+subscription.source_load_failed: "Failed to read subscription source: %{error}"
+
+runtime.api_port: API %{port}
+runtime.api_off: API off
+runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · up %{uptime}s"
+runtime.status.starting: Starting
+runtime.status.stopping: Stopping
+runtime.status.operation: "%{operation}…"
+runtime.status.operation_stage: "%{operation}: %{stage}…"
+runtime.status.running: "Running: %{summary}"
+runtime.status.stopped: Not running
+runtime.command.start: Validating and starting the core…
+runtime.command.stop: Stopping the core…
+runtime.command.restart: Safely restarting the core with the new preference…
+runtime.error.unavailable: Failed to open the core runtime
+runtime.error.start_failed: "Failed to start the core: %{error}"
+runtime.error.stop_failed: "Failed to stop the core: %{error}"
+runtime.error.restart_start_failed: "Core stopped, but restarting with the new preference failed: %{error}"
+runtime.error.poisoned: Task state lock poisoned
+runtime.error.incomplete: Task did not complete
+runtime.start_result: "Validated (binary check passed) and started: %{core_type} %{version} · mixed %{mixed} · %{api} · %{nodes} nodes · %{warnings} warnings"
+runtime.start_result_missing: · %{count} missing rule sets
+runtime.stop.forced: Core stopped (terminated and reaped)
+runtime.stop.already: Core process had already exited; state cleaned up
+
+core.proxy.toggle_a11y: Take over system proxy
+common.switch: Switch
 common.cancel: Cancel
 common.confirm: Confirm
 common.close: Close
 common.save: Save
 common.selected: "Selected: %{name}"
 common.current: "Effective now: %{name}"
+
+status.subscription_read_failed: "Couldn't read the current subscription: %{error}. The last valid value is kept."
+status.core_read_failed: "Couldn't read the selected core: %{error}. The last valid value is kept."
+status.summary_error_short: " · summary unavailable"
+status.proxy_recovery_short: " · system proxy recovery required"
+
+overview.summary.problem_title: Problem reading current state
+overview.proxy.state: "System proxy preference: %{preference} · actual takeover: %{ownership}"
+overview.proxy.recovery_warning: The system proxy needs recovery. Only records owned by this app are restored; unknown external proxies are left untouched.
+overview.proxy.recover: Restore system proxy
+
+runtime.stage.read_settings: reading saved settings
+runtime.stage.validate_binary: validating the core binary
+runtime.stage.preflight_ports: checking listener ports
+runtime.stage.compose_config: composing the configuration
+runtime.stage.validate_config: validating the configuration
+runtime.stage.start_process: starting the core process
+runtime.stage.wait_ready: waiting for the core to become ready
+runtime.stage.restore_proxy_and_stop: restoring the system proxy and stopping the core
+runtime.exit.exited: The core process exited.
+runtime.exit.failed: "The core exited unexpectedly: %{error}"
+runtime.command.restore_proxy: Restoring the system proxy…
+runtime.error.restore_proxy_failed: "Failed to restore the system proxy: %{error}"
+runtime.error.proxy_unsupported: System proxy takeover is supported on Windows only.
+runtime.proxy.unowned: not taken over
+runtime.proxy.owned: held by this app
+runtime.proxy.recovery_required: recovery required
+runtime.proxy.unsupported: system proxy guardian unavailable
+runtime.proxy.unknown: "Unknown state: %{error}"
+runtime.proxy.preference_on: on
+runtime.proxy.preference_off: off
+runtime.proxy.preference_unknown: unknown
+runtime.proxy.restored: The system proxy was restored from this app's records (no leftover records meant no action).
+
+core.proxy.change_busy: A core start or stop is in progress. Change the system proxy preference after it finishes.
+core.proxy.save_failed: "Failed to save the system proxy preference: %{error}"
+core.proxy.saved_next_start: System proxy preference saved; the independent guardian will take over or restore it on the next core start
+core.proxy.saved_off: System proxy preference turned off
+core.proxy.restart_unavailable: A core command is in progress; the system proxy preference was not changed. Try again shortly.
 
 appearance.title: Appearance
 appearance.subtitle: Theme, appearance mode, language and motion · changes apply immediately and are saved
@@ -34,8 +196,13 @@ appearance.language.en: English
 appearance.motion.system: System
 appearance.motion.reduce: Reduce motion
 appearance.theme.default_mark: Default
-appearance.scale_note: UI scale follows the system text scale (now %{percent}%); NSH 0.5.0 has no app-level scale override, so no non-functional option is offered here
+appearance.scale_note: UI scale follows the system text scale (now %{percent}%); NSH 0.5.1 has no app-level scale override, so no non-functional option is offered here
 appearance.hover_preview: Point at a theme to preview; click to apply and save
+appearance.previewing: "Previewing: %{name}. Click to apply and save."
+appearance.theme.a11y: "Theme: %{name}"
+appearance.save_failed: Couldn't save the appearance setting; the previous value is still active. Free some app storage and try again.
+appearance.section.material: Window Material & Opacity
+appearance.material_note: In NSH 0.5.1 the main window's material (backdrop) is a launch-time configuration only; there is no runtime API to switch window material or window opacity, so no non-functional options are offered here
 
 gallery.title: Component Gallery
 gallery.subtitle: Development acceptance only (--ui-gallery) · no entry in normal user navigation
@@ -99,3 +266,66 @@ gallery.motion.press: Press scale 0.97 / 0.95
 gallery.motion.reduced_on: Rendered with reduced motion (immediately readable)
 gallery.motion.spinning: Spinning (loop playing)
 gallery.theme.pick: Click to apply a theme; point to preview
+
+# Rules, diagnostics and TypeScript overrides
+nav.rules: "Rules"
+nav.diagnostics: "Diagnostics"
+rules.title: "Rules"
+rules.subtitle: "Choose routes for domains, apps and networks. Rules run in order; restart the core to apply changes."
+rules.saved: "Rules saved. Start or restart the core to apply them."
+rules.list: "Rule order"
+rules.search: "Filter rules"
+rules.quick: "Quick add"
+rules.batch: "Batch input"
+rules.domain: "Exact domain"
+rules.suffix: "Domain suffix"
+rules.keyword: "Domain keyword"
+rules.cidr: "IP network"
+rules.process: "Process name"
+rules.port: "Destination port"
+rules.proxy: "Proxy"
+rules.direct: "Direct"
+rules.reject: "Reject"
+rules.kind: "Match type"
+rules.target: "Match value"
+rules.action: "Route"
+rules.lines: "One rule per line"
+rules.first: "Insert first (highest priority)"
+rules.save_edit: "Save changes"
+rules.add: "Add rules"
+rules.reset: "Reset editor"
+rules.edit: "Edit"
+rules.disable: "Disable"
+rules.enable: "Enable"
+rules.up: "Move up"
+rules.down: "Move down"
+rules.delete: "Delete"
+rules.empty: "No matching rules."
+profile.editor: "TypeScript override"
+profile.name: "Template name"
+profile.url: "Remote TS URL (optional)"
+profile.url_hint: "Remote then local. Fetched during composition; cached source is used if the request fails."
+profile.source: "Local TypeScript (optional)"
+profile.source_hint: "function main(config: any) { return config; }\nType annotations supported. Synchronous; no imports, network or file access."
+profile.cancel: "Cancel"
+profile.save: "Save"
+profile.discard_question: "Discard unsaved changes?"
+profile.keep: "Keep editing"
+profile.discard: "Discard changes"
+diagnostics.title: "Diagnostics"
+diagnostics.subtitle: "Check system DNS, direct TCP, saved DNS upstreams and the core proxy path independently."
+diagnostics.target: "Target domain"
+diagnostics.run: "Run diagnostics"
+diagnostics.trace: "Check local rules"
+diagnostics.add_rule: "Add a rule for this domain"
+diagnostics.running: "Checking network paths; each step has an 8-second timeout…"
+diagnostics.summary: "Target %{target} · Completed %{time} · %{failed} failed checks"
+diagnostics.empty: "No diagnostics run yet."
+diagnostics.local_title: "Local rule estimate"
+diagnostics.local_result: "First determinable route: %{outbound}; %{uncertain} earlier rules lack context."
+diagnostics.no_match: "No match"
+diagnostics.local_hint: "Saved local rules only. Default rules, remote rule sets, process and port context are excluded. This is not a trace from the running core."
+diagnostics.ok: "Passed"
+diagnostics.fail: "Failed"
+diagnostics.skip: "Skipped"
+diagnostics.info: "Info"

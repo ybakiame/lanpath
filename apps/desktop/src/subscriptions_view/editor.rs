@@ -1,11 +1,16 @@
-//! 订阅编辑弹窗：名称/地址/可选 User-Agent/覆写模板绑定草稿与已保存数据
-//! 分离，刷新/启停/删除/设置生效不会清空未保存修改；取消时有未保存修改
-//! 需确认。覆写绑定用单选列表（无覆写 + 每个现存模板），保存时业务层在
-//! 同一业务锁内校验模板真实存在，失效引用显示真实错误、不静默改绑。
+//! 订阅编辑弹窗（阶段 1 语义组件迁移）：名称/地址/可选 User-Agent/覆写
+//! 模板绑定草稿与已保存数据分离，刷新/启停/删除/设置生效不会清空未保存
+//! 修改；取消时有未保存修改需确认。覆写绑定用单选列表（无覆写 + 每个
+//! 现存模板），保存时业务层在同一业务锁内校验模板真实存在，失效引用
+//! 显示真实错误、不静默改绑。
 
-use nsh_base::{button, dialog, input, radio, radio_group, theme};
+use nsh_base::{dialog, radio, radio_group, theme};
 use nsh_core::prelude::*;
 use uuid::Uuid;
+
+use crate::ui::button::{ButtonSize, ButtonVariant, button};
+use crate::ui::input;
+use crate::ui::overlay::confirm_dialog;
 
 use super::SubscriptionPageState;
 
@@ -19,7 +24,7 @@ pub(super) fn edit_dialog(state: SubscriptionPageState) -> AnyElement {
         .iter()
         .find(|subscription| subscription.id == id)
         .map(|subscription| subscription.name.clone())
-        .unwrap_or_else(|| "未知订阅".to_owned());
+        .unwrap_or_else(|| t!("subscription.unknown"));
     let cancel_state = state.clone();
     let form_show = state.clone();
     let form_build = state.clone();
@@ -55,61 +60,41 @@ fn edit_form(state: SubscriptionPageState, title: String) -> impl IntoElement {
         .bg(move || theme().card)
         .border(px(1.0))
         .border_color(move || theme().border)
-        .child(text(format!("编辑订阅“{title}”")).text_size(px(15.0)))
+        .child(text(t!("subscription.edit_title", name = title)).text_size(px(15.0)))
         .child(
-            text("地址变更会清除旧原文/缓存，保存后需重新刷新")
+            text(|| t!("subscription.edit_url_hint"))
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
         .child(
-            input()
+            input::input(state.edit.name)
                 .test_id("edit-name")
-                .value(state.edit.name)
-                .placeholder("订阅名称")
-                .on_change(move |text: &str| {
-                    name_state.edit.name.set(text.to_owned());
+                .placeholder(|| t!("subscription.name_placeholder"))
+                .on_change(move |text: String| {
+                    name_state.edit.name.set(text);
                     name_state.edit.dirty.set(true);
-                })
-                .p_2()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().input)
-                .bg(move || theme().background),
+                }),
         )
         .child(
-            input()
+            input::input(state.edit.url)
                 .test_id("edit-url")
-                .value(state.edit.url)
-                .placeholder("订阅地址（https://…）")
-                .auto_correct(false)
-                .on_change(move |text: &str| {
-                    url_state.edit.url.set(text.to_owned());
+                .placeholder(|| t!("subscription.url_placeholder"))
+                .on_change(move |text: String| {
+                    url_state.edit.url.set(text);
                     url_state.edit.dirty.set(true);
-                })
-                .p_2()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().input)
-                .bg(move || theme().background),
+                }),
         )
         .child(
-            input()
+            input::input(state.edit.user_agent)
                 .test_id("edit-user-agent")
-                .value(state.edit.user_agent)
-                .placeholder("User-Agent（可选，留空用共享默认 clash.meta）")
-                .auto_correct(false)
-                .on_change(move |text: &str| {
-                    ua_state.edit.user_agent.set(text.to_owned());
+                .placeholder(|| t!("subscription.ua_placeholder"))
+                .on_change(move |text: String| {
+                    ua_state.edit.user_agent.set(text);
                     ua_state.edit.dirty.set(true);
-                })
-                .p_2()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().input)
-                .bg(move || theme().background),
+                }),
         )
         .child(
-            text("覆写模板（配置合成时应用）")
+            text(|| t!("subscription.binding_label"))
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
@@ -125,69 +110,32 @@ fn edit_form(state: SubscriptionPageState, title: String) -> impl IntoElement {
                 .gap_2()
                 .justify_end()
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || state.edit.request_cancel())
-                        .child(text("取消")),
+                    button(ButtonVariant::Outline)
+                        .size(ButtonSize::Sm)
+                        .label(|| t!("subscription.cancel"))
+                        .on_press(move || state.edit.request_cancel()),
                 )
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().primary)
-                        .on_press(move || save_edit(&save_press))
-                        .child(text("保存修改").text_color(move || theme().primary_foreground)),
+                    button(ButtonVariant::Primary)
+                        .size(ButtonSize::Sm)
+                        .label(|| t!("subscription.save"))
+                        .on_press(move || save_edit(&save_press)),
                 ),
         )
 }
 
+/// 放弃未保存草稿的确认（语义 ConfirmDialog，危险变体）。
 fn discard_confirm(state: SubscriptionPageState) -> impl IntoElement {
     let keep_state = state.clone();
-    view()
-        .flex_col()
-        .gap_3()
-        .w(px(420.0))
-        .p_4()
-        .rounded(move || theme().radius)
-        .bg(move || theme().card)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text("放弃未保存的修改？"))
-        .child(
-            text("草稿尚未保存，放弃后将丢失本次修改。")
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap_2()
-                .justify_end()
-                .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || state.edit.confirm_discard.set(false))
-                        .child(text("继续编辑")),
-                )
-                .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().destructive)
-                        .on_press(move || keep_state.edit.close())
-                        .child(text("放弃修改").text_color(move || theme().primary_foreground)),
-                ),
-        )
+    confirm_dialog(move || state.edit.confirm_discard.get())
+        .test_id("subscription-discard-dialog")
+        .destructive()
+        .title(|| t!("subscription.discard_title"))
+        .description(|| t!("subscription.discard_description"))
+        .confirm_label(|| t!("subscription.discard_confirm"))
+        .cancel_label(|| t!("subscription.discard_cancel"))
+        .on_cancel(move || state.edit.confirm_discard.set(false))
+        .on_confirm(move || keep_state.edit.close())
 }
 
 /// 覆写模板绑定选择：无覆写 + 每个现存模板的单选列表（模板多时也清晰
@@ -196,7 +144,7 @@ fn binding_choices(state: SubscriptionPageState) -> impl IntoElement {
     let mut group = radio_group().flex_col().gap_2().child(binding_radio(
         state.clone(),
         None,
-        "无覆写".to_owned(),
+        t!("subscription.bind_none"),
         "bind-profile-none",
     ));
     let profiles = state.profiles.get();
@@ -254,7 +202,10 @@ fn save_edit(state: &SubscriptionPageState) {
         return;
     };
     let Some(service) = state.service.clone() else {
-        state.edit.error.set(Some("打开数据根失败".to_owned()));
+        state
+            .edit
+            .error
+            .set(Some(t!("subscription.root_unavailable")));
         return;
     };
     let name = state.edit.name.get();
@@ -274,11 +225,14 @@ fn save_edit(state: &SubscriptionPageState) {
             state.reload();
             state.bump_serial();
             state.post_notice(if url_changed {
-                "已保存修改；URL 已变更，请重新刷新获取新内容".to_owned()
+                t!("subscription.url_changed_notice")
             } else {
-                "已保存修改".to_owned()
+                t!("subscription.saved_notice")
             });
         }
-        Err(error) => state.edit.error.set(Some(format!("保存修改失败:{error}"))),
+        Err(error) => state.edit.error.set(Some(t!(
+            "subscription.save_failed",
+            error = error.to_string()
+        ))),
     }
 }

@@ -10,17 +10,31 @@ mod rows;
 mod source_view;
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use lanpath_client::{Profile, Subscription, node_tags_from_nodes, parse_subscription_body};
-use nsh_base::{button, theme};
+use lanpath_client::{Profile, Subscription};
+use nsh_base::theme;
 use nsh_core::prelude::*;
-use nsh_core::storage::Storage;
 use uuid::Uuid;
 
+use crate::app_state;
 use crate::profiles::Profiles;
 use crate::subscriptions::{RefreshStatus, Subscriptions};
 
-const BUSY_REFRESHING: &str = "正在刷新订阅…";
+/// 刷新在途提示（`t!` 按当前语言取值，测试以中文断言）。
+fn busy_refreshing() -> String {
+    t!("subscription.refreshing_busy")
+}
+
+/// 读取刷新活动初始化快照：revision 必须先于 activity。worker 若在两次
+/// 读取之间完成，基线仍是完成前版本，monitor 下一 tick 能看到变化；
+/// 反过来会得到“在途 id + 新 revision”，页面永久显示刷新中。
+fn read_refresh_initial<A>(
+    read_revision: impl FnOnce() -> u64,
+    read_activity: impl FnOnce() -> Option<A>,
+) -> (u64, Option<A>) {
+    (read_revision(), read_activity())
+}
 
 /// 编辑草稿：与列表数据分离，刷新/启停/删除/设置生效不会清空未保存修改。
 #[derive(Clone)]
@@ -103,6 +117,9 @@ pub(super) struct SubscriptionPageState {
     /// 在途刷新的订阅 id（全局最多一个）：业务层互斥串行化写盘，这里
     /// 单飞防并发刷新写回与任务句柄竞争，兼作忙碌提示。
     refreshing: Signal<Vec<Uuid>>,
+    /// 初始化时记录的刷新活动版本。必须按“先 revision、后 activity”读取；
+    /// worker 在两者之间完成时，monitor 下一 tick 仍能看到版本变化并清 busy。
+    refresh_activity_revision: u64,
     /// 交互序号：每次用户操作/刷新开始递增；晚到的异步结果只在序号未变时
     /// 张贴，避免覆盖后续操作的反馈。
     serial: Signal<u64>,
@@ -121,6 +138,13 @@ impl SubscriptionPageState {
             .unwrap_or_default();
         match Subscriptions::open() {
             Ok(service) => {
+                // 先记录版本基线，再读取在途活动：若 worker 在两者之间完成，
+                // 基线仍是完成前值，monitor 能观察到变化；反过来读会留下
+                // 永久 busy。
+                let (activity_revision, initial_activity) = read_refresh_initial(
+                    || service.refresh_activity_revision(),
+                    || service.refresh_activity(),
+                );
                 let state = Self {
                     service: Some(service),
                     profiles_service,
@@ -130,7 +154,8 @@ impl SubscriptionPageState {
                     list_error: signal(None),
                     form_error: signal(None),
                     notice: signal(None),
-                    refreshing: signal(Vec::new()),
+                    refreshing: signal(initial_activity.into_iter().collect()),
+                    refresh_activity_revision: activity_revision,
                     serial: signal(0),
                     pending_remove: signal(None),
                     edit: EditState::new(),
@@ -150,6 +175,7 @@ impl SubscriptionPageState {
                 form_error: signal(None),
                 notice: signal(None),
                 refreshing: signal(Vec::new()),
+                refresh_activity_revision: 0,
                 serial: signal(0),
                 pending_remove: signal(None),
                 edit: EditState::new(),
@@ -161,14 +187,20 @@ impl SubscriptionPageState {
 
     /// 从磁盘重读列表与生效订阅；消息通道（notice/list_error）由 post_*
     /// 独占管理，这里不触碰，避免晚到的刷新重读清掉更新操作的反馈。
-    /// 任何失败都显示真实错误，不伪造成功。
+    /// 任何失败都显示真实错误，不伪造成功。读完后同步 App 级共享的
+    /// 当前生效订阅摘要（概览/全局状态栏与列表同一来源，不独立轮询）。
     fn reload(&self) {
         let Some(service) = self.service.clone() else {
             return;
         };
         match service.load() {
             Ok(subscriptions) => self.list.set(subscriptions),
-            Err(error) => self.list_error.set(Some(format!("加载订阅失败:{error}"))),
+            Err(error) => {
+                self.list_error.set(Some(t!(
+                    "subscription.load_failed",
+                    error = error.to_string()
+                )));
+            }
         }
         if let Ok(active) = service.active_id() {
             self.active.set(active);
@@ -176,11 +208,13 @@ impl SubscriptionPageState {
         if let Some(profiles_service) = self.profiles_service.clone() {
             match profiles_service.load() {
                 Ok(profiles) => self.profiles.set(profiles),
-                Err(error) => self
-                    .list_error
-                    .set(Some(format!("加载覆写模板失败:{error}"))),
+                Err(error) => self.list_error.set(Some(t!(
+                    "subscription.profiles_load_failed",
+                    error = error.to_string()
+                ))),
             }
         }
+        app_state::refresh_active_subscription(&app_state::current());
     }
 
     /// 是否有刷新在途（忙碌提示与单飞去重用）。
@@ -239,95 +273,37 @@ impl SubscriptionPageState {
 
 pub(super) fn subscription_page() -> impl IntoElement {
     let state = SubscriptionPageState::new();
-    let fixture_report = signal(
-        Storage::get_item(FIXTURE_REPORT_KEY).unwrap_or_else(|| "尚未解析共享订阅。".to_owned()),
-    );
-
+    spawn_refresh_activity_monitor(state.clone());
     view()
         .flex_1()
         .flex_col()
         .gap_4()
-        .child(text("订阅").text_size(px(24.0)))
-        .child(
-            text("真实订阅列表 · 保存到 NSH 桌面独立数据根 · 仅新增/刷新时按需联网，不启动核心/系统代理")
-                .text_color(move || theme().muted_foreground),
-        )
+        .child(text(|| t!("subscription.title")).text_size(px(24.0)))
+        .child(text(|| t!("subscription.subtitle")).text_color(move || theme().muted_foreground))
         .child(add_form::add_subscription_form(state.clone()))
-        .child(rows::subscription_list(state.clone()))
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("共享解析验证").text_size(px(15.0)))
-                .child(
-                    text("调用共享 lanpath-client 解析固定测试订阅，与订阅列表数据无关")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().secondary)
-                        .on_press(move || {
-                            let report = parse_fixture_report();
-                            let _ = Storage::set_item(FIXTURE_REPORT_KEY, &report);
-                            fixture_report.set(report);
-                        })
-                        .child(
-                            text("解析共享订阅").text_color(move || theme().secondary_foreground),
-                        ),
-                )
-                .child(
-                    text(move || fixture_report.get())
-                        .selectable(true)
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
+        .child(rows::subscription_list(state))
 }
 
-const FIXTURE_REPORT_KEY: &str = "fixture_parse_report";
-
-/// 共享解析验证（固定测试订阅）：纯本地解析，不联网。
-fn parse_fixture_report() -> String {
-    const FIXTURE: &str = r#"proxies:
-  - name: 东京测试节点
-    type: ss
-    server: 192.0.2.1
-    port: 8388
-    cipher: aes-256-gcm
-    password: test-only
-  - name: 新加坡测试节点
-    type: ss
-    server: 192.0.2.2
-    port: 8388
-    cipher: aes-256-gcm
-    password: test-only
-"#;
-    match parse_subscription_body(FIXTURE, None) {
-        Ok(result) => {
-            let nodes = node_tags_from_nodes(&result.singbox_nodes);
-            let names = nodes
-                .iter()
-                .map(|node| node.name.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!(
-                "解析成功：{} 个节点\n格式：{:?}\n警告：{} 条\n\n{}",
-                nodes.len(),
-                result.format,
-                result.warnings.len(),
-                names
-            )
+/// 观察同根共享的刷新活动：旧页面发出的刷新在离页后完成时，新页面仍会
+/// 通过版本变化清除 busy 并重读真实列表，不依赖旧页面的 UI 回调。
+fn spawn_refresh_activity_monitor(state: SubscriptionPageState) {
+    let Some(service) = state.service.clone() else {
+        return;
+    };
+    // 使用页面构造时记录的基线，避免重新读取时吞掉初始化窗口内的完成。
+    let revision = signal(state.refresh_activity_revision);
+    set_interval(Duration::from_millis(200), move || {
+        let current = service.refresh_activity_revision();
+        if current == revision.get() {
+            return;
         }
-        Err(error) => format!("解析失败：{error}"),
-    }
+        revision.set(current);
+        let shared = service.refresh_activity();
+        state.refreshing.set(shared.into_iter().collect::<Vec<_>>());
+        if shared.is_none() {
+            state.reload();
+        }
+    });
 }
 
 /// 手动/自动刷新共用：全局单飞（在途刷新未完成时新的刷新不启动，完成
@@ -339,9 +315,14 @@ pub(super) fn spawn_refresh(state: SubscriptionPageState, id: Uuid) -> bool {
     };
     let Some(service) = state.service.clone() else {
         state.finish_refreshing(id);
-        state.post_error("打开数据根失败".to_owned());
+        state.post_error(t!("subscription.root_unavailable"));
         return false;
     };
+    if service.refresh_activity().is_some() {
+        state.finish_refreshing(id);
+        state.post_notice(t!("subscription.refresh_other_in_progress"));
+        return false;
+    }
     let done = state.clone();
     state.task.with(|slot| {
         slot.replace(spawn(async move {
@@ -369,23 +350,62 @@ fn finish_refresh(
             state.reload();
             state.post_notice_if_current(
                 token,
-                format!("刷新完成：{node_count} 个节点（{format:?}）"),
+                t!(
+                    "subscription.refresh_done",
+                    count = node_count,
+                    format = format!("{format:?}")
+                ),
             );
         }
         Ok(RefreshStatus::Failed { error }) => {
             // 真实错误已随记录持久化，重读列表让行内错误可见；只在仍是
             // 最新交互时张贴，避免覆盖后续操作的反馈。
             state.reload();
-            state.post_error_if_current(token, format!("刷新订阅失败:{error}"));
+            state.post_error_if_current(
+                token,
+                t!("subscription.refresh_failed", error = error.to_string()),
+            );
         }
         Ok(RefreshStatus::Stale) => {
             state.reload();
-            state
-                .post_notice_if_current(token, "刷新期间订阅已被修改或删除，结果未写入".to_owned());
+            state.post_notice_if_current(token, t!("subscription.refresh_stale"));
+        }
+        Ok(RefreshStatus::Busy) => {
+            state.refreshing.set(Vec::new());
+            state.post_notice_if_current(token, t!("subscription.refresh_other_in_progress"));
         }
         Err(error) => {
             state.reload();
-            state.post_error_if_current(token, format!("刷新订阅失败:{error}"));
+            state.post_error_if_current(
+                token,
+                t!("subscription.refresh_failed", error = error.to_string()),
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::read_refresh_initial;
+
+    /// 可控完成窗口：worker 在 revision 读取后、activity 读取前完成。
+    /// 基线必须保留完成前版本，monitor 下一次 tick 才能清掉初始 busy。
+    #[test]
+    fn refresh_snapshot_keeps_pre_completion_revision() {
+        let revision = Cell::new(3_u64);
+        let activity = Cell::new(Some("refresh-id"));
+        let (base, initial) = read_refresh_initial(
+            || revision.get(),
+            || {
+                revision.set(4);
+                activity.set(None);
+                activity.get()
+            },
+        );
+        assert_eq!(base, 3, "基线必须是完成前的 revision");
+        assert_eq!(initial, None, "完成后共享活动已清除");
+        assert_ne!(revision.get(), base, "下一 tick 能看到版本变化");
     }
 }

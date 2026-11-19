@@ -529,6 +529,49 @@ async fn refresh_uses_saved_values_not_unsaved_edits() {
 }
 
 #[tokio::test]
+async fn a_second_refresh_on_the_same_root_is_busy_without_a_request() {
+    let server = TestServer::new(vec![Route {
+        path: "/busy.yaml",
+        status: 200,
+        body: YAML.to_string(),
+        userinfo: None,
+        delay: Duration::from_millis(300),
+    }]);
+    let temporary = tempfile::tempdir().unwrap();
+    let service = Subscriptions::for_root(temporary.path()).unwrap();
+    let added = service
+        .add("单飞", &server.url("/busy.yaml"), None)
+        .unwrap();
+
+    let revision_before = service.refresh_activity_revision();
+    let inflight = service.clone();
+    let id = added.id;
+    let first = tokio::spawn(async move { inflight.refresh(id).await });
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(service.refresh_activity(), Some(id), "共享活动对同根可见");
+    let second = service.refresh(id).await.unwrap();
+    assert!(matches!(second, RefreshStatus::Busy), "{second:?}");
+    assert_eq!(
+        server
+            .recorded()
+            .iter()
+            .filter(|request| request.path == "/busy.yaml")
+            .count(),
+        1,
+        "第二个调用不发请求"
+    );
+    assert!(matches!(
+        first.await.unwrap().unwrap(),
+        RefreshStatus::Updated { .. }
+    ));
+    assert_eq!(service.refresh_activity(), None, "完成后清除共享活动");
+    assert!(
+        service.refresh_activity_revision() > revision_before,
+        "开始/完成都推进版本，供离页页面与 App 摘要重读"
+    );
+}
+
+#[tokio::test]
 async fn refresh_result_is_stale_after_mid_flight_edit() {
     let server = TestServer::new(vec![Route {
         path: "/slow.yaml",
@@ -704,7 +747,7 @@ fn enable_active_and_rename_preserve_profile_binding() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = crate::profiles::Profiles::for_root(temporary.path()).unwrap();
     let profile = profiles
-        .save(None, "绑定模板", String::new(), String::new(), None, None)
+        .save(None, "绑定模板", String::new(), None)
         .unwrap();
     let service = Subscriptions::for_root(temporary.path()).unwrap();
     let added = service
@@ -749,7 +792,7 @@ async fn refresh_preserves_profile_binding() {
     let temporary = tempfile::tempdir().unwrap();
     let profiles = crate::profiles::Profiles::for_root(temporary.path()).unwrap();
     let profile = profiles
-        .save(None, "刷新模板", String::new(), String::new(), None, None)
+        .save(None, "刷新模板", String::new(), None)
         .unwrap();
     let service = Subscriptions::for_root(temporary.path()).unwrap();
     let added = service
@@ -768,4 +811,36 @@ async fn refresh_preserves_profile_binding() {
     let status = service.refresh(added.id).await.unwrap();
     assert!(matches!(status, RefreshStatus::Updated { .. }));
     assert_eq!(service.load().unwrap()[0].profile_id, Some(profile.id));
+}
+
+/// 共享解析验证（固定测试订阅）：调用共享 `lanpath-client::parse_subscription_body`
+/// 纯本地解析（原订阅页底部测试卡片的产品内入口已按阶段 1 移除，行为改由
+/// 业务层测试与开发画廊覆盖）。断言节点数、格式与节点名，不依赖互联网。
+#[test]
+fn shared_parser_parses_the_fixed_fixture() {
+    const FIXTURE: &str = r#"proxies:
+  - name: 东京测试节点
+    type: ss
+    server: 192.0.2.1
+    port: 8388
+    cipher: aes-256-gcm
+    password: test-only
+  - name: 新加坡测试节点
+    type: ss
+    server: 192.0.2.2
+    port: 8388
+    cipher: aes-256-gcm
+    password: test-only
+"#;
+    let result = parse_subscription_body(FIXTURE, None).expect("fixture parses");
+    let nodes = lanpath_client::node_tags_from_nodes(&result.singbox_nodes);
+    let names = nodes
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(format!("{:?}", result.format), "ClashYaml");
+    assert_eq!(result.warnings.len(), 0);
+    assert_eq!(names, "东京测试节点\n新加坡测试节点");
 }

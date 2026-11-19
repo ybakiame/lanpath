@@ -3,7 +3,7 @@
 
 use nsh_base::{
     checkbox as base_checkbox, menu, menu_item, menu_separator, radio as base_radio,
-    select as base_select, switch as base_switch, tab, tabs, theme,
+    radio_group as base_radio_group, select as base_select, tab, tabs, theme,
 };
 use nsh_core::prelude::*;
 
@@ -56,50 +56,169 @@ pub fn select(
 
 /// 开关（track/thumb 颜色 token 化）。
 pub fn switch(checked: Signal<bool>, on_change: impl Fn(bool) + 'static) -> AnyElement {
-    base_switch()
-        .checked(move || checked.get())
-        .track_style(move |s| {
-            s.bg(move || {
-                if checked.get() {
-                    theme().primary
-                } else {
-                    theme().input
-                }
-            })
-            .rounded_full()
+    switch_labeled(
+        move || checked.get(),
+        || SharedString::from(t!("common.switch")),
+        on_change,
+    )
+}
+
+/// 带可访问名称、checked 状态、焦点及 Enter/Space 键盘激活的开关。
+pub fn switch_labeled(
+    checked: impl Fn() -> bool + 'static,
+    label: impl Fn() -> SharedString + 'static,
+    on_change: impl Fn(bool) + 'static,
+) -> AnyElement {
+    let checked = std::rc::Rc::new(checked);
+    let on_change = std::rc::Rc::new(on_change);
+    let focused = signal(false);
+    let checked_for_state = checked.clone();
+    let checked_for_track = checked.clone();
+    let checked_for_thumb = checked.clone();
+    let toggle = {
+        let checked = checked.clone();
+        let on_change = on_change.clone();
+        std::rc::Rc::new(move || on_change(!checked()))
+    };
+    let press_toggle = toggle.clone();
+    effect(move || {
+        if !focused.get() {
+            return;
+        }
+        for key in ["enter", "space"] {
+            let toggle = toggle.clone();
+            on_key_with(
+                key,
+                KeyOptions {
+                    when: nsh_core::keymap::When::NotEditing,
+                    ..KeyOptions::default()
+                },
+                move |_| toggle(),
+            );
+        }
+    });
+    view()
+        .role(AccessibilityRole::Switch)
+        .focusable(true)
+        .on_focus(move || focused.set(true))
+        .on_blur(move || focused.set(false))
+        .accessibility_state(move || AccessibilityState {
+            checked: Some(if checked_for_state() {
+                nsh_core::Checked::True
+            } else {
+                nsh_core::Checked::False
+            }),
+            ..AccessibilityState::default()
         })
-        .thumb_style(move |s| {
-            s.rounded_full().bg(move || {
-                theme()
-                    .color("switch-thumb")
-                    .unwrap_or_else(|| theme().card)
-            })
-        })
-        .on_change(move |next: &bool| on_change(*next))
+        .optional_label(move || Some(label()))
+        .cursor_pointer()
+        .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .on_press(move || press_toggle())
+        .child(
+            view()
+                .w(px(36.0))
+                .h(px(20.0))
+                .rounded_full()
+                .p(px(2.0))
+                .bg(move || {
+                    if checked_for_track() {
+                        theme().primary
+                    } else {
+                        theme().input
+                    }
+                })
+                .child(
+                    view()
+                        .size(px(16.0))
+                        .rounded_full()
+                        .ml(move || {
+                            if checked_for_thumb() {
+                                px(16.0)
+                            } else {
+                                px(0.0)
+                            }
+                        })
+                        .bg(move || {
+                            theme()
+                                .color("switch-thumb")
+                                .unwrap_or_else(|| theme().card)
+                        }),
+                ),
+        )
         .into_element()
 }
 
-/// 复选框（标签在右，整行可点）。
+/// 复选框（标签在右，整行可点；自绘可见方框与勾选标记）。
 pub fn checkbox(
     checked: Signal<bool>,
     label: impl Fn() -> String + 'static,
     on_change: impl Fn(bool) + 'static,
 ) -> AnyElement {
+    let checked_for_indicator = checked;
+    let check_for_mark = checked;
+    let label = std::rc::Rc::new(label);
+    let label_for_a11y = label.clone();
     base_checkbox()
+        .flex_row()
         .checked(move || checked.get())
+        .accessibility_label(move || Some(SharedString::from(label_for_a11y())))
         .items_center()
         .gap_3()
         .cursor_pointer()
+        .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .hit_slop(EdgeInsets::all(px(4.0)))
+        .indicator_style(move |s| {
+            s.size(px(16.0))
+                .items_center()
+                .justify_center()
+                .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
+                .border(px(1.0))
+                .border_color(move || theme().input)
+        })
+        .indicator(
+            view()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
+                .bg(move || {
+                    if checked_for_indicator.get() {
+                        theme().primary
+                    } else {
+                        transparent_black().into()
+                    }
+                })
+                .child(when(
+                    move || check_for_mark.get(),
+                    || {
+                        text("✓")
+                            .text_size(px(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(move || theme().primary_foreground)
+                    },
+                )),
+        )
         .on_change(move |next: &bool| on_change(*next))
         .child(
-            text(label)
+            text(move || label())
                 .text_size(px(14.0))
                 .text_color(move || theme().foreground),
         )
         .into_element()
 }
 
-/// 单选行（标签在右，整行可点；`test_id` 供测试与自动化）。
+/// 单选组：一个键盘焦点站，方向键在选项间移动并选择。分组名由所在
+/// 分区的可见标题承担（NSH 0.5.1 的 RadioGroup 未提供标签 prop）。
+pub fn radio_group(children: impl IntoElement) -> AnyElement {
+    base_radio_group()
+        .flex_col()
+        .gap_2()
+        .child(children)
+        .into_element()
+}
+
+/// 单选行（标签在右，整行可点；hover/pressed/focus-visible 与可见选中
+/// 圆点；`test_id` 供测试与自动化）。
 pub fn radio_row(
     checked: impl Fn() -> bool + 'static,
     label: impl Fn() -> String + 'static,
@@ -109,10 +228,33 @@ pub fn radio_row(
     let checked = std::rc::Rc::new(checked);
     let is_checked: std::rc::Rc<dyn Fn() -> bool> = std::rc::Rc::new(move || checked());
     let checked_for_prop = is_checked.clone();
-    let checked_for_bg = is_checked.clone();
+    let checked_for_ring = is_checked.clone();
+    let checked_for_dot = is_checked.clone();
     let el = base_radio()
         .checked(move || checked_for_prop())
         .cursor_pointer()
+        .hit_slop(EdgeInsets::all(px(4.0)))
+        .py(px(6.0))
+        .px(px(8.0))
+        .rounded(move || theme().radius)
+        .text_color(move || theme().foreground)
+        .hover(|s| {
+            s.bg(move || theme().accent)
+                .text_color(move || theme().accent_foreground)
+        })
+        .active(|s| {
+            s.bg(move || {
+                theme()
+                    .color("accent-active")
+                    .unwrap_or_else(|| theme().accent)
+            })
+            .text_color(move || {
+                theme()
+                    .color("accent-active-foreground")
+                    .unwrap_or_else(|| theme().accent_foreground)
+            })
+        })
+        .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .on_change(move |_: &bool| on_select())
         .child(
             view()
@@ -122,22 +264,29 @@ pub fn radio_row(
                 .child(
                     view()
                         .size(px(16.0))
+                        .items_center()
+                        .justify_center()
                         .rounded_full()
                         .border(px(1.0))
-                        .border_color(move || theme().muted_foreground)
-                        .bg(move || {
-                            if checked_for_bg() {
+                        .border_color(move || {
+                            if checked_for_ring() {
                                 theme().primary
                             } else {
-                                theme().card
+                                theme().input
                             }
-                        }),
+                        })
+                        .bg(move || theme().card)
+                        .child(when(
+                            move || checked_for_dot(),
+                            || {
+                                view()
+                                    .size(px(8.0))
+                                    .rounded_full()
+                                    .bg(move || theme().primary)
+                            },
+                        )),
                 )
-                .child(
-                    text(label)
-                        .text_size(px(14.0))
-                        .text_color(move || theme().foreground),
-                ),
+                .child(text(label).text_size(px(14.0))),
         )
         .into_element();
     view().test_id(test_id).child(el).into_element()

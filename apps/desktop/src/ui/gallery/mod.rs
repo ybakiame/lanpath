@@ -1,7 +1,7 @@
 //! 组件画廊：仅开发验收（`--ui-gallery` 启动，普通用户导航没有
 //! 入口）。覆盖各 variant/size、交互状态、主题、明暗、语言与
 //! reduced motion；在系统缩放（75–150%）场景下同样可读可用。NSH
-//! 0.5.0 无应用级缩放 API，画廊不提供、也不声称有应用内缩放控件。
+//! 0.5.1 无应用级缩放 API，画廊不提供、也不声称有应用内缩放控件。
 //! 供 Windows UIA 与截图验收。分区内容在 `sections.rs`。
 
 mod sections;
@@ -70,11 +70,13 @@ fn theme_section() -> AnyElement {
         "gallery.section.theme",
         view()
             .grid()
+            .w_full()
+            .app_class("justify-items-stretch")
             .grid_cols(move || if window().width.0 < 1080.0 { 2_u16 } else { 4 })
             .gap_3()
             .children(ThemeId::ALL.iter().map(|id| {
                 let prefs = prefs::prefs();
-                let prefs_for_press = prefs.clone();
+                let prefs_for_press = prefs;
                 let theme_id = *id;
                 let test_id: &'static str = match theme_id {
                     ThemeId::Amethyst => "gallery-theme-amethyst",
@@ -93,11 +95,22 @@ fn theme_section() -> AnyElement {
                 };
                 button::button(button::ButtonVariant::Ghost)
                     .size(button::ButtonSize::Content)
+                    .full_width()
+                    .selected(move || prefs.theme.get() == theme_id)
+                    .accessible_name(move || {
+                        SharedString::from(t!("appearance.theme.a11y", name = theme_id.id_name()))
+                    })
                     .test_id(test_id)
-                    .on_press(move || prefs_for_press.apply_theme(theme_id))
-                    .prefix(theme_preview::theme_preview(theme_id, move || {
-                        prefs.theme.get() == theme_id
-                    }))
+                    .on_press(move || {
+                        if prefs_for_press.apply_theme(theme_id).is_err() {
+                            feedback::show_toast(t!("appearance.save_failed"));
+                        }
+                    })
+                    .prefix(move || {
+                        theme_preview::theme_preview(theme_id, move || {
+                            prefs.theme.get() == theme_id
+                        })
+                    })
             })),
     )
 }
@@ -181,14 +194,20 @@ fn motion_demo() -> AnyElement {
             button::button(button::ButtonVariant::Outline)
                 .label(|| t!("gallery.motion.demo"))
                 .on_press(move || {
+                    if prefs::prefs().reduced.get() {
+                        // 应用内“减少动效”与系统设置同等生效：循环演示
+                        // 不启动，也不留下一帧持续动画。
+                        play_spin.stop();
+                        spinning.set(false);
+                        return;
+                    }
                     if spinning.get() {
                         play_spin.stop();
                         spinning.set(false);
                     } else {
                         let mut spec = MotionPreset::Spin.spec();
                         spec.timing.duration_ms = 1400.0;
-                        // 尊重减少动效：reduced 时 `play` 立即落到末帧
-                        // （整圈）且不持续旋转。
+                        // 引擎级 reduced 时 `play` 落到末帧且不持续旋转。
                         let _ = play_spin.play(spec);
                         spinning.set(true);
                     }

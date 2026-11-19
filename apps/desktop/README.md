@@ -1,300 +1,68 @@
 # Lanpath NSH Desktop
 
-`apps/desktop` 是 NSH Windows 迁移目标（纯 Rust，NSH 0.5.0），与最小验证应用 `apps/nsh`、
-GPUI 对照 `apps/gpui` 并行存在。应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取或迁移
-Tauri/GPUI/NSH 验证应用的数据根；核心“校验并启动”仅限用户态 loopback mixed + Clash API；
-Windows 系统代理经独立普通权限同映像守护精确接管/恢复（见核心页“系统代理”分区），GUI 侧
-绝不直写注册表；TUN/VPN 不接管，不安装服务/启动项；仅订阅新增/刷新与核心查询/下载按需联网。
+`apps/desktop` 是当前 NSH Windows 桌面实验目标（Rust、NSH 0.5.1），
+程序名 `lanpath-desktop-nsh.exe`，应用身份 `com.ybakiame.lanpath.desktop.nsh`。
+与 Tauri、GPUI 和最小 NSH 验证应用独立，不读取或迁移它们的数据。
 
-窗口壳为侧栏导航 + 主内容区。当前实现八个真实页面：
+## 运行
 
-- 请求设置：订阅刷新与远程资源请求的网络请求策略（从 apps/gpui 迁移并适配）。
-  四种代理模式（直连 / 跟随系统 / 核心代理 / 自定义 HTTP(S)/SOCKS5）单选持久化到本应用
-  `app.toml` 的 `[client]` 段（`request_proxy_mode` / `request_proxy_url` /
-  `github_proxy_prefix`）；自定义地址与 GitHub 镜像前缀草稿可编辑，保存经共享
-  `validate_request_proxy` 校验，非法地址（scheme 非 http/https/socks5/socks5h、带
-  path/query/fragment、端口 0 等）拒绝不落盘，错误不回显用户名/密码/token/完整 URL；
-  非自定义模式同样保存自定义地址草稿供稍后切回（与 GPUI 一致）。保存时在同一业务锁内
-  重新加载最新配置，只改请求相关三个字段，不覆盖 active 选择、system/tun、MITM、端口等
-  无关字段；读取页面不无故写盘（数据根初始化已建 `app.toml`，页面自身不额外改写文件
-  字节），新装默认直连（数据根初始化持久化，`load_for_requests` 固定 data_dir 本根），
-  已有配置损坏返回真实错误、绝不重写为默认。GitHub 前缀按共享
-  `apply_github_proxy_prefix` 语义在使用时拼接（保存值原样保留）。保存后
-  `ClientConfig::load_for_requests` 立即可读，订阅刷新经共享 `load_request_config`
-  消费同一策略（无第二处新装默认）。核心代理只指向已保存的 mixed_port：
-  核心未运行时请求真实失败（页面如实说明，不做连接测试、不显示假成功；
-  系统代理接管开关在核心页“系统代理”分区，不在本页）。重置恢复已保存草稿
-  （有未保存修改需确认），日志只记模式不记地址/前缀。
-- 订阅：真实订阅列表与持久化。复用共享 `lanpath-client::SubscriptionStore` /
-  `Subscription` / `SubFormat`，数据写入本应用自己的隔离数据根（所有权标记 +
-  进程内文件锁租约 + 生产/链接路径准入，从 apps/gpui 迁移并适配，约束未削弱）。
-  支持名称 + URL + 可选 User-Agent 新增（校验失败不覆盖已有数据，新增成功后自动
-  后台刷新，沿用 GPUI 行为；新增订阅无覆写绑定）、编辑（URL 变更清除旧原文/缓存，
-  URL 不变保留；弹窗内可绑定“无覆写”或一个现存覆写模板——单选列表真实可选，保存时
-  业务层在同一业务锁内校验模板存在，失效引用显示真实错误、不静默改绑；未保存取消
-  需确认）、手动刷新（busy/结果反馈；始终使用已保存 URL/UA，不把未保存表单写回；
-  失败显示共享层脱敏真实错误并保留旧缓存；刷新期间被编辑/删除的结果丢弃不覆盖；
-  刷新/启停/设置生效不改变覆写绑定）、启用切换、设为当前生效订阅（持久化到本应用
-  `app.toml` 的 `active_subscription_id`，拒绝停用/不存在项，停用或删除生效项自动
-  清除）、查看最后一次成功刷新原文（只读弹窗，无原文时明确提示先刷新）与带确认的
-  删除；行内显示绑定的覆写模板名，模板被外部删除等导致引用失效时显示真实错误提示。
-  联网仅在新增/刷新时按需发生：已有配置原样保留并遵守已保存的请求代理策略
-  （`request_proxy_mode`/`request_proxy_url`/`github_proxy_prefix`），新装默认直连、
-  不读取系统代理（数据根初始化已把该默认持久化到 `app.toml`，与 GPUI 为新配置设定
-  的策略一致）；请求在后台线程执行，不启动核心、系统代理或 TUN。清单/配置的读写与覆写
-  模板业务共用数据根的同一把业务锁（同根句柄经 Weak 缓存共享数据根），刷新全局单飞，
-  完成后再可刷新。
-- 覆写：真实覆写模板（Profile）管理。复用共享 `lanpath-client::ProfileStoreV2`，
-  模板存本数据根 `profiles.json`（不读取/迁移其他应用数据，含旧版
-  `profile.json`——本应用独立新根不会出现该文件）。支持列出、新建、编辑、删除
-  （需确认；被任一订阅 `profile_id` 引用时业务层在同一业务锁内拒绝并显示真实错误，
-  解除绑定后才可删）。名称 trim 必填且除自身外唯一；YAML/JS 本地覆写真实调用共享
-  `validate_yaml_override`/`validate_js_override`（空允许），用 NSH 真实多行输入
-  编辑（保留换行）；两个远程覆写地址可选、规范化并共享 `validate_remote_url` 校验。
-  保存失败保留草稿并显示真实错误，取消有未保存确认。远程覆写地址本页只保存供后续
-  配置合成时解析：不下载、不预览、不显示“已生效”。日志只记名称/结果/节点数，不记
-  YAML/JS 正文、远程地址或订阅地址。
-- 核心：真实核心库存与下载/选择。复用共享 `lanpath-client::core_management::
-  CoreManagementService::experimental`（confined 策略，与 GPUI 同一共享语义），
-  只管理本数据根 `cores/<binary>/<version>/` 下的真实核心文件：列出本地真实
-  版本、查询远端通道（仅 stable/prerelease）、下载指定已查询版本（共享语义：
-  下载 + version probe 验证 + 自动选中 + 按通道保留当前与前一版本）、选择本地
-  版本、带确认地删除非 active 版本（共享层拒绝删除 active/越界/链接核心）。
-  sing-box/Mihomo 库存类型切换（实际选中独立显示，active 为空显示“尚未选择
-  核心”，不把无核心当崩溃）；Mihomo 文件名/版本规范全走共享函数，不自造规则。
-  选择持久化固定写 `app.toml`（统一 TOML 布局，与 GPUI 同一共享语义：共享
-  persist_selection 读-改-写 `[core]` 段，只改 `core_binary`/`core_type` 两个
-  字段，active 订阅、请求代理、端口等全部保留；新装默认请求策略——直连 None——
-  已由数据根初始化持久化，不会被核心选择改回 System）。core_type 由
-  `[core].kind` 投影：Mihomo 类型只能来自 Mihomo 核心选择。页面固定文案
-  “管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态
-  loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管”。
-  busy 全局单飞（操作按钮 busy 中按下 no-op，完成后恢复）；操作失败保留旧
-  列表并显示真实错误；下载进度只显示共享真实阶段（查询资产/下载/解压/验证/
-  保存），不伪造 byte 百分比；任务模型：操作在 `background` 执行，Signal 只在
-  UI 线程回写（进度槽位 + 轮询），spawn 挂在页面级 owner 下（弹窗/行级临时
-  owner 销毁不取消在途工作；离开页面 owner 取消任务，重进页面全新状态，
-  不永久 busy）。mutation 跨页面互斥在业务层：同根所有 `CoreInventory` 句柄共享
-  一把 try_acquire 锁，下载/选择/删除在途时立即报“另一项核心库存操作正在进行，
-  请稍后重试”（绝不排队），锁覆盖整个 mutation（可跨 await），只读查询不加锁；
-  下载不包含 wintun/TUN 资源（confined 策略不取 TUN 附件，TUN 资源将来单独
-  处理）。远端查询/下载按共享库存现有实现消费已保存的 ClientConfig
-  请求策略（`request_client_builder` + GitHub 镜像前缀），GitHub API base 仅
-  测试可注入（storage 键 `lanpath_desktop_nsh.core_api_base` / 环境变量
-  `LANPATH_DESKTOP_CORE_API_BASE`），生产仍 GitHub。日志只记类型/版本/结果
-  （不记完整路径），不记 token 或完整带凭据 URL。不接核心日志流。
-  核心运行（同页“运行”卡片）：新增“校验并启动”“停止”。启动固定同一份
-  ClientConfig 快照——拒绝 `tun_enabled`（TUN 仍不授权，设置保留）；
-  必须有 confined 库存选中核心并经
-  `validate_managed_binary`；先预检 mixed/Clash API 端口 loopback 可绑定
-  （新根默认端口为 GPUI 实验值 17899/19090，避免与生产 17890/9090 冲突，
-  已有根保留已保存值）；配置经 `compose_with_config(快照)` 一次合成（不重复
-  联网），由 `ConfigValidator` 先守能力边界（sing-box 仅允许已保存端口的
-  127.0.0.1 mixed inbound，拒绝 tun/`set_system_proxy`/非 loopback/面板下载
-  字段，log/cache/rule_set/certificate 资源路径限根内；Mihomo mixed-port
-  匹配、不得 allow-lan/tun、external-controller 仅 loopback、无面板下载
-  字段），再经真实核心二进制校验（sing-box `check -c 临时文件 -D 根` /
-  Mihomo `-t -d 根 -f 临时文件`，no_window，并行有界 drain，20 秒超时强杀
-  回收）；通过后才启动并等待 mixed 端口真实监听、Clash API 就绪，任何失败
-  回滚 `stop_process`（回滚失败同时报告原错误与回收错误并保留可重试状态）。
-  停止回执展示真实 kind。状态轮询每次真实核验进程活性，能发现核心异常退出；
-  运行状态按根共享（Weak 缓存 + App 级 Stored），跨页一致；GUI 正常退出
-  drop 按记录的 OS 进程身份回收本次子进程，绝不按进程名强杀。启停与库存
-  mutation 共享同根 try_acquire 锁：启动途中下载/选择/删除立即 busy，运行中
-  （含停止进行中 running 未清）业务层真实核验（`is_running_sync`，不看 UI
-  状态）拒绝修改核心文件或选择。日志只记操作/端口/版本/阶段，不记配置正文、
-  节点/代理凭据或完整 URL。核心以 sing-box 为主，Mihomo 只需能运行订阅配置。
-  系统代理（同页“系统代理”分区，仅 Windows）：开关只保存偏好（同一业务锁内
-  读最新配置只改 `system_proxy_enabled` 一个字段）；首次启用弹一次性确认框
-  （“若已有其他代理，仅本次接管，停止/退出精确归还；授权不保存”），确认才
-  保存偏好并授予进程内一次性接管授权（AtomicBool，不持久化、重启即失效；
-  停用即清除；启动 acquire 时读取并消费，成功或失败都只影响当次），取消
-  不写配置。运行中切换走安全启停周期（停止含守护恢复，启动按新偏好接管），
-  绝不绕守护直写注册表。接管语义迁移自 apps/gpui `proxy_guardian`：同映像
-  独立普通权限守护进程（管道身份 `LanpathNSH-Proxy-<uuid>`，参数有界版本化，
-  SID/session/logon/elevation/映像/进程身份全核验，不继承 Job、不安装服务），
-  核心校验/mixed/API 就绪后 arm 并 acquire `127.0.0.1:mixed_port`（普通
-  Acquire 恒共享 RequireDirect，外来活动代理拒绝；仅用户确认后以独立
-  `AcquireTakeover` 形态经共享 `acquire_with_policy(..., ExplicitTakeover)`
-  接管并精确归还），接管失败保留核心与恢复证据；启动前恢复本应用
-  abandoned journal；停止先守护 restore 再停核心，守护死亡/通信失败只按
-  本应用 owner（数据根 UUID）精确恢复；界面显示未接管/本应用持有/需要
-  恢复/未知错误，并提供仅本应用 owner 的显式“恢复系统代理”。复用共享
-  `lanpath-client::sysproxy` 会话与 DPAPI 日志，不复制不修改。非 Windows
-  显示“仅 Windows 支持”并隐藏恢复操作（偏好开关仍可见可保存），已保存
-  偏好不产生运行失败。真实 WinINet 验收待主代理（自动化测试全部为
-  fixture）。
-- 配置：共享合成预览（从 apps/gpui 的 `business/config.rs` 迁移 sing-box 与
-  Mihomo 两条合成分支）。用户点击“生成配置预览”后在后台线程按已保存配置快照合成
-  完整配置——sing-box 输出 pretty JSON，Mihomo 输出 YAML（核心直接消费的格式），
-  页面以只读滚动区域展示正文、生成警告（配置切片回退、远程覆写降级、缺失规则集、
-  Mihomo 切片未应用等）与真实错误，明确文案“共享合成预览，未进行核心二进制校验”，
-  绝不显示“核心已验证/已启动”。本切片不做核心下载/安装/校验/启停，不启动核心、
-  系统代理或 TUN。核心以 sing-box 为主；Mihomo 现阶段支持订阅配置合成运行：
-  优先原始 Clash 订阅原文提取代理（其余格式按共享转换逐节点处理，无法表示的协议
-  真实报错），远程+本地覆写链与 sing-box 同一实现；不做 Mihomo 结构化切片编辑，
-  用户定制的 sing-box 配置切片只警告、不应用（切片内容保留，供切回 sing-box）。
-  合成前置：当前生效订阅必须存在且启用（共享存储语义）；优先本地节点缓存，无缓存时
-  Core 请求策略明确拒绝，其余模式用进入网络前固定的 `ClientConfig` 快照联网刷新
-  一次——网络途中设置页的修改不改变本次合成策略（`Subscriptions::refresh_with_config`
-  与 `refresh` 共享同一实现，写回按 id/URL/UA 防 stale，业务锁不跨 await）。关联
-  Profile 必须真实存在，远程 YAML/JS 经共享 `resolve_remote_overrides_with_context`
-  与本根 `cache/profiles` 解析，远程失败按共享降级并展示真实警告；配置切片读取失败
-  按 GPUI 回退共享默认值并把真实警告展示给用户。合成链与 GPUI 启动前预览同路径：
-  sing-box 走 `build_core_config_v2` + `compose_singbox_config(mixed_port, None)`，
-  规则集走 `prepare_missing_rule_sets_warn_only`/`prepare_builtin_rule_sets`/
-  `materialize_rule_sets`，缺失按共享降级并回报 missing tags；`inject_local_override_warn_only`、
-  `apply_panel_features` 后移除 `experimental.clash_api` 的 `external_ui`/
-  `external_ui_download_url`；Mihomo 走 `mihomo_nodes_from_subscription` +
-  `build_mihomo_config_v2` + `compose_mihomo_config(mixed_port, None)` +
-  `apply_mihomo_panel_features`，并移除顶层 `external-ui`/`external-ui-url`，
-  避免预览触发面板下载。任务模型：busy 单飞（在途重复点击不启动第二个合成，
-  完成后可再生成）；失败保留旧预览并显示真实错误，不伪报新成功；离开页面在途任务
-  随 owner 取消，重进页面不永久 busy。日志只记节点数、警告数与结果，不记配置正文、
-  节点凭据、远程 URL 或代理 URL。
-- 日志：本应用真实运行事件。内存分区是有界缓冲（1000 条、revision 增量快照、
-  级别筛选、显示条数选择、2 秒轮询可暂停、行详情、带确认的清空）；采集经 tracing
-  全局层只捕获 `lanpath_*` target 的本应用事件。磁盘分区读取本应用数据根 `logs/`
-  的真实文件列表与尾部原文（共享 `lanpath-client::logs` 安全读取：白名单文件名、
-  拒绝链接/硬链接、2 MiB / 1000 行上限），导出经 NSH 原生保存对话框选择目标后拼接
-  原文写出。磁盘写入为 `app.log.YYYY-MM-DD` 日轮转（tracing-appender 非阻塞 +
-  队列上限 + 真实错误上报，退出冲刷）。无核心日志流：本应用不启动核心。
-- 备份：加密备份导出与恢复导入/确认。复用共享 `lanpath-client::backup`
-  （age 加密 zip、一次性预览缓存、启动事务），不复制加密/事务实现。导出：
-  密码输入恒掩码、至少 12 字符或一键生成共享强密码（24 位），经 NSH 原生保存
-  对话框选定目标后写出真实 `.zip.age`——`create_new` 绝不覆盖已有文件、失败
-  清理半成品，成功后清空密码输入；失败（弱口令/对话框不可用/写出错误）真实
-  上屏不伪成功。导入：经原生打开对话框选择文件（16 MiB 上限，超限真实拒绝），
-  密码解密预览展示版本/时间/平台/订阅数/覆写数/文件数/字节；preview_id 一次性、
-  300 秒过期（共享缓存 take 拒绝过期/二次消费），修改文件或密码立即 discard。
-  恢复确认：弹窗明确“停止核心（系统代理按原值恢复）+ 生成加密回滚 + 需重启”，
-  确认后先消费一次性授权，再取数据根活动屏障写保护——等待在途订阅刷新/配置
-  合成/核心下载/核心启动真正结束（这些长任务全程持读保护，不只靠页面 busy），
-  随后停止核心（含守护恢复），最后在业务锁内生成加密回滚（`backup-history/
-  Lanpath-rollback-*.zip.age`）并落 `.backup-pending`（与全部写路径互斥，防
-  TOCTOU）。成功后标记待重启：订阅/覆写/请求设置/系统代理偏好/核心库存/核心
-  启动等一切业务写在业务锁内过 pending 门被拒绝（读仍允许），在途刷新写回前
-  再查一次 pending、落下即按 Stale 丢弃；恢复入口为 NSH 可靠重启 API（旧进程
-  退出后才拉起新进程），失败提示手动重启，不伪装已重启。启动事务：数据根
-  独占锁内、storage_init 与任何业务之前先 `apply_pending_at_startup` 原子应用
-  （提交/回滚由共享事务保证；恢复日志含糊即真实失败，全窗错误不进业务页）；
-  页面展示 `.backup-applied.json` 恢复摘要（确认后才 acknowledge 清除）与
-  `.backup-failed` 真实错误（原配置保留，可重新导入）。失败 prepare 不遗留
-  pending，可重新解密重试。外观不属于本格式（NSH 外观 storage），导出/恢复
-  固定传 `None`。日志只记文件名、计数、字节与本根路径，绝不记密码/明文/订阅
-  正文。
-- 外观：13 组命名主题（amethyst 默认，indigo/ocean/forest/sand/rose/
-  graphite/cyan/orange/teal/crimson/gold/slate，各含完整浅色/深色配对，
-  浅色保持高亮微色相、正文与主色对比度 ≥4.5:1，由单测逐项断言）+
-  浅色 / 深色 / 跟随系统模式 + 界面语言（简体中文 / English / 跟随系统）+
-  动效偏好（跟随系统 / 减少动效）。全部真实接入运行时切换：`set_tokens`
-  换主题 token、`set_color_scheme` 换模式、`set_locale` 换语言（`t!`
-  响应式读取），切换不重建组件树与业务运行状态；选择持久化到 NSH
-  storage（`theme` / 沿用既有 `appearance` / `language` / `reduce_motion`），
-  启动时 `prefs().install()` 恢复。界面缩放是明确的不支持项：NSH 0.5.0
-  的 `font_scale` 仅平台可读、无应用级覆盖 API，外观页只展示当前系统
-  文本缩放，不提供存而不生效的选项。
-
-## 组件层与画廊（阶段 0）
-
-`src/ui/` 为语义组件层（DESIGN.md 5）：Button/IconButton（variant ×
-size × loading/disabled，press 缩放 0.97/0.95）、Input/Field（invalid
-态）、Select/Switch/Checkbox/RadioRow/TabBar、Badge/Spinner/Skeleton/
-Empty/StatusBar/Toast、Surface/Separator/ListItem/Toolbar、ConfirmDialog/
-Tooltip、DataTable 薄封装与 ThemePreview。组件只按语义 token 取色，
-功能页不传颜色/圆角/局部字体；颜色字面量仅存在于 `src/ui/theme.rs` 的
-调色板构建。动效 token（instant 120ms / fast 180ms / base 240ms /
-slow 360ms / slower 500ms、距离 4/8/16pt）集中在 `src/ui/motion.rs`，
-减少动效（系统或偏好）时过渡时长归零、内容立即可读。
-
-组件画廊仅开发验收：`cargo run -- --ui-gallery`（普通用户导航没有
-入口），覆盖各 variant/size、交互状态、13 主题（点击应用并持久化）、
-明暗、语言与 reduced motion；在系统缩放场景下同样可读（NSH 0.5.0
-无应用级缩放 API，无应用内缩放控件）。供 Windows UIA 与截图验收。
-
-翻译集中在 `locales/zh-CN.yml` 与 `locales/en.yml`（意图稳定 key，
-参数 `%{name}`），编译期嵌入经根组件注入；zh-TW 结构预留（运行时
-回退链 `zh-Hant-TW → zh → en` 已可用，新增语言只需加 yml）。导航与
-外观基础设施已接入 i18n，业务页翻译随后续阶段迁移。
-
-订阅页底部保留“共享解析验证”卡片：调用共享 `lanpath-client::parse_subscription_body`
-解析固定测试订阅，作为独立的共享解析验证，与订阅列表数据无关。
-
-## 数据根
-
-- 默认根为 NSH 桌面独立身份目录（Windows：`%LOCALAPPDATA%\lanpath-desktop-nsh`；
-  Linux/macOS：`$XDG_DATA_HOME/lanpath-desktop-nsh` 或 `~/.local/share/lanpath-desktop-nsh`）。
-- 显式覆盖：环境变量 `LANPATH_DESKTOP_DATA_DIR` 优先；宿主/测试也可通过 NSH storage
-  键 `lanpath_desktop_nsh.data_dir` 预置（优先级低于环境变量）。两者都经过同一套准入检查。
-- 准入拒绝生产/便携 Lanpath 祖先、其他 Lanpath 应用数据根（Tauri/GPUI/apps/nsh）、
-  符号链接/junction/硬链接共享文件；损坏的身份标记不会静默重建。不提供便携模式。
-- 统一 TOML 布局是权威布局（与 GPUI 一致）：`app.toml` 承载 `[client]`（请求策略、
-  `active_subscription_id` 等）与 `[core]`（核心选择）两段，`subscriptions.toml` 承载
-  订阅清单，订阅原文/节点缓存在 `cache/subscriptions/`，覆写模板远程缓存在
-  `cache/profiles/`；`profiles.json`、`config_slices.json`、`logs/` 等保持原样。
-  **breaking change**：本应用是无实际用户的本地迭代产品，不提供旧数据迁移——
-  数据根准入（归属/树/独占锁）完成后只做很小的统一存储初始化：新根直接建
-  `app.toml`（`[client]` 新装默认：直连 `request_proxy_mode=none`、
-  `mitm_enabled=false`、`data_dir` 本根；`[core]` 核心选择由共享
-  `settings`/`core_management` 正常管理）与 `subscriptions.toml`，已有统一根
-  原样保留。存在早期切片的 JSON 测试布局（`client.json` /
-  `subscriptions.json` / `subscription_cache/` / `profile_cache/`）时明确报
-  “旧测试配置布局不受支持，请使用新的数据根”，不迁移、不静默忽略或清空，
-  也不读取其他应用的数据根。
-- 订阅、请求设置、覆写模板、核心库存、配置合成、备份与日志共用同一条数据根租约与按路径缓存：页面来回切换不重开缓冲，
-  第二进程仍被拒绝。订阅清单（`subscriptions.toml`）、覆写模板（`profiles.json`）、核心库存
-  （`cores/<binary>/<version>/`）与请求设置
-  （`app.toml`）的所有读写共用数据根上的同一把业务锁：校验引用与落盘在同一临界区内完成，
-  不会出现“校验无引用后另一线程完成绑定”的竞争；锁不跨网络 await。配置合成预览经同根
-  `Subscriptions` 句柄复用这把锁与 Weak 缓存，快照刷新与页面操作天然互斥。跨 await 的
-  长任务（订阅刷新、配置合成、核心下载、核心启动）另持数据根活动屏障读保护直到完成；
-  备份恢复准备取写保护并等待在途任务清零（持写期间新长任务排队、拿到读保护后仍先过
-  pending 门），取锁顺序恒为 activity → mutation → lifecycle → business，无反向路径。
-- 订阅原文与节点缓存在数据根 `cache/subscriptions/`（统一布局；共享存储层按
-  `app.toml` 存在与否自动分派）；当前生效订阅与请求设置持久化在本应用自己的
-  `app.toml`（`active_subscription_id` 与 `request_proxy_mode` / `request_proxy_url` /
-  `github_proxy_prefix`），不触碰其他应用的配置。
+Linux 从仓库根进入 `devenv shell`，再执行：
 
 ```sh
-cargo test --locked      # 全部测试：单元/数据根准入（src）+ 纯 Rust headless（tests/）
-cargo run                # 本机原生后端直接运行 Rust 根组件
-cargo run -- --ui-gallery  # 组件画廊（仅开发验收，普通导航无入口）
+cargo run --locked --manifest-path apps/desktop/Cargo.toml
 ```
 
-测试不依赖 QuickJS/TSX：headless 场景在 `tests/` 下用 `nsh_testing::Headless`
-（内存 storage 后端预置每场景独立临时数据根，1100×800 桌面视口）直接驱动 Rust 根组件；
-日志场景经真实 tracing 采集路径验证内存/磁盘/导出（保存对话框由 headless 注入应答），
-订阅刷新场景经 `tests/common` 的本线程最小 HTTP 服务器（127.0.0.1 随机端口）真实联网，
-断言实际请求路径与 User-Agent，不依赖互联网。核心页场景复用同一服务器：release metadata
-JSON 回指本服务器资产（`{addr}` 占位符），下载经真实 tar.gz 归档解压与脚本核心 version
-probe（Unix）验证解压路径/自动选中/剪枝语义；查询失败、busy 单飞与离页恢复、删除确认、
-配置合并不被核心选择改写等均有覆盖；release metadata API 经 storage 键注入，生产仍
-GitHub。请求设置场景复用同一服务器做正向代理：
-页面保存 Custom 代理后触发订阅刷新，代理以绝对形式收到不可达目标
-（`192.0.0.0/24` 文档地址）的完整请求，证明请求确实走新代理；Core 未启动负例把已保存
-mixed_port 指向本机闲置端口，断言刷新真实连接拒绝、错误落盘，不等待超时。覆写模板场景
-不联网：远程覆写地址只保存不下载；种子数据场景先启动一次应用初始化数据根（写入归属
-标记）再预置业务文件，与生产准入一致。备份场景：导出/导入对话框由 headless 注入应答，
-写出文件经共享 age 解密验证真实加密；恢复准备、pending 写门与启动事务在 src 业务测试用
-真实文件 + 本线程延迟服务器覆盖；跨进程重启（可靠重启 API 与启动事务在真机的完整链路）
-待主代理 Windows 原生验收。
+Windows 使用原生 Rust/MSVC/CMake：
 
-阶段 0 基础（`src/ui/`、locales、画廊）测试：主题单测断言 13 组配对
-完整性、浅色背景高亮不脏灰、正文/主色对比度 ≥4.5:1 与圆角 token；
-locales 单测断言中英文 key 集合与 `%{参数}` 占位一致。headless 外观
-场景（`tests/appearance.rs`）覆盖导航、主题/模式/语言/动效的真实切换
-与持久化、启动恢复、语言切换不重建业务状态（存储语言预置 zh-CN，
-翻译前中文断言不变）；画廊场景（`tests/ui_gallery.rs`）用与
-`--ui-gallery` 同一条 `gallery_root()` 构建链断言分区完整性、按钮
-loading 禁用态、确认对话框回调、列表行选中、引擎级 reduced motion
-下内容立即可读与存储语言偏好生效。
+```powershell
+cargo build --locked --manifest-path apps/desktop/Cargo.toml
+.\apps\desktop\target\debug\lanpath-desktop-nsh.exe
+```
 
-Windows 原生验收已在隔离数据根完成：1180×800 下主题网格 4 列、960×640
-下 2 列并可滚动；检查 amethyst/ocean 明暗画面、英文长文本、下拉当前值、
-语言切换后的字段提示、减少动效，以及对话框 Escape 关闭与焦点返回触发按钮。
-Windows Debug 构建和严格 all-target Clippy 通过；没有启动核心或修改系统代理。
-应用内 75–150% 缩放仍不受 NSH 0.5.0 支持，本轮也未改宿主系统缩放设置。
+## 便携模式与隔离数据
 
-`nsh.json` 命名根组件，`src/lib.rs` 是 UI；主题令牌集中由 `src/ui/theme.rs`
-注册（13 组命名主题，运行时 `set_tokens` 切换），翻译在 `locales/`。
-NSH 生成的文件在 `.nsh/`，Cargo 构建目录为 `target/`。
+在程序同级创建空文件 `lanpath.portable`，下次启动使用同级 `data/`：
+
+```text
+验证目录/
+├── lanpath-desktop-nsh.exe
+├── lanpath.portable
+└── data/
+```
+
+以程序实际所在目录为准，终端或快捷方式的工作目录不参与解析；`.portable`
+不生效。业务配置、订阅、规则、核心库存、日志，以及 NSH 主题/语言偏好和
+图片缓存都放在此 `data/` 下。可给不同验证目录各放一份程序与标记文件。
+退出应用后可整体移动便携目录，已有归属、规则与偏好保留。
+
+`LANPATH_DESKTOP_DATA_DIR` 环境变量优先于便携标记，可显式选择一个独立目录：
+
+```powershell
+$env:LANPATH_DESKTOP_DATA_DIR = 'D:\LanpathTests\case-a'
+.\lanpath-desktop-nsh.exe
+```
+
+没有标记或覆盖时，Windows 使用 `%LOCALAPPDATA%\lanpath-desktop-nsh`；
+Linux 使用 `$XDG_DATA_HOME/lanpath-desktop-nsh` 或
+`~/.local/share/lanpath-desktop-nsh`。正常退出后添加/移除标记再启动即可切换，
+不会自动搬迁、合并或删除已有数据。切换后主题等偏好也按数据目录隔离，
+旧系统 NSH 偏好不会自动导入。无显式覆盖时标记非法，或选定目录不可写时，启动失败，不回退其他目录。
+
+每个数据根独立持有进程锁，同一根不支持同时打开多个实例；不同根可分别验证。
+核心端口仍需避免冲突。非空目录必须已有本应用归属，生产与其他应用数据根、
+符号链接/junction 和共享硬链接继续拒绝。Headless/嵌入测试仍可使用
+`lanpath_desktop_nsh.data_dir` storage 键注入；原生程序使用启动时固定的数据根。
+
+## 当前功能
+
+- 概览、订阅与核心：添加/刷新订阅，选择当前订阅，双核心库存与真实配置校验、启停。
+- 规则：六类常用匹配、快速表单、批量简写、筛选、编辑、启停、排序和删除；重启核心生效。
+- 诊断：系统 DNS、直连 TCP、已保存 DNS 上游、mixed/Clash 检查及本地规则预估。
+- 覆写：本地/远程 TypeScript，远程先于本地；不执行 YAML 覆写，不提供模块/文件/网络能力。
+- 请求设置、配置预览、日志、加密备份与恢复、主题/语言及减少动效。
+
+核心仅运行用户态 loopback mixed 和 Clash API；Windows 系统代理经独立普通权限
+守护接管/恢复。没有 TUN/VPN 或 MITM，未完成生产切换与发布。部分既有页面
+尚未完成英文翻译，NSH 0.5.1 Windows 的完整 Tab 导航仍有限制。
+
+开发方案、设计稿、验收记录及历史工作日志统一放在本地 `.work/`。

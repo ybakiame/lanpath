@@ -1,18 +1,18 @@
 //! 核心页“运行”卡片渲染：真实 running/busy/结果/停止 kind/错误展示与
-//! “校验并启动”“停止”按钮。状态视图模型与后台操作在 `super::runtime`。
+//! “校验并启动”“停止”按钮。状态与命令来自 App 级 `app_state` 共享信号
+//! （与概览/全局状态栏同一来源，切页不重建、不互相矛盾）；所有文案由
+//! 语义状态在展示层按当前语言生成。
 
-use nsh_base::{button, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use super::CorePageState;
-use super::runtime::{spawn_start, spawn_stop};
+use crate::app_state::{self, AppState};
+use crate::ui::button::{ButtonSize, ButtonVariant, button};
 
-pub(super) fn runtime_card(state: CorePageState) -> impl IntoElement {
-    let status_state = state.clone();
-    let start_state = state.clone();
-    let stop_state = state.clone();
-    let exit_state = state.clone();
-    let result_state = state.clone();
+pub(super) fn runtime_card() -> impl IntoElement {
+    let shared = app_state::current();
+    let status = shared.status;
+    let command = shared.command;
     view()
         .flex_col()
         .gap_2()
@@ -27,20 +27,15 @@ pub(super) fn runtime_card(state: CorePageState) -> impl IntoElement {
                 .text_color(move || theme().muted_foreground),
         )
         .child(text(move || {
-            let view = status_state.status.get();
-            if let Some(operation) = view.operation {
-                return match view.stage {
-                    Some(stage) => format!("{operation}：{stage}…"),
-                    None => format!("{operation}…"),
-                };
+            let status = status.get();
+            let command = command.get();
+            if command.busy {
+                return app_state::command_pending_line(&command, &status);
             }
-            match view.summary {
-                Some(summary) => format!("运行中：{summary}"),
-                None => "未运行".to_owned(),
-            }
+            app_state::runtime_status_line(&status)
         }))
         .child(
-            text(move || exit_state.status.get().exit_error.unwrap_or_default())
+            text(move || app_state::exit_error_line(&status.get().exit_error))
                 .text_size(px(12.0))
                 .text_color(move || theme().destructive),
         )
@@ -49,48 +44,49 @@ pub(super) fn runtime_card(state: CorePageState) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .child({
-                    let press_state = start_state.clone();
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().primary)
-                        .on_press(move || spawn_start(press_state.clone()))
-                        .child(
-                            view().test_id("core-start").child(
-                                text("校验并启动")
-                                    .text_color(move || theme().primary_foreground),
-                            ),
-                        )
-                })
-                .child({
-                    let press_state = stop_state.clone();
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || spawn_stop(press_state.clone()))
-                        .child(
-                            view()
-                                .test_id("core-stop")
-                                .child(text("停止").text_size(px(12.0))),
-                        )
-                }),
+                .child(start_button(shared.clone()))
+                .child(stop_button(shared)),
         )
         .child(
-            text(move || {
-                let started = result_state.start_result.get().unwrap_or_default();
-                let stopped = result_state.stop_result.get().unwrap_or_default();
-                match (started.is_empty(), stopped.is_empty()) {
-                    (false, _) => started,
-                    (_, false) => stopped,
-                    _ => String::new(),
-                }
-            })
-            .text_size(px(12.0))
-            .text_color(move || theme().primary),
+            text(move || app_state::command_result_line(&command.get().result))
+                .text_size(px(12.0))
+                .text_color(move || theme().primary),
         )
+        .child(
+            text(move || app_state::command_error_line(&command.get().error))
+                .text_size(px(12.0))
+                .text_color(move || theme().destructive),
+        )
+}
+
+/// “校验并启动”：运行中/在途/命令 busy 时禁用（共享命令单飞）。
+fn start_button(shared: AppState) -> AnyElement {
+    let status = shared.status;
+    let command = shared.command;
+    button(ButtonVariant::Primary)
+        .size(ButtonSize::Sm)
+        .test_id("core-start")
+        .label(|| "校验并启动".to_owned())
+        .disabled(move || {
+            let status = status.get();
+            status.running || status.operation.is_some() || command.get().busy
+        })
+        .on_press(move || app_state::spawn_start(&shared))
+        .into_element()
+}
+
+/// “停止”：仅在真实运行中可用；命令结果（含真实停止 kind）共享反馈。
+fn stop_button(shared: AppState) -> AnyElement {
+    let status = shared.status;
+    let command = shared.command;
+    button(ButtonVariant::Outline)
+        .size(ButtonSize::Sm)
+        .test_id("core-stop")
+        .label(|| "停止".to_owned())
+        .disabled(move || {
+            let status = status.get();
+            !status.running || status.operation.is_some() || command.get().busy
+        })
+        .on_press(move || app_state::spawn_stop(&shared))
+        .into_element()
 }

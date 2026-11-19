@@ -3,8 +3,10 @@
 //! ownership 展示（未接管/本应用持有/需要恢复/未知错误）与显式“恢复系
 //! 统代理”操作（仅支持平台提供；不支持平台如实显示说明并隐藏恢复）。
 
-use nsh_base::{button, dialog, switch, theme};
+use nsh_base::{button, dialog, theme};
 use nsh_core::prelude::*;
+
+use crate::app_state;
 
 use super::CorePageState;
 use super::runtime::{
@@ -13,7 +15,6 @@ use super::runtime::{
 };
 
 pub(super) fn proxy_card(state: CorePageState) -> impl IntoElement {
-    let support_state = state.clone();
     view()
         .flex_col()
         .gap_2()
@@ -25,7 +26,7 @@ pub(super) fn proxy_card(state: CorePageState) -> impl IntoElement {
         .child(
             // 支持性来自运行时真实状态（守护装配）：非 Windows 如实说明。
             when(
-                move || !support_state.status.get().proxy_supported,
+                move || !app_state::current().status.get().proxy_supported,
                 move || {
                     text("系统代理接管仅支持 Windows；下方开关只保存偏好（本机不接管），恢复操作不可用")
                         .text_size(px(12.0))
@@ -33,13 +34,12 @@ pub(super) fn proxy_card(state: CorePageState) -> impl IntoElement {
                 },
             ),
         )
-        .child(proxy_controls(support_state))
+        .child(proxy_controls(state))
 }
 
 /// 接管控件：开关 + 状态 + 显式恢复（恢复仅支持平台提供）。
 fn proxy_controls(state: CorePageState) -> impl IntoElement {
     let toggle_state = state.clone();
-    let status_state = state.clone();
     let switch_display = state.clone();
     let restore_state = state;
     view()
@@ -51,20 +51,13 @@ fn proxy_controls(state: CorePageState) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .child(
-                    view()
-                        .test_id("proxy-toggle")
-                        .on_press(move || {
-                            spawn_toggle_proxy(
-                                toggle_state.clone(),
-                                !toggle_state.proxy_enabled.get(),
-                            )
-                        })
-                        .child(
-                            switch()
-                                .track_class("w-9 h-5 rounded-full bg-muted checked:bg-primary p-0.5")
-                                .thumb_class("w-4 h-4 rounded-full bg-background checked:translate-x-4")
-                                .checked(move || switch_display.proxy_enabled.get()),
+                    view().test_id("proxy-toggle").child(
+                        crate::ui::select::switch_labeled(
+                            move || switch_display.proxy_enabled.get(),
+                            || t!("core.proxy.toggle_a11y").into(),
+                            move |enabled| spawn_toggle_proxy(toggle_state.clone(), enabled),
                         ),
+                    ),
                 )
                 .child(
                     text("核心运行时代理系统代理（经独立守护精确接管/恢复）")
@@ -76,8 +69,21 @@ fn proxy_controls(state: CorePageState) -> impl IntoElement {
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
+        .child(
+            text(move || {
+                let shared = app_state::current();
+                if shared.command.get().busy || shared.status.get().operation.is_some() {
+                    t!("core.proxy.change_busy").to_string()
+                } else {
+                    String::new()
+                }
+            })
+            .test_id("proxy-change-busy")
+            .text_size(px(12.0))
+            .text_color(move || theme().muted_foreground),
+        )
         .child(when(
-            move || status_state.status.get().proxy_supported,
+            move || app_state::current().status.get().proxy_supported,
             move || {
                 let restore = restore_state.clone();
                 view()
@@ -86,7 +92,7 @@ fn proxy_controls(state: CorePageState) -> impl IntoElement {
                     .child(text(move || {
                         format!(
                             "当前状态：{}",
-                            format_proxy_ownership(&status_state.status.get().proxy_ownership)
+                            format_proxy_ownership(&app_state::current().status.get().proxy_ownership)
                         )
                     }))
                     .child(
@@ -102,6 +108,12 @@ fn proxy_controls(state: CorePageState) -> impl IntoElement {
                                     .rounded(move || theme().radius)
                                     .border(px(1.0))
                                     .border_color(move || theme().border)
+                                    .disabled(move || {
+                                        let shared = app_state::current();
+                                        shared.command.get().busy
+                                            || shared.status.get().operation.is_some()
+                                    })
+                                    .disabled_style(|s| s.opacity(0.5))
                                     .on_press(move || spawn_restore_proxy(press_state.clone()))
                                     .child(
                                         view()

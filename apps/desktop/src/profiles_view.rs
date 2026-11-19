@@ -1,5 +1,5 @@
 //! 覆写模板页：NSH 桌面独立数据根上的真实模板列表。模板保存共享
-//! `lanpath-client::ProfileStoreV2`（本根 `profiles.json`）；YAML/JS 本地
+//! `lanpath-client::ProfileStoreV2`（本根 `profiles.json`）；TypeScript 本地
 //! 覆写经共享校验（空允许），远程覆写地址可选、规范化并共享校验后保存，
 //! 仅在后续配置合成时解析——本页不下载、不预览、不显示“已生效”，
 //! 不启动核心、系统代理或 TUN。删除被订阅引用的模板会被拒绝并显示真实
@@ -23,9 +23,7 @@ pub(super) struct ProfileEditState {
     open: Signal<bool>,
     id: Signal<Option<Uuid>>,
     name: Signal<String>,
-    yaml_override: Signal<String>,
     js_override: Signal<String>,
-    yaml_url: Signal<String>,
     js_url: Signal<String>,
     dirty: Signal<bool>,
     error: Signal<Option<String>>,
@@ -38,9 +36,7 @@ impl ProfileEditState {
             open: signal(false),
             id: signal(None),
             name: signal(String::new()),
-            yaml_override: signal(String::new()),
             js_override: signal(String::new()),
-            yaml_url: signal(String::new()),
             js_url: signal(String::new()),
             dirty: signal(false),
             error: signal(None),
@@ -51,9 +47,7 @@ impl ProfileEditState {
     fn open_new(&self) {
         self.id.set(None);
         self.name.set(String::new());
-        self.yaml_override.set(String::new());
         self.js_override.set(String::new());
-        self.yaml_url.set(String::new());
         self.js_url.set(String::new());
         self.dirty.set(false);
         self.error.set(None);
@@ -65,10 +59,7 @@ impl ProfileEditState {
     fn open_edit(&self, profile: &Profile) {
         self.id.set(Some(profile.id));
         self.name.set(profile.name.clone());
-        self.yaml_override.set(profile.yaml_override.clone());
         self.js_override.set(profile.js_override.clone());
-        self.yaml_url
-            .set(profile.yaml_url.clone().unwrap_or_default());
         self.js_url.set(profile.js_url.clone().unwrap_or_default());
         self.dirty.set(false);
         self.error.set(None);
@@ -193,11 +184,9 @@ pub(super) fn save_edit(state: &ProfilesPageState) {
     };
     let id = state.edit.id.get();
     let name = state.edit.name.get();
-    let yaml = state.edit.yaml_override.get();
     let js = state.edit.js_override.get();
-    let yaml_url = optional_text(&state.edit.yaml_url.get());
     let js_url = optional_text(&state.edit.js_url.get());
-    match service.save(id, &name, yaml, js, yaml_url, js_url) {
+    match service.save(id, &name, js, js_url) {
         Ok(_) => {
             state.edit.close();
             state.reload();

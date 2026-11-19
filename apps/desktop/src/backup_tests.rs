@@ -100,7 +100,7 @@ fn export_roundtrips_through_real_age_and_rejects_weak_password() {
         .expect("add subscription");
     Profiles::for_root(root)
         .expect("open profiles")
-        .save(None, "模板甲", String::new(), String::new(), None, None)
+        .save(None, "模板甲", String::new(), None)
         .expect("save profile");
 
     let encrypted = service
@@ -305,7 +305,7 @@ async fn confirmed_prepare_blocks_writes_until_startup_applies() {
     assert!(
         Profiles::for_root(root)
             .expect("open profiles")
-            .save(None, "模板丙", String::new(), String::new(), None, None)
+            .save(None, "模板丙", String::new(), None)
             .is_err()
     );
     assert!(

@@ -1,16 +1,16 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：覆写模板页真实列表、
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：覆写模板页真实列表、
 //! 多行覆写编辑、持久化、删除确认与订阅绑定/解绑/删除拒绝。
 //! 每个场景使用独立临时数据根；本切片不为远程覆写地址联网。
 
 mod common;
 
-use common::{data_root, start_app, texts};
+use common::{data_root, open_subscriptions, start_app, texts};
 
 /// 启动一次应用并等订阅页渲染完成：数据根由此初始化（写入归属标记），
 /// 之后才能在盘上预置种子业务文件（直写文件绕过准入会拒绝）。
 fn initialize_root(entries: std::collections::BTreeMap<String, String>) {
     let mut first = start_app(entries).0;
-    first.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut first);
     drop(first);
 }
 
@@ -30,7 +30,7 @@ fn profile_id_of(dir: &tempfile::TempDir, name: &str) -> uuid::Uuid {
 fn navigating_to_the_profiles_page_shows_an_empty_list() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("覆写").unwrap();
     app.wait_for("尚无覆写模板。").unwrap();
     let seen = texts(&app);
@@ -49,18 +49,14 @@ fn navigating_to_the_profiles_page_shows_an_empty_list() {
 fn creating_a_profile_with_multiline_overrides_persists_and_reopens() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("覆写").unwrap();
     app.wait_for("尚无覆写模板。").unwrap();
 
     app.press("新建覆写模板").unwrap();
     app.wait_for("新建覆写模板").unwrap();
     app.type_text("id:profile-name", " 东京模板 ").unwrap();
-    app.type_text("id:profile-yaml-url", " https://example.com/y.yaml ")
-        .unwrap();
-    const YAML: &str = "dns:\n  enabled: true";
-    const JS: &str = "function main(config) {\n  return config;\n}";
-    app.type_text("id:profile-yaml", YAML).unwrap();
+    const JS: &str = "function main(config: Record<string, unknown>) {\n  return config;\n}";
     app.type_text("id:profile-js", JS).unwrap();
     app.press("保存").unwrap();
     app.wait_for("覆写模板已校验并保存").unwrap();
@@ -69,12 +65,7 @@ fn creating_a_profile_with_multiline_overrides_persists_and_reopens() {
     assert!(seen.contains(&"东京模板"), "{seen:?}");
     // 行内摘要是一整个文本元素：逐项子串断言。
     let summary = |needle: &str| seen.iter().any(|text| text.contains(needle));
-    for expected in [
-        "本地 YAML 覆写：已填写",
-        "本地 JS 覆写：已填写",
-        "远程 YAML：已配置",
-        "远程 JS：未配置",
-    ] {
+    for expected in ["本地 TS 覆写：已填写", "远程 TS：未配置"] {
         assert!(summary(expected), "missing {expected}: {seen:?}");
     }
     // 空白远程地址未伪造“已配置”。
@@ -82,28 +73,20 @@ fn creating_a_profile_with_multiline_overrides_persists_and_reopens() {
 
     // 同一数据根重开：模板从磁盘恢复；编辑回读多行内容原样（换行保留）。
     let mut reopened = start_app(entries).0;
-    reopened.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut reopened);
     reopened.press("覆写").unwrap();
     reopened.wait_for("东京模板").unwrap();
     reopened
         .press("id:profile-row-东京模板 >> text:编辑")
         .unwrap();
-    reopened.wait_for("编辑覆写模板“东京模板”").unwrap();
+    reopened.wait_for("TypeScript 覆写").unwrap();
     assert_eq!(
         reopened.screen().input_text("id:profile-name").unwrap(),
         Some("东京模板")
     );
     assert_eq!(
-        reopened.screen().input_text("id:profile-yaml").unwrap(),
-        Some(YAML)
-    );
-    assert_eq!(
         reopened.screen().input_text("id:profile-js").unwrap(),
         Some(JS)
-    );
-    assert_eq!(
-        reopened.screen().input_text("id:profile-yaml-url").unwrap(),
-        Some("https://example.com/y.yaml")
     );
 }
 
@@ -124,16 +107,16 @@ fn cancelling_a_profile_edit_with_changes_asks_first() {
         }])
         .unwrap();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("覆写").unwrap();
     app.wait_for("草稿模板").unwrap();
 
     app.press("id:profile-row-草稿模板 >> text:编辑").unwrap();
-    app.wait_for("编辑覆写模板“草稿模板”").unwrap();
+    app.wait_for("TypeScript 覆写").unwrap();
     app.clear("id:profile-name").unwrap();
     app.type_text("id:profile-name", "不应保存").unwrap();
     app.press("取消").unwrap();
-    app.wait_for("放弃未保存的覆写修改？").unwrap();
+    app.wait_for("有未保存修改，要丢弃吗？").unwrap();
     // 继续编辑：草稿还在。
     app.press("继续编辑").unwrap();
     assert_eq!(
@@ -142,8 +125,8 @@ fn cancelling_a_profile_edit_with_changes_asks_first() {
     );
     // 再次取消并确认放弃：列表仍是原名。
     app.press("取消").unwrap();
-    app.wait_for("放弃未保存的覆写修改？").unwrap();
-    app.press("放弃修改").unwrap();
+    app.wait_for("有未保存修改，要丢弃吗？").unwrap();
+    app.press("丢弃修改").unwrap();
     app.wait_for("共 1 个覆写模板").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"草稿模板"), "{seen:?}");
@@ -167,7 +150,7 @@ fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
         }])
         .unwrap();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("覆写").unwrap();
     app.wait_for("保留模板").unwrap();
 
@@ -183,24 +166,22 @@ fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
         Some("保留模板")
     );
 
-    // 非法 YAML（非 mapping）：拒绝，不落盘。
     app.clear("id:profile-name").unwrap();
     app.type_text("id:profile-name", "坏模板").unwrap();
-    app.type_text("id:profile-yaml", "- a\n- b").unwrap();
-    app.press("保存").unwrap();
-    app.wait_for("text:/YAML override must be a mapping/")
+    app.type_text("id:profile-js", "function main(c: ) {}")
         .unwrap();
+    app.press("保存").unwrap();
+    app.wait_for("text:/TypeScript 覆写/").unwrap();
 
     // 非法 JS（缺 main）：拒绝。
-    app.clear("id:profile-yaml").unwrap();
+    app.clear("id:profile-js").unwrap();
     app.type_text("id:profile-js", "console.log(1)").unwrap();
     app.press("保存").unwrap();
-    app.wait_for("text:/JS override must define a main function/")
-        .unwrap();
+    app.wait_for("text:/请定义同步 function main/").unwrap();
 
     // 非法远程 URL（非 http/https）：拒绝。
     app.clear("id:profile-js").unwrap();
-    app.type_text("id:profile-yaml-url", "ftp://example.com/y.yaml")
+    app.type_text("id:profile-js-url", "ftp://example.com/y.yaml")
         .unwrap();
     app.press("保存").unwrap();
     app.wait_for("text:/Remote override URL must start with http/")
@@ -222,7 +203,7 @@ fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
 fn binding_delete_refusal_unbind_and_profile_delete() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
 
     // 订阅页新增订阅（无模板可绑，新增仍 None）。
     app.type_text("id:subscription-name", "绑定订阅").unwrap();
@@ -265,6 +246,7 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
 
     // 重开后绑定仍在（持久化）。
     let mut reopened = start_app(entries.clone()).0;
+    open_subscriptions(&mut reopened);
     reopened.wait_for("覆写：乙模板").unwrap();
 
     // 模板页删除被引用模板：拒绝并显示真实错误。
@@ -297,6 +279,7 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
 
     // 解绑持久化后，删除成功且列表/磁盘清空该模板。
     let mut third = start_app(entries).0;
+    open_subscriptions(&mut third);
     third.wait_for("共 1 个订阅").unwrap();
     third.press("覆写").unwrap();
     third.wait_for("共 2 个覆写模板").unwrap();
@@ -345,6 +328,7 @@ fn a_subscription_with_an_externally_removed_profile_shows_a_real_error() {
     std::fs::remove_file(dir.path().join("profiles.json")).unwrap();
 
     let mut app = start_app(entries).0;
+    open_subscriptions(&mut app);
     app.wait_for("失效订阅").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"覆写模板引用失效，请重新绑定"), "{seen:?}");

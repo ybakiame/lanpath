@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：配置页共享合成预览。
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：配置页共享合成预览。
 //! 每个场景使用独立临时数据根（见 `common::data_root`）；联网用例经
 //! `common::TestServer` 本地真实 HTTP 服务器（含自定义代理的绝对形式请求），
 //! 不依赖互联网。
@@ -22,7 +22,7 @@ const DISCLAIMER: &str = "共享合成预览，未进行核心二进制校验 ·
 /// 设置页测试的预置方式一致）。
 fn init_data_root(entries: &std::collections::BTreeMap<String, String>) {
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
 }
 
 /// 新增已启用订阅并设为当前生效（不写节点缓存），返回 id。
@@ -86,7 +86,7 @@ fn open_config_page(app: &mut nsh_testing::Headless) {
 fn config_page_opens_with_disclaimer_and_idle_state() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("配置").unwrap();
     app.wait_for("尚未生成配置预览").unwrap();
     let seen = texts(&app);
@@ -307,4 +307,43 @@ fn mihomo_selection_composes_a_yaml_preview() {
     );
     // 明确文案始终可见，绝不显示“已验证/已启动”。
     assert!(texts(&app).contains(&DISCLAIMER));
+}
+
+/// 合成成功可能更新订阅节点清单；完成后概览/状态栏共享摘要必须重读，
+/// 不等待用户再次进入订阅页。
+#[test]
+fn successful_compose_refreshes_the_shared_subscription_summary() {
+    let server = TestServer::new(vec![TestRoute::ok("/sub.yaml", YAML)]);
+    let (dir, entries) = data_root();
+    init_data_root(&entries);
+    let core = common::seed_core(
+        dir.path(),
+        lanpath_common::CoreType::SingBox,
+        "1.2.3",
+        "1.2.3",
+    );
+    common::save_core_config(dir.path(), &core);
+    seed_active_subscription(dir.path(), &server.url("/sub.yaml"));
+    save_request_mode(dir.path(), RequestProxyMode::Custom, &server.url(""));
+
+    let mut app = start_app(entries).0;
+    common::wait_ready(&mut app);
+    // 订阅已生效但尚无节点：概览仍处于首配流程。
+    assert!(texts(&app).contains(&"刷新节点"), "{:?}", texts(&app));
+
+    open_config_page(&mut app);
+    app.press("生成配置预览").unwrap();
+    app.wait_for_within(
+        "text:/上次成功生成：sing-box · JSON · 2 个节点/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    app.press("概览").unwrap();
+    app.wait_for_within(
+        "text:/预览订阅 · 2 个节点 · 格式 ClashYaml/",
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    assert!(texts(&app).contains(&"预览订阅 · 2 个节点 · 格式 ClashYaml"));
 }

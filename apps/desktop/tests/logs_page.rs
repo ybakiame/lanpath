@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：日志页真实内存/磁盘
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：日志页真实内存/磁盘
 //! 分区、级别筛选、暂停/刷新、详情、清空确认与导出。采集走真实 tracing
 //! 路径（`lanpath_*` target 经全局采集层进入本应用数据根的缓冲与磁盘）；
 //! 导出经 NSH 原生保存对话框（headless 注入选定路径）。
@@ -33,7 +33,7 @@ fn emit_error(message: &str) {
 fn open_logs_page() -> (tempfile::TempDir, Headless) {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("解析共享订阅").unwrap();
+    common::wait_ready(&mut app);
     app.press("日志").unwrap();
     app.wait_for("id:logs-memory-status").unwrap();
     (dir, app)
@@ -341,7 +341,7 @@ fn switching_sections_keeps_the_memory_buffer() {
 fn subscription_actions_are_captured_before_the_first_logs_page_visit() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "启动采集验证")
         .unwrap();
     app.type_text("id:subscription-url", "https://example.com/private.yaml")

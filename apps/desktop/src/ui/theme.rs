@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use nsh_core::element::{AdaptiveColor, Tokens};
 use nsh_core::{Hsla, element::set_tokens};
 
-/// 命名主题 ID（DESIGN.md 4.3；ID 本身不翻译，界面直接显示 ID）。
+/// 命名主题 ID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ThemeId {
     Amethyst,
@@ -190,20 +190,22 @@ fn contrast(a: Hsla, b: Hsla) -> f32 {
     (hi + 0.05) / (lo + 0.05)
 }
 
-/// `bg` 上对比度达标的前景：在深/浅两个候选中取更优者；都不达标时
-/// 向对应极值逐步压亮度直到 ≥4.5（极小步数内收敛）。
+/// `bg` 上对比度达标的前景：优先保留柔和的深/浅候选；两者都不达标时
+/// 回退到纯黑/纯白中对比度更高者，避免候选朝背景方向收敛。
 fn foreground_on(bg: Hsla) -> Hsla {
-    let mut light = hsl(0.0, 0.0, 0.99);
-    let mut dark = hsl(0.0, 0.0, 0.10);
-    for _ in 0..24 {
-        let cl = contrast(light, bg);
-        let cd = contrast(dark, bg);
-        if cl >= 4.5 || cd >= 4.5 {
-            return if cl >= cd { light } else { dark };
-        }
-        light.l -= 0.04;
-        dark.l += 0.04;
+    let light = hsl(0.0, 0.0, 0.99);
+    let dark = hsl(0.0, 0.0, 0.10);
+    let light_contrast = contrast(light, bg);
+    let dark_contrast = contrast(dark, bg);
+    if light_contrast >= 4.5 || dark_contrast >= 4.5 {
+        return if light_contrast >= dark_contrast {
+            light
+        } else {
+            dark
+        };
     }
+    let light = hsl(0.0, 0.0, 1.0);
+    let dark = hsl(0.0, 0.0, 0.0);
     if contrast(light, bg) >= contrast(dark, bg) {
         light
     } else {
@@ -234,16 +236,29 @@ fn status(dark: bool) -> Status {
     }
 }
 
-/// 朝 `toward_darker` 方向逐步调 `color` 的亮度，直到与 `bg` 的对比度
-/// ≥4.5（正文级）或步数耗尽——保证每组主题、两个外观的辅助文字可读。
-fn meet_aa(mut color: Hsla, bg: Hsla, darker: bool) -> Hsla {
-    for _ in 0..24 {
-        if contrast(color, bg) >= 4.5 {
+/// 朝当前外观远离表面的方向调整亮度，直到颜色在全部实际表面上
+/// 达到正文（4.5:1）或非文本（3:1）对比度。
+fn meet_contrast(mut color: Hsla, backgrounds: &[Hsla], minimum: f32, lighter: bool) -> Hsla {
+    for _ in 0..50 {
+        if backgrounds.iter().all(|bg| contrast(color, *bg) >= minimum) {
             break;
         }
-        color.l += if darker { 0.02 } else { -0.02 };
+        color.l = (color.l + if lighter { 0.02 } else { -0.02 }).clamp(0.0, 1.0);
     }
     color
+}
+
+/// 交互状态保持同一语义色相，hover/active 逐级增强；优先沿用 normal
+/// 前景，状态背景改变后不再达标时才重新求配对前景。
+fn action_state(base: Hsla, preferred_fg: Hsla, dark: bool, amount: f32) -> (Hsla, Hsla) {
+    let mut background = base;
+    background.l = (base.l + if dark { amount } else { -amount }).clamp(0.0, 1.0);
+    let foreground = if contrast(preferred_fg, background) >= 4.5 {
+        preferred_fg
+    } else {
+        foreground_on(background)
+    };
+    (background, foreground)
 }
 
 /// 一组语义色（单外观）：名字 → 颜色。派生规则集中在此，组件层只按
@@ -305,17 +320,32 @@ fn palette(id: ThemeId, dark: bool) -> Vec<(&'static str, Hsla)> {
             hsl(h, s * 0.45, 0.28),
         )
     };
-    let primary_fg = foreground_on(primary);
-    let muted_fg = meet_aa(muted_fg, bg, dark);
-    let switch_thumb = if dark {
-        hsl(h, s * 0.20, 0.96)
-    } else {
-        hsl(h, s * 0.25, 0.99)
-    };
     let sidebar = if dark {
         hsl(h, s * 0.14, 0.115)
     } else {
         hsl(h, s * 0.22, 0.955)
+    };
+    let surfaces = [bg, card, popover, sidebar];
+    let muted_fg = meet_contrast(muted_fg, &surfaces, 4.5, dark);
+    let input = meet_contrast(input, &surfaces, 3.0, dark);
+    let ring = meet_contrast(primary, &surfaces, 3.0, dark);
+
+    let primary_fg = foreground_on(primary);
+    let destructive_fg = foreground_on(status.destructive);
+    let (primary_hover, primary_hover_fg) = action_state(primary, primary_fg, dark, 0.04);
+    let (primary_active, primary_active_fg) = action_state(primary, primary_fg, dark, 0.08);
+    let (secondary_hover, secondary_hover_fg) = action_state(secondary, secondary_fg, dark, 0.04);
+    let (secondary_active, secondary_active_fg) = action_state(secondary, secondary_fg, dark, 0.08);
+    let (accent_hover, accent_hover_fg) = action_state(accent, accent_fg, dark, 0.04);
+    let (accent_active, accent_active_fg) = action_state(accent, accent_fg, dark, 0.08);
+    let (destructive_hover, destructive_hover_fg) =
+        action_state(status.destructive, destructive_fg, dark, 0.04);
+    let (destructive_active, destructive_active_fg) =
+        action_state(status.destructive, destructive_fg, dark, 0.08);
+    let switch_thumb = if dark {
+        hsl(h, s * 0.20, 0.96)
+    } else {
+        hsl(h, s * 0.25, 0.99)
     };
     let mut colors = vec![
         ("background", bg),
@@ -326,17 +356,33 @@ fn palette(id: ThemeId, dark: bool) -> Vec<(&'static str, Hsla)> {
         ("popover-foreground", fg),
         ("primary", primary),
         ("primary-foreground", primary_fg),
+        ("primary-hover", primary_hover),
+        ("primary-hover-foreground", primary_hover_fg),
+        ("primary-active", primary_active),
+        ("primary-active-foreground", primary_active_fg),
         ("secondary", secondary),
         ("secondary-foreground", secondary_fg),
+        ("secondary-hover", secondary_hover),
+        ("secondary-hover-foreground", secondary_hover_fg),
+        ("secondary-active", secondary_active),
+        ("secondary-active-foreground", secondary_active_fg),
         ("muted", muted),
         ("muted-foreground", muted_fg),
         ("accent", accent),
         ("accent-foreground", accent_fg),
+        ("accent-hover", accent_hover),
+        ("accent-hover-foreground", accent_hover_fg),
+        ("accent-active", accent_active),
+        ("accent-active-foreground", accent_active_fg),
         ("destructive", status.destructive),
-        ("destructive-foreground", foreground_on(status.destructive)),
+        ("destructive-foreground", destructive_fg),
+        ("destructive-hover", destructive_hover),
+        ("destructive-hover-foreground", destructive_hover_fg),
+        ("destructive-active", destructive_active),
+        ("destructive-active-foreground", destructive_active_fg),
         ("border", border),
         ("input", input),
-        ("ring", primary),
+        ("ring", ring),
         ("sidebar", sidebar),
         ("sidebar-foreground", fg),
         ("sidebar-primary", primary),
@@ -344,7 +390,7 @@ fn palette(id: ThemeId, dark: bool) -> Vec<(&'static str, Hsla)> {
         ("sidebar-accent", accent),
         ("sidebar-accent-foreground", accent_fg),
         ("sidebar-border", border),
-        ("sidebar-ring", primary),
+        ("sidebar-ring", ring),
         ("warning", status.warning),
         ("warning-foreground", foreground_on(status.warning)),
         ("success", status.success),

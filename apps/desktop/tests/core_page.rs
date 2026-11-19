@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：核心页（核心库存与
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：核心页（核心库存与
 //! 下载/选择）。真实联网场景经本线程 127.0.0.1 HTTP 服务器（release metadata
 //! JSON 回指本服务器资产 + 真实 tar.gz 归档），不依赖互联网；Unix 用脚本
 //! 核心做真实 version probe，Windows 原生验收由主代理执行。每个场景独立
@@ -7,10 +7,12 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{TestRoute, TestServer, data_root, start_app, texts};
+use common::{
+    TestRoute, TestServer, core_binary, data_root, init_root_then, save_core_config, seed_core,
+    seed_runtime_target, start_app, texts,
+};
 use lanpath_client::ClientConfig;
 #[cfg(unix)]
 use lanpath_client::RequestProxyMode;
@@ -22,64 +24,6 @@ fn open_core_page(app: &mut nsh_testing::Headless) {
     app.press("核心").unwrap();
     app.wait_for("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管")
         .unwrap();
-}
-
-/// 数据根内的库存二进制路径（共享 on-disk 命名规则）。
-fn core_binary(root: &Path, core_type: CoreType, version: &str) -> PathBuf {
-    let name = if cfg!(windows) {
-        format!("{}.exe", core_type.binary_name())
-    } else {
-        core_type.binary_name().to_string()
-    };
-    root.join("cores")
-        .join(core_type.binary_name())
-        .join(version)
-        .join(name)
-}
-
-/// 种子一个库存核心：Unix 为可真实 version probe 的脚本核心，其他平台为
-/// 仅用于列表/删除路径的元数据文件（选择/下载的 probe 原生验收由主代理做）。
-fn seed_core(root: &Path, core_type: CoreType, version: &str, _reported: &str) -> PathBuf {
-    let path = core_binary(root, core_type, version);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    #[cfg(unix)]
-    {
-        let output = match core_type {
-            CoreType::SingBox => format!("sing-box version {_reported}"),
-            CoreType::Mihomo => format!("Mihomo Meta v{_reported} linux amd64"),
-        };
-        std::fs::write(&path, format!("#!/bin/sh\necho '{output}'\n")).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    #[cfg(not(unix))]
-    std::fs::write(&path, b"inventory metadata fixture").unwrap();
-    path
-}
-
-/// 持久化选中核心（core_binary 指向种子路径，core_type 由共享推断）。
-fn save_core_config(root: &Path, binary: &Path) {
-    ClientConfig::new(
-        root.to_path_buf(),
-        "https://hub.example",
-        "token",
-        binary.to_path_buf(),
-    )
-    .save()
-    .unwrap();
-}
-
-/// 先启动一次应用初始化数据根（写入归属标记），再预置库存与配置。
-fn init_root_then(
-    entries: &std::collections::BTreeMap<String, String>,
-    root: &Path,
-    seed: impl FnOnce(&Path),
-) {
-    {
-        let mut app = start_app(entries.clone()).0;
-        app.wait_for("尚无订阅。").unwrap();
-    }
-    seed(root);
 }
 
 /// 检查更新（channels 列表）fixture 服务器：只含 release 列表路由。
@@ -145,7 +89,7 @@ fn release_server(version: &str, delay: Duration) -> TestServer {
 fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     app.press("核心").unwrap();
     app.wait_for("尚未选择核心").unwrap();
     let seen = texts(&app);
@@ -217,7 +161,7 @@ fn seeded_active_core_shown_and_type_switch_keeps_active_summary() {
         save_core_config(root, &singbox);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.wait_for("sing-box · v1.2.3").unwrap();
     let seen = texts(&app);
@@ -243,7 +187,7 @@ fn check_remote_then_download_installs_selects_and_persists() {
     let server = release_server("1.2.3", Duration::ZERO);
     entries.insert(API_BASE_KEY.to_owned(), server.url(""));
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
 
     app.press("id:core-check-remote").unwrap();
@@ -281,7 +225,7 @@ fn check_remote_failure_keeps_state_and_recovers_with_a_good_server() {
     let bad = TestServer::new(vec![]);
     entries.insert(API_BASE_KEY.to_owned(), bad.url(""));
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.press("id:core-check-remote").unwrap();
     app.wait_for_within("text:/检查更新失败/", Duration::from_secs(10))
@@ -293,7 +237,7 @@ fn check_remote_failure_keeps_state_and_recovers_with_a_good_server() {
     let good = channels_server("1.2.3");
     entries.insert(API_BASE_KEY.to_owned(), good.url(""));
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.press("id:core-check-remote").unwrap();
     app.wait_for("远程：v1.2.3").unwrap();
@@ -304,10 +248,10 @@ fn check_remote_failure_keeps_state_and_recovers_with_a_good_server() {
     );
 }
 
-/// 下载 busy 全局单飞（重复点击不重复请求）；下载中途离开页面再回来
-/// 不永久 busy、可立即查询；但旧下载仍在后台时，新页面的下载/选择/删除
-/// 被业务层同根 mutation 锁立即拒绝（真实 busy 错误，不产生第二个资产
-/// 请求）；旧下载完成后锁释放，可再次下载（缓存重新校验并选中）。
+/// 下载 busy 全局单飞（重复点击不重复请求）；下载中途离开页面再回来，
+/// 新页面从业务层共享活动恢复真实 busy，而不是假装空闲或永久 busy；旧 worker
+/// 完成后版本变化会清除 busy、重载列表并同步 App 级核心摘要。无需再次点击
+/// 下载或手动查询即可看到真实选中核心。
 #[cfg(unix)]
 #[test]
 fn download_is_single_flight_and_recovers_after_leaving_the_page() {
@@ -315,7 +259,7 @@ fn download_is_single_flight_and_recovers_after_leaving_the_page() {
     let server = release_server("1.2.3", Duration::from_millis(1500));
     entries.insert(API_BASE_KEY.to_owned(), server.url(""));
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.press("id:core-check-remote").unwrap();
     app.wait_for("远程：v1.2.3").unwrap();
@@ -324,37 +268,71 @@ fn download_is_single_flight_and_recovers_after_leaving_the_page() {
     // busy 中重复点击 no-op（全局单飞，不启动第二个下载）。
     app.press("id:core-download").unwrap();
 
-    // 下载在途时离开页面再回来：全新页面状态，不永久 busy，可查询。
+    // 下载在途时离开页面再回来：新页面看到同根真实活动，不能重复发请求。
     app.press("订阅").unwrap();
-    app.wait_for("尚无订阅。").unwrap();
-    app.press("核心").unwrap();
-    app.wait_for("尚未选择核心").unwrap();
-    app.press("id:core-check-remote").unwrap();
-    app.wait_for("远程：v1.2.3").unwrap();
-
-    // 旧下载仍在后台（离页的 owner 只取消 UI 轮询）：新页面再下载被
-    // 业务层 mutation 锁立即拒绝——真实 busy 错误，且不产生第二个资产请求。
-    app.press("id:core-download").unwrap();
-    app.wait_for_within("text:/另一项核心库存操作正在进行/", Duration::from_secs(10))
+    common::wait_ready(&mut app);
+    open_core_page(&mut app);
+    app.wait_for_within("text:/正在下载/", Duration::from_secs(5))
         .unwrap();
+    // 新页面处于共享 busy：下载入口不可按压，不产生第二个资产请求。
+    assert!(
+        !app.screen().matches("id:core-download").unwrap(),
+        "共享在途时不能再次启动下载: {:?}",
+        texts(&app)
+    );
     assert_eq!(server.count_path("/asset"), 1, "不产生第二个资产请求");
 
-    // 旧下载真实完成：落盘并释放锁。
+    // 旧页面 worker 真实完成：落盘、活动清除、摘要更新，无需重进页面。
     let binary = core_binary(dir.path(), CoreType::SingBox, "1.2.3");
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !binary.is_file() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(binary.is_file(), "在途下载完成并落盘: {binary:?}");
-    assert_eq!(server.count_path("/asset"), 1, "单飞：资产只下载一次");
-
-    // 锁释放后可再操作：缓存路径重新校验并自动选中。
-    app.press("id:core-download").unwrap();
     app.wait_for_within("sing-box · v1.2.3", Duration::from_secs(45))
         .unwrap();
-    assert_eq!(server.count_path("/asset"), 1);
+    assert!(binary.is_file(), "在途下载完成并落盘: {binary:?}");
+    assert_eq!(server.count_path("/asset"), 1, "单飞：资产只下载一次");
+    assert!(
+        !texts(&app).iter().any(|text| text.contains("正在下载")),
+        "共享活动完成后 busy 清除: {:?}",
+        texts(&app)
+    );
     let config = ClientConfig::load(dir.path()).unwrap();
     assert_eq!(config.core_binary, binary);
+}
+
+/// 核心下载在离页期间完成：重新进入时页面初始 busy 必须与共享活动一致，
+/// 不能残留“正在下载”，且真实选中核心与 App 摘要可直接看到。
+#[cfg(unix)]
+#[test]
+fn download_completed_before_returning_clears_initial_busy() {
+    let (dir, mut entries) = data_root();
+    let server = release_server("1.2.3", Duration::from_millis(300));
+    entries.insert(API_BASE_KEY.to_owned(), server.url(""));
+    let mut app = start_app(entries).0;
+    common::wait_ready(&mut app);
+    open_core_page(&mut app);
+    app.press("id:core-check-remote").unwrap();
+    app.wait_for("远程：v1.2.3").unwrap();
+    app.press("id:core-download").unwrap();
+
+    app.press("订阅").unwrap();
+    common::wait_ready(&mut app);
+    let binary = core_binary(dir.path(), CoreType::SingBox, "1.2.3");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        let saved = ClientConfig::load(dir.path()).is_ok_and(|config| config.core_binary == binary);
+        if binary.is_file() && saved {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(binary.is_file(), "下载已完成落盘");
+
+    open_core_page(&mut app);
+    app.wait_for("sing-box · v1.2.3").unwrap();
+    let seen = texts(&app);
+    assert!(
+        !seen.iter().any(|text| text.contains("正在下载")),
+        "完成先于重进时不得残留 busy: {seen:?}"
+    );
+    assert_eq!(server.count_path("/asset"), 1);
 }
 
 /// 删除非 active 版本需确认；active 行没有使用/删除按钮（共享层同样拒绝）。
@@ -369,7 +347,7 @@ fn delete_inactive_needs_confirmation_and_active_row_has_no_actions() {
     });
     let inactive = core_binary(dir.path(), CoreType::SingBox, "1.2.2");
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.wait_for("sing-box · v1.2.3").unwrap();
 
@@ -415,17 +393,15 @@ fn selecting_a_local_version_switches_active_and_preserves_unrelated_config() {
         assert_eq!(latest, core_binary(root, CoreType::SingBox, "1.2.3"));
     });
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.wait_for("sing-box · v1.2.2").unwrap();
 
     app.press("id:core-use-sing-box-1.2.3").unwrap();
     app.wait_for("sing-box · v1.2.3").unwrap();
-    let seen = texts(&app);
-    assert!(
-        seen.iter().any(|text| text.contains("已选中")),
-        "选择成功反馈: {seen:?}"
-    );
+    // 共享活动清除会先触发摘要重读；本页完成通知随后到达，单独等待。
+    app.wait_for_within("text:/已选中/", Duration::from_secs(10))
+        .unwrap();
 
     let config = ClientConfig::load(dir.path()).unwrap();
     assert_eq!(
@@ -450,7 +426,7 @@ fn mihomo_selection_shows_summary_and_config_preview_note() {
         save_core_config(root, &mihomo);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.wait_for("mihomo · v1.19.29").unwrap();
     let seen = texts(&app);
@@ -468,49 +444,6 @@ fn mihomo_selection_shows_summary_and_config_preview_note() {
 //
 // 下列用例使用 rustc 现场编译的 fixture 假核心（真实进程/真实监听/真实
 // 回收），不是真实 sing-box/Mihomo；Windows 真实核心验收由主代理执行。
-
-const CLASH_YAML: &str = "proxies:\n  - name: 节点甲\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n  - name: 节点乙\n    type: ss\n    server: 192.0.2.2\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n";
-
-/// 种子 fixture 核心 + 已启用生效订阅（含原文/缓存）+ 端口与核心选择。
-fn seed_runtime_target(
-    root: &Path,
-    core_type: CoreType,
-    version: &str,
-    mixed: u16,
-    api: u16,
-) -> PathBuf {
-    let binary = common::seed_fixture_core(root, core_type, version);
-    let store = lanpath_client::SubscriptionStore::new(root.to_path_buf());
-    let subscription = store
-        .add("运行订阅", "https://example.com/c.yaml", true, None)
-        .unwrap();
-    let fetched = lanpath_client::parse_subscription_body(CLASH_YAML, None).unwrap();
-    store
-        .write_source(
-            subscription.id,
-            &lanpath_client::SubscriptionSource {
-                format: fetched.format,
-                content: fetched.source.clone(),
-            },
-        )
-        .unwrap();
-    store
-        .write_cached_content(
-            subscription.id,
-            &lanpath_client::CachedSubscriptionContent {
-                format: fetched.format,
-                singbox_nodes: fetched.singbox_nodes,
-            },
-        )
-        .unwrap();
-    let mut config = ClientConfig::load_for_requests(root).unwrap();
-    config.active_subscription_id = Some(subscription.id);
-    config.core_binary = binary.clone();
-    config.mixed_port = mixed;
-    config.clash_api_port = api;
-    config.save().unwrap();
-    binary
-}
 
 /// 校验并启动 → 真实进程/真实监听 → 停止回收：结果文案明确“已完成二进制
 /// 校验”，状态行显示真实版本/端口，停止回执含真实 kind。
@@ -678,12 +611,12 @@ fn unexpected_exit_is_detected_by_the_status_poll() {
 fn cancelling_proxy_enable_confirmation_writes_nothing() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
     let before = std::fs::read(&config).expect("read app.toml");
 
-    app.press("id:proxy-toggle").unwrap();
+    app.press("id:proxy-toggle >> role:switch").unwrap();
     app.wait_for("启用系统代理接管？").unwrap();
     let seen = texts(&app);
     for expected in ["仅本次接管", "精确归还", "不保存", "重新确认"] {
@@ -697,7 +630,7 @@ fn cancelling_proxy_enable_confirmation_writes_nothing() {
     // 取消：配置字节不变（含默认 system_proxy_enabled=false 不被重写）。
     assert_eq!(std::fs::read(&config).expect("reread"), before);
     // 开关仍关：再次按下重新弹确认框。
-    app.press("id:proxy-toggle").unwrap();
+    app.press("id:proxy-toggle >> role:switch").unwrap();
     app.wait_for("启用系统代理接管？").unwrap();
 }
 
@@ -707,11 +640,11 @@ fn cancelling_proxy_enable_confirmation_writes_nothing() {
 fn confirming_proxy_enable_saves_preference_only() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_core_page(&mut app);
     let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
 
-    app.press("id:proxy-toggle").unwrap();
+    app.press("id:proxy-toggle >> role:switch").unwrap();
     app.wait_for("启用系统代理接管？").unwrap();
     app.press("id:proxy-confirm-accept").unwrap();
     app.wait_for_within("text:/系统代理偏好已保存/", Duration::from_secs(10))
@@ -722,4 +655,41 @@ fn confirming_proxy_enable_saves_preference_only() {
         saved.contains("system_proxy_enabled = true"),
         "偏好已保存: {saved}"
     );
+}
+
+/// 启停命令在途时修改系统代理偏好必须在写配置/授权前拒绝：不能先保存新
+/// 偏好却因共享命令忙而不重启，导致界面偏好与运行核心快照相反。
+#[test]
+fn proxy_preference_change_is_rejected_while_a_core_command_is_busy() {
+    let (dir, entries) = data_root();
+    init_root_then(&entries, dir.path(), |root| {
+        seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18397, 18398);
+    });
+    let mut app = start_app(entries).0;
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+    open_core_page(&mut app);
+    let config = dir.path().join("app.toml");
+    let before = std::fs::read(&config).expect("read app.toml before start");
+
+    app.press("id:core-start").unwrap();
+    app.press("id:proxy-toggle >> role:switch").unwrap();
+    assert!(
+        !texts(&app)
+            .iter()
+            .any(|text| text.contains("启用系统代理接管？")),
+        "命令在途时不得先弹确认/写偏好"
+    );
+    app.wait_for_within("text:/核心启动或停止进行中/", Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&config).expect("read app.toml during start"),
+        before,
+        "拒绝必须发生在写配置之前"
+    );
+
+    app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
+        .unwrap();
+    app.press("id:core-stop").unwrap();
+    app.wait_for_within("text:/已停止核心/", Duration::from_secs(30))
+        .unwrap();
 }

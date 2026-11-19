@@ -204,6 +204,9 @@ fn spawn_compose(state: ConfigPageState) {
                 Ok(preview) => {
                     done.error.set(None);
                     done.preview.set(Some(preview));
+                    // 合成可能按需刷新订阅缓存/节点清单；概览与状态栏的
+                    // 当前生效摘要必须消费同一份已确认数据。
+                    crate::app_state::refresh_active_subscription(&crate::app_state::current());
                 }
                 Err(error) => {
                     // 失败保留旧预览，只显示真实错误，不伪报新成功。

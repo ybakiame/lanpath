@@ -1,9 +1,8 @@
 //! NSH 桌面独立数据目录：所有权标记 + 进程内租约 + 生产/链接路径准入。
 //!
 //! 从 apps/gpui 的 data_root 迁移并适配为 NSH 桌面身份（`.lanpath-desktop-nsh`），
-//! 链接、所有权、租约和路径安全约束与 GPUI 版本一致，不削弱。GPUI 的便携模式
-//! 依赖可执行文件目录布局，NSH 桌面不提供便携模式：只有默认目录与显式覆盖
-//! （`LANPATH_DESKTOP_DATA_DIR` 环境变量或宿主预置的 NSH storage 键）。
+//! 链接、所有权、租约和路径安全约束与 GPUI 版本一致。程序旁的
+//! `lanpath.portable` 启用同级 data/，路径选择与原生 storage 绑定见 location。
 //! 准入全部通过并持锁后初始化统一 TOML 存储（`app.toml` +
 //! `subscriptions.toml`，见 `storage_init` 模块；breaking change，
 //! 旧 JSON 测试布局明确拒绝）。
@@ -18,18 +17,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 #[path = "data_root_identity.rs"]
 mod identity;
 
-/// 显式数据根环境变量（与 apps/gpui 的桌面迁移目标一致）。
-pub(crate) const DATA_DIR_ENV: &str = "LANPATH_DESKTOP_DATA_DIR";
-/// 宿主/测试可预置的 NSH storage 键，优先级低于环境变量；仅作为启动参数，
-/// 不进入持久化业务数据。
-pub(crate) const DATA_DIR_STORAGE_KEY: &str = "lanpath_desktop_nsh.data_dir";
+#[path = "data_location.rs"]
+mod location;
+pub(crate) use location::{prepare_native_data_dir, resolve_data_location};
 
 const OWNER_FILE: &str = ".lanpath-desktop-nsh";
 const OWNER_CONTENT: &[u8] = b"lanpath-desktop-nsh-data-root-v1\n";
 const LOCK_FILE: &str = ".lanpath-desktop-nsh.lock";
-
-/// 默认数据根目录名（NSH 桌面独立身份，区别于 Tauri/GPUI/apps/nsh）。
-pub(crate) const DATA_DIR_NAME: &str = "lanpath-desktop-nsh";
 
 /// 禁止作为祖先目录的应用数据根：Tauri 生产目录、GPUI 实验目录与 apps/nsh
 /// 验证应用目录。匹配不区分大小写；不包含本应用自身的目录名。
@@ -197,75 +191,6 @@ impl Drop for DataRoot {
     }
 }
 
-pub(crate) fn default_data_dir() -> LanpathResult<PathBuf> {
-    #[cfg(windows)]
-    {
-        Ok(environment_directory("LOCALAPPDATA")?.join(DATA_DIR_NAME))
-    }
-    #[cfg(not(windows))]
-    {
-        let base = match std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
-            Some(value) => absolute_environment_directory("XDG_DATA_HOME", value)?,
-            None => environment_directory("HOME")?.join(".local/share"),
-        };
-        Ok(base.join(DATA_DIR_NAME))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct DataLocation {
-    pub(crate) path: PathBuf,
-}
-
-impl DataLocation {
-    /// 显式路径非法时是错误，绝不回退默认目录；解析在任何失败后也不重试
-    /// 其他目录。
-    pub(crate) fn resolve(explicit: Option<&Path>) -> LanpathResult<Self> {
-        let path = match explicit {
-            Some(path) => {
-                if path.as_os_str().is_empty()
-                    || path.components().any(|part| part == Component::ParentDir)
-                {
-                    return Err(invalid(
-                        "显式 NSH 桌面数据路径必须非空且不含 '..'（LANPATH_DESKTOP_DATA_DIR）",
-                    ));
-                }
-                std::path::absolute(path)?
-            }
-            None => default_data_dir()?,
-        };
-        // 准入仍是 DataRoot::open 的职责；解析永不重试外来或生产目录。
-        Ok(Self { path })
-    }
-}
-
-/// 解析本进程的数据根：环境变量优先，其次宿主预置的 storage 键，最后默认目录。
-/// 两者都走同一份 DataRoot::open 准入检查。
-pub(crate) fn resolve_data_location() -> LanpathResult<DataLocation> {
-    let explicit = std::env::var_os(DATA_DIR_ENV).filter(|value| !value.is_empty());
-    let explicit = match explicit {
-        Some(value) => Some(PathBuf::from(value)),
-        None => nsh_core::storage::Storage::get_item(DATA_DIR_STORAGE_KEY)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from),
-    };
-    DataLocation::resolve(explicit.as_deref())
-}
-
-fn environment_directory(name: &str) -> LanpathResult<PathBuf> {
-    let value = std::env::var_os(name)
-        .ok_or_else(|| invalid(format!("{name} 是持久化 NSH 桌面数据目录的必需环境变量")))?;
-    absolute_environment_directory(name, value)
-}
-
-fn absolute_environment_directory(name: &str, value: std::ffi::OsString) -> LanpathResult<PathBuf> {
-    let path = PathBuf::from(value);
-    if !path.is_absolute() {
-        return Err(invalid(format!("{name} 必须是绝对路径目录")));
-    }
-    Ok(path)
-}
-
 fn needs_initialization(root: &Path) -> LanpathResult<bool> {
     let Some(metadata) = metadata_if_present(root)? else {
         return Ok(true);
@@ -323,7 +248,8 @@ fn check_ancestors(path: &Path) -> LanpathResult<()> {
         // 只探测元数据；绝不打开生产配置或种子数据。
         let production_marker = (depth != 0 || !owned_self)
             && (metadata_if_present(&ancestor.join("client.json"))?.is_some()
-                || metadata_if_present(&ancestor.join("lanpath.portable"))?.is_some());
+                || (metadata_if_present(&ancestor.join(location::PORTABLE_MARKER))?.is_some()
+                    && !location::is_own_portable_directory(ancestor)?));
         let portable_layout = (metadata_if_present(&ancestor.join("Lanpath.exe"))?.is_some()
             || metadata_if_present(&ancestor.join("lanpath-app.exe"))?.is_some())
             && (metadata_if_present(&ancestor.join("data"))?.is_some()

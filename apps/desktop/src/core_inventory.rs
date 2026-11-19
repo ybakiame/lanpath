@@ -27,7 +27,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use lanpath_client::core_management::{CoreManagementService, ManagedCore, RemoteChannel};
 use lanpath_client::cores::CoreDownloadStage;
@@ -51,6 +52,78 @@ pub(crate) const MUTATION_BUSY: &str = "另一项核心库存操作正在进行�
 static MUTATION_LOCKS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
     OnceLock::new();
 
+/// 同根共享的后台库存活动：页面销毁不会取消 `background` worker，后续
+/// 页面和 App 级摘要仍需要看到真实在途状态与完成事实。活动状态只保存
+/// 语义类型/进度，不保存翻译后的文案。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InventoryActivityKind {
+    Download,
+    Select,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InventoryActivity {
+    pub(crate) kind: InventoryActivityKind,
+    pub(crate) stage: Option<CoreDownloadStage>,
+}
+
+#[derive(Default)]
+struct SharedActivity {
+    current: Mutex<Option<InventoryActivity>>,
+    revision: AtomicU64,
+}
+
+static ACTIVITY: OnceLock<Mutex<HashMap<PathBuf, Weak<SharedActivity>>>> = OnceLock::new();
+
+fn activity_for(root: &Path) -> Arc<SharedActivity> {
+    let mut activities = ACTIVITY
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(activity) = activities.get(root).and_then(Weak::upgrade) {
+        return activity;
+    }
+    let activity = Arc::new(SharedActivity::default());
+    activities.insert(root.to_path_buf(), Arc::downgrade(&activity));
+    activity
+}
+
+/// 活动登记 guard：业务方法返回、失败或取消时都会清除活动并推进版本，
+/// 不依赖页面 UI 回调是否还活着。
+struct ActivityGuard {
+    shared: Arc<SharedActivity>,
+}
+
+impl ActivityGuard {
+    fn begin(shared: Arc<SharedActivity>, activity: InventoryActivity) -> Self {
+        if let Ok(mut current) = shared.current.lock() {
+            *current = Some(activity);
+        }
+        shared.revision.fetch_add(1, Ordering::Release);
+        Self { shared }
+    }
+
+    fn stage(&self, stage: Option<CoreDownloadStage>) {
+        if let Ok(mut current) = self.shared.current.lock()
+            && let Some(current) = current.as_mut()
+            && current.stage != stage
+        {
+            current.stage = stage;
+            self.shared.revision.fetch_add(1, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut current) = self.shared.current.lock() {
+            *current = None;
+        }
+        self.shared.revision.fetch_add(1, Ordering::Release);
+    }
+}
+
 fn mutation_lock_for(root: &Path) -> Arc<tokio::sync::Mutex<()>> {
     let mut locks = MUTATION_LOCKS
         .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
@@ -73,6 +146,7 @@ pub(crate) struct CoreInventory {
     root: Arc<DataRoot>,
     service: CoreManagementService,
     mutation: Arc<tokio::sync::Mutex<()>>,
+    activity: Arc<SharedActivity>,
 }
 
 impl CoreInventory {
@@ -103,11 +177,34 @@ impl CoreInventory {
             service = service.with_api_base(base);
         }
         let mutation = mutation_lock_for(root.path());
+        let activity = activity_for(root.path());
         Ok(Self {
             root,
             service,
             mutation,
+            activity,
         })
+    }
+
+    /// 当前同根共享的后台 mutation（不同页面看到同一事实）。
+    pub(crate) fn activity(&self) -> Option<InventoryActivity> {
+        self.activity
+            .current
+            .lock()
+            .ok()
+            .and_then(|activity| activity.clone())
+    }
+
+    /// 活动状态版本：无活动时也会在完成时推进，供 App/页面检测需要重读。
+    pub(crate) fn activity_revision(&self) -> u64 {
+        self.activity.revision.load(Ordering::Acquire)
+    }
+
+    fn begin_activity(&self, kind: InventoryActivityKind) -> ActivityGuard {
+        ActivityGuard::begin(
+            self.activity.clone(),
+            InventoryActivity { kind, stage: None },
+        )
     }
 
     /// 取 mutation 锁；在途时立即拒绝（不排队）。调用方持有 guard 直至
@@ -176,6 +273,7 @@ impl CoreInventory {
         self.ensure_not_running()?;
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
+        let _activity = self.begin_activity(InventoryActivityKind::Select);
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "选择核心：{core_type}");
         self.service.for_core(core_type).select(path)
     }
@@ -201,7 +299,12 @@ impl CoreInventory {
         self.ensure_not_running()?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心：{core_type} {version}");
         let service = self.service.for_core(core_type);
-        let installed = service.download_with_progress(version, progress).await?;
+        let activity = self.begin_activity(InventoryActivityKind::Download);
+        let report = |stage: CoreDownloadStage| {
+            activity.stage(Some(stage));
+            progress(stage);
+        };
+        let installed = service.download_with_progress(version, &report).await?;
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心完成：{} {}", installed.core_type(), installed.version());
         Ok(installed)
     }
@@ -213,6 +316,7 @@ impl CoreInventory {
         self.ensure_not_running()?;
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
+        let _activity = self.begin_activity(InventoryActivityKind::Delete);
         tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "删除核心：{core_type}");
         self.service.for_core(core_type).delete(path)
     }

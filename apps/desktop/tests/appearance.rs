@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：侧栏导航、外观页
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：侧栏导航、外观页
 //! 多主题/模式/语言/动效的真实切换、持久化与恢复、语言切换不重建
 //! 业务状态。每个场景使用独立临时数据根（界面语言预置 zh-CN）。
 
@@ -6,7 +6,7 @@ mod common;
 
 use nsh_engine::Environment;
 
-use common::{data_root, start_app, texts};
+use common::{data_root, start_app, start_app_desktop, texts};
 
 /// 侧栏在订阅页与外观页之间导航，两页内容互不串扰；导航项有稳定
 /// test_id（不依赖翻译文案）。
@@ -14,10 +14,12 @@ use common::{data_root, start_app, texts};
 fn navigating_between_the_two_sidebar_pages() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("解析共享订阅").unwrap();
+    app.wait_for("开始之前").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"订阅"), "{seen:?}");
-    assert!(app.screen().shows("解析共享订阅"));
+    // 默认首页是概览：未配置时只显示步骤（添加订阅为当前可执行步）。
+    assert!(app.screen().shows("开始之前"));
+    assert!(app.screen().shows("选择核心"));
     assert!(!app.screen().matches("id:appearance-light").unwrap());
 
     app.press("role:button[外观]").unwrap();
@@ -35,14 +37,14 @@ fn navigating_between_the_two_sidebar_pages() {
             "missing theme {theme}"
         );
     }
-    assert!(!app.screen().shows("解析共享订阅"));
+    assert!(!app.screen().shows("开始之前"));
     assert!(app.screen().matches("id:appearance-light").unwrap());
     // 选中主题同时显示名称与勾选（默认 amethyst 选中）。
     assert!(app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
     assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
 
     app.press("role:button[订阅]").unwrap();
-    assert!(app.screen().shows("解析共享订阅"));
+    app.wait_for("id:subscription-name").unwrap();
     assert!(!app.screen().matches("id:appearance-light").unwrap());
 }
 
@@ -52,7 +54,7 @@ fn navigating_between_the_two_sidebar_pages() {
 fn switching_appearance_light_dark_and_system_for_real() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
-    app.wait_for("解析共享订阅").unwrap();
+    app.wait_for("开始之前").unwrap();
     app.press("role:button[外观]").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"已选择：amethyst"), "{seen:?}");
@@ -85,7 +87,7 @@ fn switching_appearance_light_dark_and_system_for_real() {
 fn switching_theme_applies_and_persists() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
-    app.wait_for("解析共享订阅").unwrap();
+    app.wait_for("开始之前").unwrap();
     app.press("role:button[外观]").unwrap();
     assert_eq!(storage.get("theme"), None, "未选择时无 theme 键");
 
@@ -103,6 +105,98 @@ fn switching_theme_applies_and_persists() {
     assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
 }
 
+/// 主题卡暴露可访问名称与选中语义，读屏不只依赖 ✓ 图形。
+#[test]
+fn theme_cards_expose_selected_state_and_names() {
+    let (_dir, entries) = data_root();
+    let mut app = start_app(entries).0;
+    app.wait_for("开始之前").unwrap();
+    app.press("role:button[外观]").unwrap();
+    let amethyst = "role:button[主题：amethyst]";
+    let ocean = "role:button[主题：ocean]";
+    assert!(app.screen().selected(amethyst).unwrap());
+    assert!(!app.screen().selected(ocean).unwrap());
+    app.press("id:theme-ocean >> text:ocean").unwrap();
+    assert!(app.screen().selected(ocean).unwrap());
+    assert!(!app.screen().selected(amethyst).unwrap());
+}
+
+/// 指针悬停只预览不写盘；A→B→离开后回已保存主题，点击才提交；
+/// 悬停中离页由页面清理恢复 confirmed 主题。
+#[test]
+fn theme_hover_preview_is_transient_and_cleans_up_on_leave() {
+    let (_dir, entries) = data_root();
+    let (mut app, storage) = start_app_desktop(entries);
+    app.wait_for("开始之前").unwrap();
+    app.press("role:button[外观]").unwrap();
+    app.hover("id:theme-ocean").unwrap();
+    app.wait_for("正在预览：ocean；点击应用并保存").unwrap();
+    assert_eq!(storage.get("theme"), None, "hover 不得写 storage");
+    app.hover("id:theme-amethyst").unwrap();
+    app.wait_for("正在预览：amethyst；点击应用并保存").unwrap();
+    assert_eq!(storage.get("theme"), None);
+    app.hover("id:appearance-light").unwrap();
+    app.wait_for("指向主题可预览，点击应用并保存").unwrap();
+    assert_eq!(storage.get("theme"), None);
+
+    app.hover("id:theme-ocean").unwrap();
+    app.wait_for("正在预览：ocean；点击应用并保存").unwrap();
+    app.press("id:theme-ocean >> text:ocean").unwrap();
+    assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
+    assert!(app.screen().shows("已选择：ocean"));
+
+    // 悬停后离页：页面 owner 清理，不把临时预览写盘或留在选中态。
+    app.hover("id:theme-forest").unwrap();
+    app.wait_for("正在预览：forest；点击应用并保存").unwrap();
+    app.press("role:button[订阅]").unwrap();
+    app.wait_for("id:subscription-name").unwrap();
+    assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
+    app.press("role:button[外观]").unwrap();
+    app.wait_for("已选择：ocean").unwrap();
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
+    assert!(!app.screen().selected("role:button[主题：forest]").unwrap());
+}
+
+/// storage 配额拒绝写入时，四类外观偏好都不改变信号/运行时且显示可恢复
+/// 错误；用户看到“已选择”和实际重启恢复值不再背离。
+#[test]
+fn appearance_save_failure_keeps_previous_values_and_reports() {
+    let (_dir, mut entries) = data_root();
+    entries.insert(
+        "filler".to_owned(),
+        "x".repeat(nsh_core::storage::QUOTA - "filler".len()),
+    );
+    let (mut app, storage) = start_app(entries);
+    app.wait_for("开始之前").unwrap();
+    app.press("role:button[外观]").unwrap();
+    let failure = "外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。";
+
+    app.press("id:theme-ocean >> text:ocean").unwrap();
+    assert_eq!(storage.get("theme"), None);
+    assert!(
+        app.screen()
+            .selected("role:button[主题：amethyst]")
+            .unwrap()
+    );
+    assert!(texts(&app).contains(&failure));
+
+    app.press("id:appearance-dark >> text:深色").unwrap();
+    assert_eq!(storage.get("appearance"), None);
+    assert!(texts(&app).contains(&"当前生效：浅色"));
+
+    app.press("id:language-en >> text:English").unwrap();
+    assert_eq!(storage.get("language"), Some("zh-CN".to_owned()));
+    assert!(app.screen().shows("外观"));
+
+    app.press("id:motion-reduce >> text:减少动效").unwrap();
+    assert_eq!(storage.get("reduce_motion"), None);
+    assert!(
+        app.screen()
+            .selected("id:motion-group >> role:radio[跟随系统]")
+            .unwrap()
+    );
+}
+
 /// 启动时恢复 storage 预置的外观选择（主题 ocean + 深色 + 减少动效）。
 #[test]
 fn restores_the_persisted_appearance_choices() {
@@ -111,7 +205,7 @@ fn restores_the_persisted_appearance_choices() {
     entries.insert("appearance".to_owned(), "dark".to_owned());
     entries.insert("reduce_motion".to_owned(), "reduce".to_owned());
     let mut app = start_app(entries).0;
-    app.wait_for("解析共享订阅").unwrap();
+    app.wait_for("开始之前").unwrap();
     app.press("role:button[外观]").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"已选择：ocean"), "{seen:?}");
@@ -129,10 +223,15 @@ fn restores_the_persisted_appearance_choices() {
 fn switching_language_applies_without_rebuilding_state() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
-    app.wait_for("解析共享订阅").unwrap();
-    // 先证明业务页在中文下内容存在。
+    app.wait_for("开始之前").unwrap();
+    // 先证明业务页在中文下内容存在，并添加一条真实订阅验证切换后仍在。
     app.press("role:button[订阅]").unwrap();
-    assert!(app.screen().shows("解析共享订阅"));
+    app.wait_for("id:subscription-name").unwrap();
+    app.type_text("id:subscription-name", "语言订阅").unwrap();
+    app.type_text("id:subscription-url", "https://example.com/lang.yaml")
+        .unwrap();
+    app.press("新增订阅").unwrap();
+    assert!(texts(&app).contains(&"语言订阅"));
 
     app.press("role:button[外观]").unwrap();
     app.press("id:language-en >> text:English").unwrap();
@@ -141,9 +240,11 @@ fn switching_language_applies_without_rebuilding_state() {
     assert!(app.screen().shows("Appearance"));
     assert!(app.screen().shows("Subscriptions"));
 
-    // 业务页状态未重建：切回订阅页，共享解析验证仍在。
+    // 业务页状态未重建：切回订阅页，真实列表内容仍在。
     app.press("role:button[Subscriptions]").unwrap();
-    assert!(app.screen().shows("解析共享订阅"));
+    let seen = texts(&app);
+
+    assert!(seen.contains(&"语言订阅"), "{seen:?}");
 
     // 切回中文（此时导航仍为英文）。
     app.press("role:button[Appearance]").unwrap();
@@ -158,7 +259,7 @@ fn switching_language_applies_without_rebuilding_state() {
 fn switching_motion_preference_persists() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
-    app.wait_for("解析共享订阅").unwrap();
+    app.wait_for("开始之前").unwrap();
     app.press("role:button[外观]").unwrap();
     assert!(
         app.screen()

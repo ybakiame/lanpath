@@ -26,6 +26,7 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
     let label = id.id_name();
     view()
         .flex_col()
+        .w_full()
         .gap_2()
         .p_3()
         .rounded(move || theme().radius)

@@ -1,4 +1,4 @@
-//! Headless 测试共用 harness（`nsh_testing::Headless`，NSH 0.5.0）：
+//! Headless 测试共用 harness（`nsh_testing::Headless`，NSH 0.5.1）：
 //! 内存 storage 后端（预置条目、可回放写入）、桌面视口启动、
 //! 每场景独立的临时数据根，以及本线程内的最小 HTTP 测试服务器
 //! （订阅刷新用例真实联网，不依赖互联网）。
@@ -286,6 +286,22 @@ pub fn start_app(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStor
     (app, storage)
 }
 
+/// 以桌面语义（Linux OS + Desktop idiom）启动应用：headless 默认 OS 为
+/// 移动端（Tab 不在视图站间移动焦点）；键盘焦点/Tab 回归用例经此覆盖
+/// 桌面行为（与 NSH 自身键盘测试同一做法）。
+pub fn start_app_desktop(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStorage>) {
+    let storage = MemoryStorage::new(entries);
+    let mut config = EngineConfig {
+        viewport: Size::new(Points(1100.0), Points(800.0)),
+        storage: Some(storage.clone()),
+        ..EngineConfig::new(lanpath_desktop_nsh::root())
+    };
+    config.environment.os = nsh_core::platform::Os::Linux;
+    config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+    let app = Headless::start(config).expect("start the headless app (desktop)");
+    (app, storage)
+}
+
 /// 以给定 storage 预置启动组件画廊（`--ui-gallery` 的同一根构建链）。
 pub fn start_gallery(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStorage>) {
     let storage = MemoryStorage::new(entries);
@@ -312,6 +328,146 @@ pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
     (dir, entries)
 }
 
+/// 应用就绪：侧栏标题常驻（阶段 1 起默认首页是概览）。
+pub fn wait_ready(app: &mut Headless) {
+    app.wait_for("Lanpath NSH Desktop").unwrap();
+}
+
+/// 打开订阅页并等待列表区就绪（默认首页是概览，需先等首帧再导航）。
+pub fn open_subscriptions(app: &mut Headless) {
+    wait_ready(app);
+    app.press("id:nav-subscriptions >> role:button").unwrap();
+    app.wait_for("id:subscription-name").unwrap();
+}
+
+/// 固定 Clash YAML 测试订阅（两个 SS 节点，共享解析器可识别为 ClashYaml）。
+pub const CLASH_YAML: &str = "proxies:\n  - name: 节点甲\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n  - name: 节点乙\n    type: ss\n    server: 192.0.2.2\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n";
+
+/// 数据根内的库存二进制路径（共享 on-disk 命名规则）。
+pub fn core_binary(
+    root: &std::path::Path,
+    core_type: lanpath_common::CoreType,
+    version: &str,
+) -> std::path::PathBuf {
+    let name = if cfg!(windows) {
+        format!("{}.exe", core_type.binary_name())
+    } else {
+        core_type.binary_name().to_string()
+    };
+    root.join("cores")
+        .join(core_type.binary_name())
+        .join(version)
+        .join(name)
+}
+
+/// 种子一个库存核心：Unix 使用 version 脚本，Windows 使用真实编译的 PE
+/// 夹具，禁止把文本当作 .exe 探测，避免触发系统 16 位应用兼容性对话框。
+pub fn seed_core(
+    root: &std::path::Path,
+    core_type: lanpath_common::CoreType,
+    version: &str,
+    _reported: &str,
+) -> std::path::PathBuf {
+    let path = core_binary(root, core_type, version);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        let output = match core_type {
+            lanpath_common::CoreType::SingBox => format!("sing-box version {_reported}"),
+            lanpath_common::CoreType::Mihomo => format!("Mihomo Meta v{_reported} linux amd64"),
+        };
+        std::fs::write(&path, format!("#!/bin/sh\necho '{output}'\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[cfg(not(unix))]
+    {
+        assert_eq!(
+            version, _reported,
+            "this fixture reports its version directory"
+        );
+        std::fs::copy(compiled_core_fixture(), &path).expect("copy native inventory fixture");
+    }
+    path
+}
+
+/// 持久化选中核心（core_binary 指向种子路径，core_type 由共享推断）。
+pub fn save_core_config(root: &std::path::Path, binary: &std::path::Path) {
+    lanpath_client::ClientConfig::new(
+        root.to_path_buf(),
+        "https://hub.example",
+        "token",
+        binary.to_path_buf(),
+    )
+    .save()
+    .unwrap();
+}
+
+/// 先启动一次应用初始化数据根（写入归属标记），再预置库存与配置。
+pub fn init_root_then(
+    entries: &BTreeMap<String, String>,
+    root: &std::path::Path,
+    seed: impl FnOnce(&std::path::Path),
+) {
+    {
+        let mut app = start_app(entries.clone()).0;
+        wait_ready(&mut app);
+    }
+    seed(root);
+}
+
+/// 种子 fixture 核心（真实进程/监听/回收）+ 已启用生效订阅（含原文/缓存）
+/// + 端口与核心选择，供“校验并启动/停止”运行时用例使用。
+pub fn seed_runtime_target(
+    root: &std::path::Path,
+    core_type: lanpath_common::CoreType,
+    version: &str,
+    mixed: u16,
+    api: u16,
+) -> std::path::PathBuf {
+    let binary = seed_fixture_core(root, core_type, version);
+    let store = lanpath_client::SubscriptionStore::new(root.to_path_buf());
+    let subscription = store
+        .add("运行订阅", "https://example.com/c.yaml", true, None)
+        .unwrap();
+    let fetched = lanpath_client::parse_subscription_body(CLASH_YAML, None).unwrap();
+    store
+        .write_source(
+            subscription.id,
+            &lanpath_client::SubscriptionSource {
+                format: fetched.format,
+                content: fetched.source.clone(),
+            },
+        )
+        .unwrap();
+    store
+        .write_cached_content(
+            subscription.id,
+            &lanpath_client::CachedSubscriptionContent {
+                format: fetched.format,
+                singbox_nodes: fetched.singbox_nodes.clone(),
+            },
+        )
+        .unwrap();
+    // 清单 node_count/format 与缓存一致（等同真实刷新后的落盘形态）。
+    let mut subscriptions = store.load().unwrap();
+    if let Some(target) = subscriptions
+        .iter_mut()
+        .find(|candidate| candidate.id == subscription.id)
+    {
+        target.node_count = fetched.singbox_nodes.len() as u64;
+        target.format = Some(fetched.format);
+    }
+    store.save(&subscriptions).unwrap();
+    let mut config = lanpath_client::ClientConfig::load_for_requests(root).unwrap();
+    config.active_subscription_id = Some(subscription.id);
+    config.core_binary = binary.clone();
+    config.mixed_port = mixed;
+    config.clash_api_port = api;
+    config.save().unwrap();
+    binary
+}
+
 /// 屏幕上全部文本。
 pub fn texts(app: &Headless) -> Vec<&str> {
     app.screen().texts()
@@ -322,49 +478,10 @@ pub fn texts(app: &Headless) -> Vec<&str> {
 /// lifecycle fixture 同一模式，只链接 Cargo 已构建的 serde_json rlib）。
 /// 这是 fixture 核心，不等于真实 sing-box/Mihomo（Windows 真实核心验收由
 /// 主代理执行）。每测试进程编译一次。
+#[path = "../support/core_build.rs"]
+mod core_build;
 pub fn compiled_core_fixture() -> &'static std::path::Path {
-    static COMPILED: std::sync::LazyLock<(tempfile::TempDir, std::path::PathBuf)> =
-        std::sync::LazyLock::new(|| {
-            let directory = tempfile::tempdir().expect("fixture tempdir");
-            let executable = std::env::current_exe().expect("current test binary");
-            let dependencies = executable.parent().expect("deps directory");
-            let serde_json = std::fs::read_dir(dependencies)
-                .expect("read deps directory")
-                .map(|entry| entry.expect("deps entry").path())
-                .find(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| {
-                            name.starts_with("libserde_json-") && name.ends_with(".rlib")
-                        })
-                })
-                .expect("Cargo-built serde_json library");
-            let output = std::process::Command::new("rustc")
-                .args([
-                    "--edition=2024",
-                    "--crate-name=lanpath_desktop_core_fixture",
-                ])
-                .arg(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/fixtures/core_fixture.rs"
-                ))
-                .arg("--extern")
-                .arg(format!("serde_json={}", serde_json.display()))
-                .arg("-L")
-                .arg(format!("dependency={}", dependencies.display()))
-                .arg("-o")
-                .arg(directory.path().join("core-fixture"))
-                .output()
-                .expect("run rustc for the core fixture");
-            assert!(
-                output.status.success(),
-                "core fixture compile failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let binary = directory.path().join("core-fixture");
-            (directory, binary)
-        });
-    &COMPILED.1
+    core_build::compiled_core_fixture()
 }
 
 /// 把假核心复制进库存布局 `cores/<binary>/<version>/<文件名>`（共享

@@ -1,14 +1,18 @@
 //! 外观偏好：主题、外观模式、界面语言、动效——统一持久化到 NSH
 //! storage 并经信号驱动运行时切换（`set_tokens` / `set_color_scheme` /
 //! `set_locale`），切换不重建组件树与业务运行状态。
-//! 界面缩放是明确的不支持项：NSH 0.5.0 的 `font_scale` 仅平台可读，
+//! 界面缩放是明确的不支持项：NSH 0.5.1 的 `font_scale` 仅平台可读，
 //! 没有应用级覆盖 API，因此不提供存而不生效的缩放选项（见
 //! `appearance.scale_note` 与 README）。
+//!
+//! 持久化边界：`Storage::set_item` 同步报告配额拒绝；平台后端把已接受的
+//! 变更异步写入磁盘，后端写失败由宿主记录，应用侧不可观测。因此本模块
+//! 只承诺“已接受并立即生效”，不把同步返回当作磁盘持久化证明。
 
 use nsh_core::i18n::set_locale;
 use nsh_core::platform::Locale;
 use nsh_core::prelude::*;
-use nsh_core::storage::Storage;
+use nsh_core::storage::{Storage, StorageFull};
 
 use super::theme::{self, ThemeId};
 
@@ -134,7 +138,7 @@ impl MotionPref {
 }
 
 /// 全局外观偏好（`global` 单例）：读取处随切换更新。
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct UiPrefs {
     pub theme: Signal<ThemeId>,
     pub mode: Signal<Mode>,
@@ -170,25 +174,40 @@ pub fn prefs() -> UiPrefs {
 }
 
 impl UiPrefs {
-    /// 应用主题并持久化：只换 token，不重挂界面。
-    pub fn apply_theme(&self, id: ThemeId) {
+    /// 应用主题并持久化：先确认写入成功，再更新信号与运行时；失败时
+    /// 保持上一有效主题并恢复其 token，调用方负责就近提示。
+    pub fn apply_theme(&self, id: ThemeId) -> Result<(), StorageFull> {
+        Storage::set_item(THEME_KEY, id.id_name())?;
         self.theme.set(id);
-        let _ = Storage::set_item(THEME_KEY, id.id_name());
         theme::apply(id);
+        Ok(())
     }
 
-    /// 应用外观模式并持久化。
-    pub fn apply_mode(&self, mode: Mode) {
+    /// 应用外观模式并持久化（失败不改信号/运行时）。
+    pub fn apply_mode(&self, mode: Mode) -> Result<(), StorageFull> {
+        Storage::set_item(MODE_KEY, mode.storage_value())?;
         self.mode.set(mode);
-        let _ = Storage::set_item(MODE_KEY, mode.storage_value());
         set_color_scheme(mode.appearance());
+        Ok(())
     }
 
     /// 应用界面语言并持久化：`None` 表示跟随系统。语言切换只改
-    /// `t!` 读取结果，组件树与业务运行状态不重建。
-    pub fn apply_language(&self, language: LanguagePref) {
+    /// `t!` 读取结果，组件树与业务运行状态不重建；失败不改当前语言。
+    pub fn apply_language(&self, language: LanguagePref) -> Result<(), StorageFull> {
+        Storage::set_item(LANGUAGE_KEY, language.storage_value())?;
         self.language.set(language);
-        let _ = Storage::set_item(LANGUAGE_KEY, language.storage_value());
+        self.set_language_runtime(language);
+        Ok(())
+    }
+
+    /// 应用动效偏好并持久化（失败不改信号）。
+    pub fn apply_motion(&self, motion: MotionPref) -> Result<(), StorageFull> {
+        Storage::set_item(MOTION_KEY, motion.storage_value())?;
+        self.motion.set(motion);
+        Ok(())
+    }
+
+    fn set_language_runtime(&self, language: LanguagePref) {
         let locale = match language {
             LanguagePref::System => None,
             LanguagePref::ZhCn => Some(Locale::parse("zh-CN").unwrap_or(Locale::EN_US)),
@@ -197,15 +216,10 @@ impl UiPrefs {
         set_locale(locale);
     }
 
-    /// 应用动效偏好并持久化。
-    pub fn apply_motion(&self, motion: MotionPref) {
-        self.motion.set(motion);
-        let _ = Storage::set_item(MOTION_KEY, motion.storage_value());
-    }
-
     /// 启动安装：把持久化的主题/模式/语言一次性应用到运行时
     /// （mode 非 System 时覆盖系统外观；语言 System 时不调用
-    /// set_locale，跟随 `locale_settings()` 的首选语言）。
+    /// `set_locale`，跟随 `locale_settings()` 的首选语言）。启动恢复
+    /// 只应用已读值，不重复写 storage。
     pub fn install(&self) {
         theme::apply(self.theme.get_untracked());
         if self.mode.get_untracked() != Mode::System {
@@ -213,7 +227,7 @@ impl UiPrefs {
         }
         let language = self.language.get_untracked();
         if language != LanguagePref::System {
-            self.apply_language(language);
+            self.set_language_runtime(language);
         }
     }
 }

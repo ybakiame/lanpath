@@ -1,3 +1,4 @@
+use super::location::{DataLocation, absolute_environment_directory};
 use super::*;
 use std::process::Command;
 
@@ -336,11 +337,13 @@ fn persistent_environment_paths_must_be_absolute() {
 
 #[test]
 fn explicit_location_rejects_empty_and_parent_traversal_without_fallback() {
-    assert!(DataLocation::resolve(Some(Path::new(""))).is_err());
+    assert!(DataLocation::resolve(&std::env::current_exe().unwrap(), Some(Path::new(""))).is_err());
     let temporary = tempfile::tempdir().unwrap();
     let escape = temporary.path().join("not-created/../escape");
-    assert!(DataLocation::resolve(Some(&escape)).is_err());
-    assert!(DataLocation::resolve(Some(temporary.path())).is_ok());
+    assert!(DataLocation::resolve(&std::env::current_exe().unwrap(), Some(&escape)).is_err());
+    assert!(
+        DataLocation::resolve(&std::env::current_exe().unwrap(), Some(temporary.path())).is_ok()
+    );
 }
 
 #[test]

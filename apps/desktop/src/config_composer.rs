@@ -21,7 +21,6 @@ use lanpath_client::{
     EffectiveOverrides, PanelFeatures, ProfileStoreV2, RemoteFetchContext, RequestProxyMode,
     SubscriptionStore, apply_panel_features, build_core_config_v2, compose_singbox_config,
     inject_local_override_warn_only, prepare_missing_rule_sets_warn_only,
-    resolve_remote_overrides_with_context,
 };
 use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde_json::Value;
@@ -195,6 +194,7 @@ impl ConfigComposer {
                             RefreshStatus::Stale => {
                                 "刷新期间订阅已被修改或删除，结果未写入，请重试".to_owned()
                             }
+                            RefreshStatus::Busy => "另一个订阅刷新正在进行，请稍后重试".to_owned(),
                         };
                         return Err(LanpathError::Client(detail));
                     }
@@ -213,7 +213,7 @@ impl ConfigComposer {
         } else {
             RemoteFetchContext::stopped(config.clone())?
         };
-        // 关联 Profile 必须真实存在；远程 YAML/JS 经共享缓存目录解析，
+        // 关联 Profile 必须真实存在；远程 TS 经共享缓存目录解析并转译，
         // 远程失败按共享降级为缓存/空并返回警告，不静默。覆写链与核心类型
         // 无关：sing-box 与 Mihomo 共用同一远程+本地覆写实现。
         let (effective, remote_warnings) = match selected.profile_id {
@@ -228,7 +228,7 @@ impl ConfigComposer {
                             LanpathError::Client("订阅关联的覆写模板不存在，请重新关联".into())
                         })?
                 };
-                resolve_remote_overrides_with_context(
+                crate::ts_override::resolve(
                     &lanpath_client::resource_storage::cache_path(
                         self.root.path(),
                         "profile_cache",
@@ -236,7 +236,7 @@ impl ConfigComposer {
                     &profile,
                     &requests,
                 )
-                .await
+                .await?
             }
             None => (EffectiveOverrides::default(), Vec::new()),
         };
@@ -266,6 +266,8 @@ impl ConfigComposer {
                 lanpath_client::build_mihomo_config_v2(&nodes, &effective).await?;
             lanpath_client::compose_mihomo_config(&mut profile_config, mixed_port, None)?;
             let mut value = profile_config;
+            let rules = crate::rules::Rules::for_root(self.root.path())?.load()?;
+            warnings.extend(crate::rules::apply_mihomo_rules(&mut value, &rules));
             lanpath_client::core_config::apply_mihomo_panel_features(&mut value, &features);
             remove_mihomo_dashboard_download(&mut value);
             let content = serde_yaml::to_string(&value)?;
@@ -289,6 +291,7 @@ impl ConfigComposer {
         prepare_missing_rule_sets_warn_only(self.root.path(), &value, &requests, &|_message| ())
             .await;
         inject_local_override_warn_only(self.root.path(), &mut value);
+        crate::rules::normalize_singbox_ports(&mut value);
         apply_panel_features(&mut value, &features);
         remove_dashboard_download(&mut value);
 

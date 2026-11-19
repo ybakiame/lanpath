@@ -1,6 +1,6 @@
 //! 覆写模板（Profile）业务：共享 `lanpath-client::ProfileStoreV2` 落在 NSH
 //! 桌面自己的隔离数据根内（本根 `profiles.json`），不读取/迁移其他应用的
-//! 数据。模板只在本页维护：YAML/JS 本地覆写与两个远程覆写地址；远程地址
+//! 数据。模板只在本页维护：TypeScript 本地覆写与远程覆写地址；远程地址
 //! 仅保存供后续配置合成时解析，本切片不下载、不预览、不显示“已生效”。
 //!
 //! 所有清单读写与订阅业务共用数据根的同一把业务锁：删除前的“无订阅
@@ -12,8 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lanpath_client::{
-    Profile, ProfileStoreV2, SubscriptionStore, normalize_optional_url, validate_js_override,
-    validate_remote_url, validate_yaml_override,
+    Profile, ProfileStoreV2, SubscriptionStore, normalize_optional_url, validate_remote_url,
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use uuid::Uuid;
@@ -51,23 +50,18 @@ impl Profiles {
     }
 
     /// 校验并保存模板（`id` 为 `None` 时新建）：名称 trim 必填且除自身外
-    /// 唯一；YAML/JS 覆写真实调用共享校验（空允许）；远程 URL 可选、
+    /// 唯一；TS 覆写先转译再校验（空允许）；远程 URL 可选、
     /// 规范化并共享校验。任何失败都不触碰已有数据。
     pub(crate) fn save(
         &self,
         id: Option<Uuid>,
         name: &str,
-        yaml_override: String,
         js_override: String,
-        yaml_url: Option<String>,
         js_url: Option<String>,
     ) -> LanpathResult<Profile> {
         let name = required_name(name)?;
-        validate_yaml_override(&yaml_override).map_err(LanpathError::Validation)?;
-        validate_js_override(&js_override).map_err(LanpathError::Validation)?;
-        validate_remote_url(&yaml_url).map_err(LanpathError::Validation)?;
+        crate::ts_override::compile(&js_override)?;
         validate_remote_url(&js_url).map_err(LanpathError::Validation)?;
-        let yaml_url = normalize_optional_url(yaml_url);
         let js_url = normalize_optional_url(js_url);
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
@@ -83,9 +77,9 @@ impl Profiles {
         let profile = Profile {
             id: id.unwrap_or_else(Uuid::new_v4),
             name,
-            yaml_override,
+            yaml_override: String::new(),
             js_override,
-            yaml_url,
+            yaml_url: None,
             js_url,
         };
         match id {

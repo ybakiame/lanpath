@@ -55,7 +55,9 @@ mod types;
 
 use manager::{ActiveManager, parse_preview, read_pid_identity, wait_listener};
 use types::ActiveInfo;
-pub(crate) use types::{CoreStatus, StartOutcome};
+pub(crate) use types::{
+    CoreExit, CoreOperation, CoreStatus, RuntimeStage, SessionSummary, StartOutcome,
+};
 
 /// 新数据根默认 mixed 端口（GPUI 实验值；避免与生产 17890 冲突）。
 pub(crate) const DEFAULT_MIXED_PORT: u16 = 17899;
@@ -87,9 +89,9 @@ pub(crate) struct CoreRuntime {
     /// 持有中的核心进程管理器（运行中，或失败回滚后待重试回收）。
     lifecycle: tokio::sync::Mutex<Option<ActiveManager>>,
     phase: AtomicU8,
-    stage: Mutex<Option<String>>,
+    stage: Mutex<Option<RuntimeStage>>,
     active: Mutex<Option<ActiveInfo>>,
-    unexpected_exit: Mutex<Option<String>>,
+    unexpected_exit: Mutex<Option<CoreExit>>,
     listener_timeout: Duration,
     api_timeout: Duration,
     /// 系统代理守护日志 owner：本数据根 UUID（跨进程精确身份）。
@@ -189,9 +191,9 @@ impl CoreRuntime {
         })
     }
 
-    fn set_stage(&self, stage: &'static str) {
+    fn set_stage(&self, stage: RuntimeStage) {
         if let Ok(mut slot) = self.stage.lock() {
-            *slot = Some(stage.to_owned());
+            *slot = Some(stage);
         }
     }
 
@@ -265,7 +267,7 @@ impl CoreRuntime {
         &self,
         slot: &mut tokio::sync::MutexGuard<'_, Option<ActiveManager>>,
     ) -> LanpathResult<StartOutcome> {
-        self.set_stage("读取已保存设置");
+        self.set_stage(RuntimeStage::ReadSettings);
         let config = {
             let _guard = self.root.business_guard();
             load_request_config(self.root.path())?
@@ -275,7 +277,7 @@ impl CoreRuntime {
                 "本切片未授权 TUN；设置已保留，请关闭 TUN 后启动（不接管 TUN/VPN）".into(),
             ));
         }
-        self.set_stage("校验核心二进制");
+        self.set_stage(RuntimeStage::ValidateBinary);
         let core = self.inventory.active_core()?.ok_or_else(|| {
             LanpathError::Client("尚未选择核心；请先在核心页下载并选择 sing-box 或 Mihomo".into())
         })?;
@@ -286,18 +288,18 @@ impl CoreRuntime {
         );
         CoreManagementService::validate_managed_binary(self.root.path(), core_type, &binary)?;
 
-        self.set_stage("预检监听端口");
+        self.set_stage(RuntimeStage::PreflightPorts);
         let mut ports = vec![(config.mixed_port, "Mixed 代理")];
         if config.clash_api_enabled {
             ports.push((config.clash_api_port, "Clash API"));
         }
         port_guard::ensure_ports_available(&ports)?;
 
-        self.set_stage("合成配置");
+        self.set_stage(RuntimeStage::ComposeConfig);
         let preview = self.composer.compose_with_config(&config).await?;
         let value = parse_preview(&preview)?;
 
-        self.set_stage("校验配置（真实核心二进制）");
+        self.set_stage(RuntimeStage::ValidateConfig);
         let bindings = ValidatorBindings {
             mixed_port: config.mixed_port,
             clash_api_enabled: config.clash_api_enabled,
@@ -315,14 +317,14 @@ impl CoreRuntime {
             .await
             .map_err(|error| LanpathError::Core(format!("核心配置校验失败（未启动）：{error}")))?;
 
-        self.set_stage("启动核心进程");
+        self.set_stage(RuntimeStage::StartProcess);
         let manager = ActiveManager::new(core_type, &binary, self.root.path())?;
         // spawn 后任何失败都走同一回滚，不得提前返回留半截清理。
         if let Err(error) = manager.start(&value).await {
             return Err(self.rollback(slot, manager, error).await);
         }
 
-        self.set_stage("等待核心就绪");
+        self.set_stage(RuntimeStage::WaitReady);
         if let Err(error) = self.wait_ready(&manager, &config).await {
             return Err(self.rollback(slot, manager, error).await);
         }
@@ -340,6 +342,8 @@ impl CoreRuntime {
                 mixed_port: config.mixed_port,
                 clash_api_port,
                 started: Instant::now(),
+                config: config.clone(),
+                missing_rule_sets: preview.missing_tags().to_vec(),
             });
         }
         **slot = Some(manager);
@@ -418,7 +422,7 @@ impl CoreRuntime {
         let _mutation = self.inventory.try_mutation()?;
         let mut slot = self.lifecycle.lock().await;
         self.phase.store(PHASE_STOPPING, Ordering::Release);
-        self.set_stage("恢复系统代理并停止核心进程");
+        self.set_stage(RuntimeStage::RestoreProxyAndStop);
         let result = self.stop_locked(&mut slot).await;
         self.phase.store(PHASE_IDLE, Ordering::Release);
         self.clear_stage();

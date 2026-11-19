@@ -97,25 +97,15 @@ fn profile_row(state: ProfilesPageState, item: ReadSignal<Profile>) -> impl Into
             text(move || {
                 let profile = item.get();
                 let mut summary = String::new();
-                summary.push_str(if profile.yaml_override.trim().is_empty() {
-                    "本地 YAML 覆写：未填写"
-                } else {
-                    "本地 YAML 覆写：已填写"
-                });
                 summary.push_str(if profile.js_override.trim().is_empty() {
-                    " · 本地 JS 覆写：未填写"
+                    "本地 TS 覆写：未填写"
                 } else {
-                    " · 本地 JS 覆写：已填写"
-                });
-                summary.push_str(if profile.yaml_url.is_some() {
-                    " · 远程 YAML：已配置"
-                } else {
-                    " · 远程 YAML：未配置"
+                    "本地 TS 覆写：已填写"
                 });
                 summary.push_str(if profile.js_url.is_some() {
-                    " · 远程 JS：已配置"
+                    " · 远程 TS：已配置"
                 } else {
-                    " · 远程 JS：未配置"
+                    " · 远程 TS：未配置"
                 });
                 summary
             })

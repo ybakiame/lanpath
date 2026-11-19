@@ -10,13 +10,30 @@ const REQUIRED: &[&str] = &[
     "popover-foreground",
     "primary",
     "primary-foreground",
+    "primary-hover",
+    "primary-hover-foreground",
+    "primary-active",
+    "primary-active-foreground",
     "secondary",
     "secondary-foreground",
+    "secondary-hover",
+    "secondary-hover-foreground",
+    "secondary-active",
+    "secondary-active-foreground",
     "muted",
     "muted-foreground",
     "accent",
     "accent-foreground",
+    "accent-hover",
+    "accent-hover-foreground",
+    "accent-active",
+    "accent-active-foreground",
     "destructive",
+    "destructive-foreground",
+    "destructive-hover",
+    "destructive-hover-foreground",
+    "destructive-active",
+    "destructive-active-foreground",
     "border",
     "input",
     "ring",
@@ -37,12 +54,47 @@ const REQUIRED: &[&str] = &[
     "chart-3",
     "chart-4",
     "chart-5",
+    "chart-upload",
+    "chart-download",
+    "switch-thumb",
+];
+
+const FILLED_PAIRS: &[(&str, &str)] = &[
+    ("primary", "primary-foreground"),
+    ("secondary", "secondary-foreground"),
+    ("accent", "accent-foreground"),
+    ("destructive", "destructive-foreground"),
+    ("sidebar-primary", "sidebar-primary-foreground"),
+    ("sidebar-accent", "sidebar-accent-foreground"),
+    ("warning", "warning-foreground"),
+    ("success", "success-foreground"),
+    ("primary-hover", "primary-hover-foreground"),
+    ("primary-active", "primary-active-foreground"),
+    ("secondary-hover", "secondary-hover-foreground"),
+    ("secondary-active", "secondary-active-foreground"),
+    ("accent-hover", "accent-hover-foreground"),
+    ("accent-active", "accent-active-foreground"),
+    ("destructive-hover", "destructive-hover-foreground"),
+    ("destructive-active", "destructive-active-foreground"),
 ];
 
 fn color_of(id: ThemeId, name: &str, dark: bool) -> Hsla {
     let tokens = theme_tokens(id);
     let color = tokens.color(name).unwrap_or_else(|| panic!("{name}"));
     if dark { color.dark } else { color.light }
+}
+
+fn assert_contrast(id: ThemeId, dark: bool, foreground: &str, background: &str, minimum: f32) {
+    let ratio = contrast(
+        color_of(id, foreground, dark),
+        color_of(id, background, dark),
+    );
+    assert!(
+        ratio >= minimum,
+        "{} {}: {foreground} / {background} = {ratio:.3}:1，要求至少 {minimum}:1",
+        id.id_name(),
+        if dark { "dark" } else { "light" },
+    );
 }
 
 #[test]
@@ -52,14 +104,31 @@ fn thirteen_themes_with_complete_pairs() {
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), 13, "主题 ID 必须唯一");
+    let mut required = REQUIRED.to_vec();
+    required.sort_unstable();
     for id in ThemeId::ALL {
-        for name in REQUIRED {
-            assert!(
-                theme_tokens(id).color(name).is_some(),
-                "{} 缺 {name}",
-                id.id_name()
-            );
-        }
+        let mut light: Vec<&str> = palette(id, false)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let mut dark: Vec<&str> = palette(id, true)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        light.sort_unstable();
+        dark.sort_unstable();
+        assert_eq!(
+            light,
+            dark,
+            "{} 浅色/深色 palette key 集不一致",
+            id.id_name()
+        );
+        assert_eq!(
+            light,
+            required,
+            "{} palette 必须自行定义全部语义 key，且无额外/重复 key",
+            id.id_name()
+        );
     }
     // 存储值往返：未知值回退默认主题，不 panic。
     assert_eq!(ThemeId::from_id_name("ocean"), ThemeId::Ocean);
@@ -85,28 +154,90 @@ fn light_backgrounds_are_bright_never_dirty_gray() {
 }
 
 #[test]
-fn text_and_primary_contrast_meets_wcag_aa() {
+fn surface_text_pairs_meet_wcag_aa() {
     for id in ThemeId::ALL {
         for dark in [false, true] {
-            let bg = color_of(id, "background", dark);
-            for text in ["foreground", "muted-foreground", "secondary-foreground"] {
-                assert!(
-                    contrast(color_of(id, text, dark), bg) >= 4.5,
-                    "{} {}（{}）正文对比度不足",
-                    id.id_name(),
-                    text,
-                    if dark { "dark" } else { "light" }
-                );
+            for (surface, body) in [
+                ("background", "foreground"),
+                ("card", "card-foreground"),
+                ("sidebar", "sidebar-foreground"),
+                ("popover", "popover-foreground"),
+            ] {
+                for text in [body, "muted-foreground"] {
+                    assert_contrast(id, dark, text, surface, 4.5);
+                }
             }
-            let primary = color_of(id, "primary", dark);
-            let primary_fg = color_of(id, "primary-foreground", dark);
-            assert!(
-                contrast(primary_fg, primary) >= 4.5,
-                "{} primary-foreground 对比度不足",
-                id.id_name()
-            );
+            assert_contrast(id, dark, "secondary-foreground", "background", 4.5);
         }
     }
+}
+
+#[test]
+fn filled_semantic_pairs_meet_wcag_aa() {
+    for id in ThemeId::ALL {
+        for dark in [false, true] {
+            for (surface, foreground) in FILLED_PAIRS {
+                assert_contrast(id, dark, foreground, surface, 4.5);
+            }
+        }
+    }
+}
+
+#[test]
+fn action_states_have_visible_ordered_feedback() {
+    for id in ThemeId::ALL {
+        for dark in [false, true] {
+            for base in ["primary", "secondary", "accent", "destructive"] {
+                let normal = color_of(id, base, dark);
+                let hover = color_of(id, &format!("{base}-hover"), dark);
+                let active = color_of(id, &format!("{base}-active"), dark);
+                let hover_change = (luminance(hover) - luminance(normal)).abs();
+                let active_change = (luminance(active) - luminance(normal)).abs();
+                assert!(
+                    hover_change > 0.0,
+                    "{} {base} hover 必须与 normal 可区分",
+                    id.id_name()
+                );
+                assert!(
+                    active_change > hover_change,
+                    "{} {base} active 必须强于 hover",
+                    id.id_name()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn focus_rings_and_input_boundaries_meet_non_text_contrast() {
+    for id in ThemeId::ALL {
+        for dark in [false, true] {
+            for surface in ["background", "card", "sidebar", "popover"] {
+                assert_contrast(id, dark, "ring", surface, 3.0);
+                assert_contrast(id, dark, "input", surface, 3.0);
+            }
+            assert_contrast(id, dark, "sidebar-ring", "sidebar", 3.0);
+        }
+    }
+}
+
+#[test]
+fn contrast_and_luminance_match_known_vectors() {
+    let black = hsl(0.0, 0.0, 0.0);
+    let white = hsl(0.0, 0.0, 1.0);
+    let gray = hsl(0.0, 0.0, 0.5);
+    // 单精度 Hsla→sRGB 路径带着约 2e-6 的舍入误差，容差保留该量级。
+    let epsilon = 1e-5;
+    assert!(luminance(black).abs() <= epsilon);
+    assert!((luminance(white) - 1.0).abs() <= epsilon);
+    // #808080 的 sRGB 线性通道值，即 WCAG 相对亮度。
+    assert!((luminance(gray) - 0.21404114).abs() <= epsilon);
+    let black_white = contrast(black, white);
+    assert!(
+        (black_white - 21.0).abs() <= epsilon,
+        "black/white contrast = {black_white}"
+    );
+    assert!((contrast(gray, gray) - 1.0).abs() <= epsilon);
 }
 
 #[test]

@@ -17,6 +17,13 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(code as u8);
     }
     env_logger::init();
+    let data_dir = match lanpath_desktop_nsh::prepare_native_data_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("Lanpath 数据目录初始化失败：{error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
     // `--ui-gallery`：仅开发验收的组件画廊（普通用户导航没有入口）。
     let gallery = std::env::args().any(|arg| arg == "--ui-gallery");
     let root = if gallery {
@@ -30,7 +37,11 @@ fn main() -> std::process::ExitCode {
             title: "Lanpath NSH Desktop".to_owned(),
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             app_id: "com.ybakiame.lanpath.desktop.nsh".to_owned(),
-            size: (960, 640),
+            size: (1180, 800),
+            cache: platform::CacheOptions::at(platform::CacheLocation::Dir(
+                data_dir.join("cache/nsh"),
+            )),
+            data_dir: Some(data_dir),
             ..Default::default()
         },
     );

@@ -1,14 +1,19 @@
-//! 订阅列表：每行展示名称/启用状态/节点摘要/生效标记，提供刷新、编辑、
-//! 原文、设为生效与删除操作；底部挂载删除/编辑/原文三个弹窗。
+//! 订阅列表（阶段 1 语义组件迁移）：清晰列表行——启用开关、名称、当前
+//! 生效标记、节点数/格式、行内刷新状态；常用动作“刷新/编辑/原文/设为
+//! 生效”直接可见，删除收进“更多”菜单并必须确认（同时说明本地缓存移除）。
+//! CRUD、绑定、草稿、刷新全局单飞与缓存语义不变（见 `super`）。展示与
+//! 操作文案全部经 `t!`（zh-CN/en），共享业务错误原文作为参数原样保留。
 
 use lanpath_client::Subscription;
-use nsh_base::{button, dialog, switch, theme};
+use nsh_base::{menu, menu_item, theme};
 use nsh_core::prelude::*;
 use uuid::Uuid;
 
-use super::editor::edit_dialog;
-use super::source_view::source_dialog;
-use super::{BUSY_REFRESHING, SubscriptionPageState, spawn_refresh};
+use crate::ui::button::{ButtonSize, ButtonVariant, button};
+use crate::ui::layout::SurfaceLevel;
+use crate::ui::overlay::confirm_dialog;
+
+use super::{SubscriptionPageState, spawn_refresh};
 
 pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElement {
     let count_state = state.clone();
@@ -25,12 +30,12 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
             .flex_col()
             .gap_2()
             .child(
-                text(move || format!("共 {} 个订阅", count_state.list.get().len()))
+                text(move || t!("subscription.count", count = count_state.list.get().len()))
                     .text_color(move || theme().muted_foreground),
             )
             .child(when(
                 move || empty_state.list.get().is_empty() && empty_state.list_error.get().is_none(),
-                || text("尚无订阅。").text_color(move || theme().muted_foreground),
+                || text(|| t!("subscription.empty")).text_color(move || theme().muted_foreground),
             ))
             .child(
                 text(move || message_state.list_error.get().unwrap_or_default())
@@ -43,7 +48,7 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
             .child(when(
                 move || busy_show.any_refreshing(),
                 move || {
-                    text(BUSY_REFRESHING)
+                    text(super::busy_refreshing())
                         .text_size(px(12.0))
                         .text_color(move || theme().muted_foreground)
                 },
@@ -53,17 +58,14 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
                 |subscription: &Subscription| subscription.id,
                 move |item, _index| subscription_row(row_state.clone(), item),
             ))
-            .child(when(
-                move || remove_dialog_state.pending_remove.get().is_some(),
-                move || delete_dialog(remove_dialog_state.clone()),
-            ))
+            .child(delete_confirm(remove_dialog_state))
             .child(when(
                 move || edit_dialog_state.edit.id.get().is_some(),
-                move || edit_dialog(edit_dialog_state.clone()),
+                move || super::editor::edit_dialog(edit_dialog_state.clone()),
             ))
             .child(when(
                 move || source_dialog_state.source_view.get().is_some(),
-                move || source_dialog(source_dialog_state.clone()),
+                move || super::source_view::source_dialog(source_dialog_state.clone()),
             )),
     )
 }
@@ -79,15 +81,14 @@ fn subscription_row(
     let edit_button = state.clone();
     let source_button = state.clone();
     let activate_state = state.clone();
-    view()
+    let refresh_status_state = state.clone();
+    let active_state = state.clone();
+    let more_state = state;
+    crate::ui::surface(SurfaceLevel::Card)
         .test_id(&row_test_id)
         .flex_col()
         .gap_1()
         .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .bg(move || theme().card)
         .child(
             view()
                 .flex_row()
@@ -101,9 +102,9 @@ fn subscription_row(
                         .min_w(px(0.0)),
                 )
                 .child(when(
-                    move || state.active.get() == Some(id),
+                    move || active_state.active.get() == Some(id),
                     || {
-                        text("当前生效")
+                        text(|| t!("subscription.active_mark"))
                             .text_size(px(12.0))
                             .text_color(move || theme().primary)
                     },
@@ -111,19 +112,27 @@ fn subscription_row(
                 .child(
                     text(move || {
                         if item.get().enabled {
-                            "已启用"
+                            t!("subscription.enabled_on")
                         } else {
-                            "已停用"
+                            t!("subscription.enabled_off")
                         }
                     })
                     .text_size(px(12.0))
                     .text_color(move || theme().muted_foreground),
                 )
                 .child(view().flex_1())
+                .child(when(
+                    move || refresh_status_state.refreshing.get().contains(&id),
+                    || {
+                        text(move || t!("subscription.refreshing"))
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground)
+                    },
+                ))
                 .child(row_button(
                     refresh_button,
                     item,
-                    "刷新",
+                    || t!("subscription.action.refresh"),
                     |state, subscription| {
                         run_refresh(state, subscription.id);
                     },
@@ -131,7 +140,7 @@ fn subscription_row(
                 .child(row_button(
                     edit_button,
                     item,
-                    "编辑",
+                    || t!("subscription.action.edit"),
                     |state, subscription| {
                         state.edit.open(subscription);
                     },
@@ -139,7 +148,7 @@ fn subscription_row(
                 .child(row_button(
                     source_button,
                     item,
-                    "原文",
+                    || t!("subscription.action.source"),
                     |state, subscription| {
                         super::source_view::open_source(state, subscription);
                     },
@@ -150,43 +159,46 @@ fn subscription_row(
                         row_button(
                             activate_state.clone(),
                             item,
-                            "设为生效",
+                            || t!("subscription.action.activate"),
                             |state, subscription| {
                                 run_activate(state, subscription.id);
                             },
                         )
                     },
-                )),
+                ))
+                .child(more_menu(more_state.clone(), item)),
         )
         .child(
             text(move || {
                 let subscription = item.get();
                 let mut summary = if subscription.node_count > 0 {
-                    format!("{} 个节点", subscription.node_count)
+                    t!("subscription.nodes", count = subscription.node_count)
                 } else {
-                    "未获取节点".to_owned()
+                    t!("subscription.nodes_unknown")
                 };
                 if let Some(format) = subscription.format {
-                    summary.push_str(&format!(" · 格式 {format:?}"));
+                    summary.push_str(&format!(
+                        " · {}",
+                        t!("subscription.format", format = format!("{format:?}"))
+                    ));
                 }
                 summary
             })
             .text_size(px(12.0))
             .text_color(move || theme().muted_foreground),
         )
-        .child(binding_summary(state.clone(), item))
+        .child(binding_summary(more_state.clone(), item))
         .child(when(
             move || item.get().error.is_some(),
             move || {
-                text(format!(
-                    "错误：{}",
-                    item.get().error.clone().unwrap_or_default()
+                text(t!(
+                    "subscription.error_prefix",
+                    error = item.get().error.clone().unwrap_or_default()
                 ))
                 .text_size(px(12.0))
                 .text_color(move || theme().destructive)
             },
         ))
-        .child(row_delete_button(state, item))
 }
 
 /// 行内覆写模板绑定：已绑定显示模板名；模板被外部删除或清单损坏导致
@@ -200,11 +212,11 @@ fn binding_summary(
         move || {
             let profiles = state.profiles.get();
             match crate::profiles_view::profile_name(&profiles, item.get().profile_id) {
-                Some(name) => text(format!("覆写：{name}"))
+                Some(name) => text(t!("subscription.binding", name = name))
                     .text_size(px(12.0))
                     .text_color(move || theme().muted_foreground)
                     .into_element(),
-                None => text("覆写模板引用失效，请重新绑定")
+                None => text(|| t!("subscription.binding_invalid"))
                     .text_size(px(12.0))
                     .text_color(move || theme().destructive)
                     .into_element(),
@@ -213,66 +225,85 @@ fn binding_summary(
     )
 }
 
-/// 删除独立成行（跟在错误文本后），保持操作区简洁。
-fn row_delete_button(
-    state: SubscriptionPageState,
-    item: ReadSignal<Subscription>,
-) -> impl IntoElement {
-    row_button(state, item, "删除", |state, subscription| {
-        state.pending_remove.set(Some(subscription.clone()));
-    })
-}
-
+/// 启用开关：NSH 原生 Switch 语义（role=switch、可访问名称、checked 状态、
+/// 键盘焦点与 Enter/Space 激活由组件原生提供），样式用 host token 类
+/// （与 `proxy_card` 同一套）。实测行内 `track_style` 闭包会使该子树不进
+/// NSH 测试镜像，故 track/thumb 用类字符串。按压走 `on_change` 真实业务
+/// 切换；自动化经 `id:<row> >> role:switch` 或 test_id 包裹锚点触达。
 fn enabled_switch(
     state: SubscriptionPageState,
     item: ReadSignal<Subscription>,
 ) -> impl IntoElement {
     let switch_test_id = format!("subscription-enabled-{}", item.get().id);
+    let id = item.get().id;
+    let change_state = state;
     view()
         .test_id(&switch_test_id)
-        .on_press(move || {
-            let subscription = item.get();
-            state.bump_serial();
-            let result = state
-                .service
-                .as_ref()
-                .map(|service| service.set_enabled(subscription.id, !subscription.enabled));
-            match result {
-                Some(Ok(())) => {
-                    state.reload();
-                    state.post_notice("订阅可用状态已更新".to_owned());
+        .child(crate::ui::select::switch_labeled(
+            move || item.get().enabled,
+            move || t!("subscription.enabled_a11y", name = item.get().name).into(),
+            move |enabled| {
+                change_state.bump_serial();
+                let result = change_state
+                    .service
+                    .as_ref()
+                    .map(|service| service.set_enabled(id, enabled));
+                match result {
+                    Some(Ok(())) => {
+                        change_state.reload();
+                        change_state.post_notice(t!("subscription.enabled_updated"));
+                    }
+                    Some(Err(error)) => {
+                        change_state.reload();
+                        change_state.post_error(t!(
+                            "subscription.enable_failed",
+                            error = error.to_string()
+                        ));
+                    }
+                    None => change_state.post_error(t!("subscription.root_unavailable")),
                 }
-                Some(Err(error)) => {
-                    state.reload();
-                    state.post_error(format!("切换启用状态失败:{error}"));
-                }
-                None => state.post_error("打开数据根失败".to_owned()),
-            }
-        })
-        .child(
-            switch()
-                .track_class("w-9 h-5 rounded-full bg-muted checked:bg-primary p-0.5")
-                .thumb_class("w-4 h-4 rounded-full bg-background checked:translate-x-4")
-                .checked(move || item.get().enabled),
-        )
+            },
+        ))
 }
 
-/// 行操作按钮。同步操作（启停/生效/删除/编辑保存）经业务层互斥排队，
-/// 忙碌时也可触发；异步刷新由 `begin_refresh` 全局单飞防并发提交。
+/// “更多”菜单：低频/危险动作进入菜单；删除选中后弹确认框（确认才删除）。
+fn more_menu(state: SubscriptionPageState, item: ReadSignal<Subscription>) -> AnyElement {
+    let menu_state = state;
+    let trigger = button(ButtonVariant::Ghost)
+        .size(ButtonSize::Sm)
+        .label(|| t!("subscription.more"));
+    menu()
+        .trigger(trigger)
+        .child(
+            // test_id 挂在菜单项内部锚点上（同 Button：外层 wrapper 不在
+            // 按压/选择的祖先链上，自动化按 id 找不到目标）。
+            menu_item()
+                .text_color(move || theme().destructive)
+                .child(
+                    view()
+                        .test_id("subscription-delete")
+                        .child(text(|| t!("subscription.action.delete")).text_size(px(13.0))),
+                )
+                .on_select(move || {
+                    menu_state.pending_remove.set(Some(item.get()));
+                }),
+        )
+        .into_element()
+}
+
+/// 行操作按钮（语义 Button，Ghost 变体）：同步操作（启停/生效/删除/编辑
+/// 保存）经业务层互斥排队，忙碌时也可触发；异步刷新由 `begin_refresh`
+/// 全局单飞防并发提交。
 fn row_button(
     state: SubscriptionPageState,
     item: ReadSignal<Subscription>,
-    label: &'static str,
+    label: impl Fn() -> String + 'static,
     action: impl Fn(&SubscriptionPageState, &Subscription) + 'static,
 ) -> impl IntoElement {
-    button()
-        .px_3()
-        .py_1()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
+    button(ButtonVariant::Ghost)
+        .size(ButtonSize::Sm)
+        .label(label)
         .on_press(move || action(&state, &item.get()))
-        .child(text(label).text_size(px(12.0)))
 }
 
 /// 手动刷新：使用已保存的 URL/UA，联网在后台线程执行；
@@ -288,99 +319,58 @@ fn run_activate(state: &SubscriptionPageState, id: Uuid) {
     match result {
         Some(Ok(())) => {
             state.reload();
-            state.post_notice("已设为当前生效订阅".to_owned());
+            state.post_notice(t!("subscription.activate_done"));
         }
         Some(Err(error)) => {
             state.reload();
-            state.post_error(format!("设置生效订阅失败:{error}"));
+            state.post_error(t!(
+                "subscription.activate_failed",
+                error = error.to_string()
+            ));
         }
-        None => state.post_error("打开数据根失败".to_owned()),
+        None => state.post_error(t!("subscription.root_unavailable")),
     }
 }
 
-fn delete_dialog(state: SubscriptionPageState) -> AnyElement {
-    match state.pending_remove.get() {
-        Some(target) => {
-            let remove_id = target.id;
-            let service = state.service.clone();
-            let cancel_state = state.clone();
-            let cancel_button_state = state.clone();
-            let confirm_state = state;
-            dialog()
-                .on_cancel(move || cancel_state.pending_remove.set(None))
-                .child(
-                    view()
-                        .flex_col()
-                        .gap_3()
-                        .w(px(360.0))
-                        .p_4()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().card)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .child(text(format!("删除订阅“{}”？", target.name)))
-                        .child(
-                            text(
-                                "仅移除 NSH 桌面数据根中的记录，不影响 Tauri/GPUI/apps/nsh 数据。",
-                            )
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
-                        )
-                        .child(
-                            view()
-                                .flex_row()
-                                .gap_2()
-                                .justify_end()
-                                .child(
-                                    button()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(move || theme().radius)
-                                        .border(px(1.0))
-                                        .border_color(move || theme().border)
-                                        .on_press(move || {
-                                            cancel_button_state.pending_remove.set(None)
-                                        })
-                                        .child(text("取消")),
-                                )
-                                .child(
-                                    button()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(move || theme().radius)
-                                        .bg(move || theme().destructive)
-                                        .on_press(move || {
-                                            confirm_state.pending_remove.set(None);
-                                            confirm_state.bump_serial();
-                                            let result = service
-                                                .as_ref()
-                                                .map(|service| service.remove(remove_id));
-                                            match result {
-                                                Some(Ok(())) => {
-                                                    confirm_state.reload();
-                                                    confirm_state.post_notice(
-                                                        "订阅与本地缓存已删除".to_owned(),
-                                                    );
-                                                }
-                                                Some(Err(error)) => {
-                                                    confirm_state.reload();
-                                                    confirm_state.post_error(format!(
-                                                        "删除订阅失败:{error}"
-                                                    ));
-                                                }
-                                                None => confirm_state
-                                                    .post_error("打开数据根失败".to_owned()),
-                                            }
-                                        })
-                                        .child(
-                                            text("确认删除")
-                                                .text_color(move || theme().primary_foreground),
-                                        ),
-                                ),
-                        ),
-                )
-                .into_element()
-        }
-        None => view().into_element(),
-    }
+/// 删除确认（语义 ConfirmDialog，危险变体）：取消只关弹窗；确认才删除
+/// 并刷新列表（同时同步 App 级共享摘要）；文案明确本地缓存一并移除、
+/// 不影响其他应用数据。
+fn delete_confirm(state: SubscriptionPageState) -> AnyElement {
+    let target = state.pending_remove;
+    let service = state.service.clone();
+    let serial = state.serial;
+    confirm_dialog(move || target.get().is_some())
+        .test_id("subscription-delete-dialog")
+        .destructive()
+        .title(move || {
+            target
+                .get()
+                .map(|subscription| t!("subscription.delete_title", name = subscription.name))
+                .unwrap_or_default()
+        })
+        .description(|| t!("subscription.delete_description"))
+        .confirm_label(|| t!("subscription.delete_confirm"))
+        .on_cancel(move || target.set(None))
+        .on_confirm(move || {
+            let Some(subscription) = target.get() else {
+                return;
+            };
+            target.set(None);
+            serial.update(|value| *value += 1);
+            let result = service
+                .as_ref()
+                .map(|service| service.remove(subscription.id));
+            match result {
+                Some(Ok(())) => {
+                    state.reload();
+                    state.post_notice(t!("subscription.delete_done"));
+                }
+                Some(Err(error)) => {
+                    state.reload();
+                    state.post_error(t!("subscription.delete_failed", error = error.to_string()));
+                }
+                None => state.post_error(t!("subscription.root_unavailable")),
+            }
+        })
+        .into_element()
 }

@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：订阅页真实列表与持久化。
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：订阅页真实列表与持久化。
 //! 每个场景使用独立临时数据根（见 `common::data_root`）；刷新用例经
 //! `common::TestServer` 本地真实 HTTP 服务器联网，不依赖互联网。
 
@@ -6,31 +6,18 @@ mod common;
 
 use std::time::Duration;
 
-use common::{TestRoute, TestServer, data_root, start_app, texts};
+use common::{TestRoute, TestServer, data_root, open_subscriptions, start_app, texts};
 
-const PARSED: &str =
-    "解析成功：2 个节点\n格式：ClashYaml\n警告：0 条\n\n东京测试节点\n新加坡测试节点";
 const URL_ERROR: &str =
     "新增订阅失败:validation error: Subscription URL must start with http:// or https://";
 const NAME_ERROR: &str = "新增订阅失败:validation error: 订阅名称不能为空";
-
-/// 共享解析验证：固定测试订阅经共享 lanpath-client 解析成功。
-#[test]
-fn pressing_parse_verifies_the_shared_parser() {
-    let (_dir, entries) = data_root();
-    let mut app = start_app(entries).0;
-    app.wait_for("尚未解析共享订阅。").unwrap();
-    app.press("解析共享订阅").unwrap();
-    let seen = texts(&app);
-    assert!(seen.contains(&PARSED), "{seen:?}");
-}
 
 /// 新数据根上订阅列表为空。
 #[test]
 fn fresh_data_root_shows_an_empty_subscription_list() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     let seen = texts(&app);
     assert!(seen.contains(&"共 0 个订阅"), "{seen:?}");
 }
@@ -40,7 +27,7 @@ fn fresh_data_root_shows_an_empty_subscription_list() {
 fn adding_a_subscription_shows_it_and_clears_the_form() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "东京专线").unwrap();
     app.type_text("id:subscription-url", "https://example.com/sub.yaml")
         .unwrap();
@@ -64,7 +51,7 @@ fn adding_a_subscription_shows_it_and_clears_the_form() {
 fn saved_subscriptions_restore_across_relaunches() {
     let (_dir, entries) = data_root();
     let mut first = start_app(entries.clone()).0;
-    first.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut first);
     first.type_text("id:subscription-name", "持久订阅").unwrap();
     first
         .type_text("id:subscription-url", "https://example.com/p.yaml")
@@ -74,6 +61,7 @@ fn saved_subscriptions_restore_across_relaunches() {
     drop(first);
 
     let mut second = start_app(entries).0;
+    open_subscriptions(&mut second);
     second.wait_for("持久订阅").unwrap();
     let seen = texts(&second);
     for expected in ["持久订阅", "共 1 个订阅", "已启用"] {
@@ -86,7 +74,7 @@ fn saved_subscriptions_restore_across_relaunches() {
 fn invalid_input_is_rejected_without_overwriting_existing_data() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "保留订阅").unwrap();
     app.type_text("id:subscription-url", "https://example.com/keep.yaml")
         .unwrap();
@@ -126,14 +114,14 @@ fn invalid_input_is_rejected_without_overwriting_existing_data() {
 fn toggling_a_subscription_off_and_back_on() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "切换订阅").unwrap();
     app.type_text("id:subscription-url", "https://example.com/t.yaml")
         .unwrap();
     app.press("新增订阅").unwrap();
     assert!(texts(&app).contains(&"已启用"));
 
-    let enabled = enabled_selector(&dir, "切换订阅");
+    let enabled = format!("{} >> role:switch", enabled_selector(&dir, "切换订阅"));
     app.press(&enabled).unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"已停用"), "{seen:?}");
@@ -160,15 +148,16 @@ fn enabled_selector(dir: &tempfile::TempDir, name: &str) -> String {
 fn deleting_a_subscription_needs_confirmation_and_persists() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "待删订阅").unwrap();
     app.type_text("id:subscription-url", "https://example.com/d.yaml")
         .unwrap();
     app.press("新增订阅").unwrap();
     assert!(texts(&app).contains(&"共 1 个订阅"));
 
-    app.press("id:subscription-row-待删订阅 >> text:删除")
+    app.press("id:subscription-row-待删订阅 >> text:更多")
         .unwrap();
+    app.press("id:subscription-delete").unwrap();
     assert!(texts(&app).contains(&"删除订阅“待删订阅”？"));
     app.press("确认删除").unwrap();
     let seen = texts(&app);
@@ -177,6 +166,7 @@ fn deleting_a_subscription_needs_confirmation_and_persists() {
     drop(app);
 
     let mut reopened = start_app(entries).0;
+    open_subscriptions(&mut reopened);
     reopened.wait_for("尚无订阅。").unwrap();
 }
 
@@ -200,7 +190,7 @@ fn adding_auto_refreshes_in_the_background_against_the_saved_url() {
     )]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
 
     app.type_text("id:subscription-name", "自动刷新").unwrap();
     app.type_text("id:subscription-url", &server.url("/sub.yaml"))
@@ -232,7 +222,7 @@ fn repeat_refresh_is_locked_while_in_flight() {
     )]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
 
     add_subscription(&mut app, "锁定验证", &server.url("/slow.yaml"));
     app.wait_for("正在刷新订阅…").unwrap();
@@ -245,6 +235,78 @@ fn repeat_refresh_is_locked_while_in_flight() {
     assert_eq!(server.count_path("/slow.yaml"), 1);
 }
 
+/// 离页后后台刷新仍由业务层持有：新页面恢复真实 busy，不重复发请求；
+/// 旧 worker 完成后新版面通过共享版本自动重读节点，而不是停在旧列表。
+#[test]
+fn refresh_survives_leaving_the_page_and_is_seen_by_the_next_page() {
+    let server = TestServer::new(vec![TestRoute::delayed(
+        "/left.yaml",
+        YAML,
+        Duration::from_millis(1200),
+    )]);
+    let (_dir, entries) = data_root();
+    let mut app = start_app(entries).0;
+    open_subscriptions(&mut app);
+
+    add_subscription(&mut app, "离页刷新", &server.url("/left.yaml"));
+    app.wait_for("正在刷新订阅…").unwrap();
+
+    // 旧页面销毁只取消 UI 轮询，业务刷新继续。
+    app.press("role:button[外观]").unwrap();
+    app.press("role:button[订阅]").unwrap();
+    app.wait_for("离页刷新").unwrap();
+    app.wait_for("正在刷新订阅…").unwrap();
+
+    // 新页面看到共享在途：再次点刷新不产生第二个网络请求。
+    app.press("id:subscription-row-离页刷新 >> text:刷新")
+        .unwrap();
+    assert_eq!(server.count_path("/left.yaml"), 1);
+
+    // 旧 worker 完成：版本变化让新页面自动重读真实节点并清除 busy。
+    app.wait_for_within("2 个节点 · 格式 ClashYaml", Duration::from_secs(10))
+        .unwrap();
+    let seen = texts(&app);
+    assert!(!seen.contains(&"正在刷新订阅…"), "{seen:?}");
+    assert_eq!(server.count_path("/left.yaml"), 1);
+}
+
+/// 完成发生在离页期间：回到订阅页时初始 busy 必须与实际共享活动对齐，
+/// 不能永久显示“正在刷新”。轮询真实落盘直到完成后再重进，窗口可控。
+#[test]
+fn refresh_completed_before_returning_does_not_leave_the_page_busy() {
+    let server = TestServer::new(vec![TestRoute::delayed(
+        "/before-return.yaml",
+        YAML,
+        Duration::from_millis(300),
+    )]);
+    let (dir, entries) = data_root();
+    let mut app = start_app(entries).0;
+    open_subscriptions(&mut app);
+
+    add_subscription(&mut app, "返回前完成", &server.url("/before-return.yaml"));
+    app.wait_for("正在刷新订阅…").unwrap();
+    app.press("role:button[外观]").unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        let done = lanpath_client::SubscriptionStore::new(dir.path().into())
+            .load()
+            .unwrap()
+            .iter()
+            .any(|subscription| subscription.name == "返回前完成" && subscription.node_count == 2);
+        if done {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    app.press("role:button[订阅]").unwrap();
+    app.wait_for("2 个节点 · 格式 ClashYaml").unwrap();
+    let seen = texts(&app);
+    assert!(!seen.contains(&"正在刷新订阅…"), "{seen:?}");
+    assert_eq!(server.count_path("/before-return.yaml"), 1);
+}
+
 /// 手动刷新使用已保存的 URL/UA：编辑框里未保存的草稿不会被写回或发出。
 #[test]
 fn manual_refresh_uses_saved_url_and_keeps_unsaved_draft_unsent() {
@@ -254,7 +316,7 @@ fn manual_refresh_uses_saved_url_and_keeps_unsaved_draft_unsent() {
     ]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "草稿保护", &server.url("/saved.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -284,7 +346,7 @@ fn editing_a_subscription_saves_and_persists_without_refetching() {
     let server = TestServer::new(vec![TestRoute::ok("/keep.yaml", YAML)]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "改名前", &server.url("/keep.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -306,6 +368,7 @@ fn editing_a_subscription_saves_and_persists_without_refetching() {
     drop(app);
 
     let mut reopened = start_app(entries).0;
+    open_subscriptions(&mut reopened);
     reopened.wait_for("改名后").unwrap();
     let seen = texts(&reopened);
     assert!(seen.contains(&"2 个节点 · 格式 ClashYaml"), "{seen:?}");
@@ -319,7 +382,7 @@ fn editing_the_url_invalidates_cache_and_source() {
     let server = TestServer::new(vec![TestRoute::ok("/a.yaml", YAML)]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "换址", &server.url("/a.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -344,7 +407,7 @@ fn cancelling_an_edit_with_changes_asks_first() {
     let server = TestServer::new(vec![TestRoute::ok("/edit.yaml", YAML)]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "保护对象", &server.url("/edit.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -381,7 +444,7 @@ fn edit_draft_survives_while_a_refresh_is_in_flight() {
     )]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "在途草稿", &server.url("/draft.yaml"));
 
     app.press("id:subscription-row-在途草稿 >> text:编辑")
@@ -406,7 +469,7 @@ fn source_dialog_shows_the_last_successful_content_read_only() {
     let server = TestServer::new(vec![TestRoute::ok("/src.yaml", YAML)]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "原文订阅", &server.url("/src.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -432,7 +495,7 @@ fn refresh_failure_shows_the_real_error_without_fake_success() {
     }]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "失败订阅", &server.url("/bad.yaml"));
     app.wait_for_within("text:/HTTP 500/", Duration::from_secs(10))
         .unwrap();
@@ -451,7 +514,7 @@ fn refresh_failure_shows_the_real_error_without_fake_success() {
 fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "甲", "https://example.com/a.yaml");
     add_subscription(&mut app, "乙", "https://example.com/b.yaml");
 
@@ -460,7 +523,7 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     app.wait_for("已设为当前生效订阅").unwrap();
     assert!(texts(&app).contains(&"当前生效"));
     // 停用的订阅不能设为生效。
-    let enabled = enabled_selector(&dir, "甲");
+    let enabled = format!("{} >> role:switch", enabled_selector(&dir, "甲"));
     app.press(&enabled).unwrap();
     app.wait_for("已停用").unwrap();
     let seen = texts(&app);
@@ -476,11 +539,13 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     app.wait_for("当前生效").unwrap();
     drop(app);
     let mut reopened = start_app(entries.clone()).0;
+    open_subscriptions(&mut reopened);
     reopened.wait_for("当前生效").unwrap();
 
     reopened
-        .press("id:subscription-row-甲 >> text:删除")
+        .press("id:subscription-row-甲 >> text:更多")
         .unwrap();
+    reopened.press("id:subscription-delete").unwrap();
     reopened.wait_for("删除订阅“甲”？").unwrap();
     reopened.press("确认删除").unwrap();
     let seen = texts(&reopened);
@@ -490,6 +555,7 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
 
     // 清除也持久化。
     let mut third = start_app(entries).0;
+    open_subscriptions(&mut third);
     third.wait_for("共 1 个订阅").unwrap();
     assert!(!texts(&third).contains(&"当前生效"), "{:?}", texts(&third));
 }
@@ -504,7 +570,7 @@ fn refresh_is_single_in_flight_globally_and_recovers_afterwards() {
     ]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    open_subscriptions(&mut app);
     add_subscription(&mut app, "甲", &server.url("/a.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
@@ -534,4 +600,90 @@ fn refresh_is_single_in_flight_globally_and_recovers_afterwards() {
     assert_eq!(server.count_path("/b.yaml"), 2);
     let seen = texts(&app);
     assert!(!seen.contains(&"正在刷新订阅…"), "{seen:?}");
+}
+
+/// 启用开关的真实可访问性：role=switch、可访问名称、checked 状态如实
+/// 暴露；键盘 Enter/Space 激活切换（不只鼠标/test_id）。Windows UIA 复验
+/// 的 headless 对应。
+#[test]
+fn enabled_switch_has_role_label_checked_and_keyboard_activation() {
+    let (dir, entries) = data_root();
+    let mut app = common::start_app_desktop(entries).0;
+    open_subscriptions(&mut app);
+    add_subscription(&mut app, "开关订阅", "https://example.com/sw.yaml");
+    let enabled = format!("{} >> role:switch", enabled_selector(&dir, "开关订阅"));
+    // 真实 Switch 语义：角色 + 可访问名称 + checked 状态。
+    assert!(app.screen().matches(&enabled).unwrap(), "role:switch 可达");
+    assert!(
+        app.screen()
+            .matches("role:switch[启用订阅 开关订阅]")
+            .unwrap(),
+        "可访问名称随订阅名"
+    );
+    use nsh_core::Checked;
+    assert_eq!(
+        app.screen().accessibility_state(&enabled).unwrap().checked,
+        Some(Checked::True),
+        "初始 checked=true（已启用）"
+    );
+
+    // 键盘：桌面端指针按压不夺取键盘焦点；先经输入框取得确定焦点
+    // （名称输入框），再 Tab 4 站（URL → User-Agent → 新增按钮 → 行内
+    // 开关），Enter 与 Space 各自激活切换一次。
+    app.type_text("id:subscription-name", "draft").unwrap();
+    for _ in 0..4 {
+        app.press_key("tab").unwrap();
+    }
+    app.press_key("enter").unwrap();
+    app.wait_for("已停用").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("已启用").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("已停用").unwrap();
+    assert_eq!(
+        app.screen().accessibility_state(&enabled).unwrap().checked,
+        Some(Checked::False),
+        "checked 状态随切换更新"
+    );
+}
+
+/// 英文界面回归：订阅页主要动作、状态与启用开关可访问名称随语言切换，
+/// 不出现本阶段新增的中文硬编码（订阅名等业务数据保持原样）。
+#[test]
+fn subscription_actions_and_switch_label_follow_english() {
+    let (_dir, mut entries) = data_root();
+    entries.insert("language".to_owned(), "en".to_owned());
+    let mut app = start_app(entries).0;
+    open_subscriptions(&mut app);
+    app.type_text("id:subscription-name", "Lang sub").unwrap();
+    app.type_text("id:subscription-url", "https://example.com/en.yaml")
+        .unwrap();
+    app.press("Add subscription").unwrap();
+
+    let seen = texts(&app);
+    for expected in [
+        "Subscriptions",
+        "Enabled",
+        "Refresh",
+        "Edit",
+        "Source",
+        "Set active",
+        "More",
+    ] {
+        assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
+    }
+    // 本阶段 UI 文案不得残留中文硬编码。
+    for unexpected in ["刷新", "编辑", "设为生效", "更多", "已启用", "新增订阅"] {
+        assert!(
+            !seen.contains(&unexpected),
+            "英文界面出现中文硬编码 {unexpected}: {seen:?}"
+        );
+    }
+    // 启用开关可访问名称随语言切换。
+    assert!(
+        app.screen()
+            .matches("role:switch[Enable subscription Lang sub]")
+            .unwrap(),
+        "英文可访问名称"
+    );
 }

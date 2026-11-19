@@ -9,8 +9,10 @@ use nsh_core::prelude::*;
 /// 单行输入（高 40，DESIGN.md 4.4）。
 pub struct Input {
     value: Signal<String>,
+    accessible_name: Option<Box<dyn Fn() -> String>>,
     placeholder: Option<Box<dyn Fn() -> String>>,
     on_change: Option<Box<dyn Fn(String)>>,
+    on_submit: Option<Box<dyn Fn()>>,
     invalid: Option<Box<dyn Fn() -> bool>>,
     disabled: Option<Box<dyn Fn() -> bool>>,
     masked: bool,
@@ -21,8 +23,10 @@ pub struct Input {
 pub fn input(value: Signal<String>) -> Input {
     Input {
         value,
+        accessible_name: None,
         placeholder: None,
         on_change: None,
+        on_submit: None,
         invalid: None,
         disabled: None,
         masked: false,
@@ -31,6 +35,10 @@ pub fn input(value: Signal<String>) -> Input {
 }
 
 impl Input {
+    pub fn accessible_name(mut self, name: impl Fn() -> String + 'static) -> Self {
+        self.accessible_name = Some(Box::new(name));
+        self
+    }
     pub fn placeholder(mut self, placeholder: impl Fn() -> String + 'static) -> Self {
         self.placeholder = Some(Box::new(placeholder));
         self
@@ -38,6 +46,11 @@ impl Input {
 
     pub fn on_change(mut self, on_change: impl Fn(String) + 'static) -> Self {
         self.on_change = Some(Box::new(on_change));
+        self
+    }
+
+    pub fn on_submit(mut self, on_submit: impl Fn() + 'static) -> Self {
+        self.on_submit = Some(Box::new(on_submit));
         self
     }
 
@@ -68,6 +81,8 @@ impl Input {
 /// token 化外观，最小高度 80。
 pub struct Textarea {
     value: Signal<String>,
+    accessible_name: Option<Box<dyn Fn() -> String>>,
+    test_id: Option<&'static str>,
     placeholder: Option<Box<dyn Fn() -> String>>,
     on_change: Option<Box<dyn Fn(String)>>,
     invalid: Option<Box<dyn Fn() -> bool>>,
@@ -78,6 +93,8 @@ pub struct Textarea {
 pub fn textarea(value: Signal<String>) -> Textarea {
     Textarea {
         value,
+        accessible_name: None,
+        test_id: None,
         placeholder: None,
         on_change: None,
         invalid: None,
@@ -86,6 +103,14 @@ pub fn textarea(value: Signal<String>) -> Textarea {
 }
 
 impl Textarea {
+    pub fn accessible_name(mut self, name: impl Fn() -> String + 'static) -> Self {
+        self.accessible_name = Some(Box::new(name));
+        self
+    }
+    pub fn test_id(mut self, id: &'static str) -> Self {
+        self.test_id = Some(id);
+        self
+    }
     pub fn placeholder(mut self, placeholder: impl Fn() -> String + 'static) -> Self {
         self.placeholder = Some(Box::new(placeholder));
         self
@@ -139,6 +164,12 @@ impl IntoElement for Textarea {
         if let Some(disabled) = self.disabled {
             el = el.disabled(disabled);
         }
+        if let Some(name) = self.accessible_name {
+            el = el.optional_label(move || Some(name().into()));
+        }
+        if let Some(id) = self.test_id {
+            el = el.test_id(id);
+        }
         el.into_element()
     }
 }
@@ -171,11 +202,17 @@ impl IntoElement for Input {
         if let Some(on_change) = self.on_change {
             el = el.on_change(move |text: &str| on_change(text.to_owned()));
         }
+        if let Some(on_submit) = self.on_submit {
+            el = el.on_submit(move |_: &str| on_submit());
+        }
         if self.masked {
             el = el.masked(true);
         }
         if let Some(disabled) = self.disabled {
             el = el.disabled(disabled);
+        }
+        if let Some(name) = self.accessible_name {
+            el = el.optional_label(move || Some(name().into()));
         }
         if let Some(id) = self.test_id {
             el = el.test_id(id);
@@ -239,6 +276,9 @@ impl IntoElement for Field {
         }
         if let Some(control) = self.control {
             el = el.child(control);
+        }
+        if self.hint.is_none() && self.error.is_none() {
+            return el.into_element();
         }
         let hint = self.hint;
         let error = Rc::new(self.error);

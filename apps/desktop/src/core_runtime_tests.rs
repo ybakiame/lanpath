@@ -32,7 +32,9 @@ fn test_core() -> TestCore {
 
 fn test_core_with_api_timeout(api_timeout: Duration) -> TestCore {
     let dir = tempfile::tempdir().expect("tempdir");
-    let root = dir.path().to_path_buf();
+    // Runtime/库存按 canonical path 归属；Windows 的 tempdir 前缀不含
+    // `\\?\`，不规范化会让随后 seed 的库存被判为根外文件。
+    let root = std::fs::canonicalize(dir.path()).expect("canonicalize temp root");
     let runtime = CoreRuntime::for_root_with_timeouts(
         &root,
         Duration::from_secs(3),
@@ -117,6 +119,16 @@ async fn start_validates_launches_and_stops_singbox() {
     assert_eq!(outcome.clash_api_port, Some(18102));
     assert_eq!(outcome.node_count, 2);
 
+    // 保存新端口不改变当前会话；诊断必须取启动快照而非新保存值。
+    edit_config(&core.root, |config| {
+        config.mixed_port = 18109;
+    });
+    let (running_config, _) = core
+        .runtime
+        .diagnostic_context()
+        .expect("running diagnostic context");
+    assert_eq!(running_config.mixed_port, 18101);
+
     // 真实监听：mixed 端口可连接（fixture 核心已绑定）。
     tokio::net::TcpStream::connect(("127.0.0.1", 18101))
         .await
@@ -130,6 +142,7 @@ async fn start_validates_launches_and_stops_singbox() {
     let kind = core.runtime.stop().await.expect("stop");
     assert_eq!(kind, ProcessStopKind::Forced);
     assert!(!core.runtime.status().await.running);
+    assert!(core.runtime.diagnostic_context().is_none());
     tokio::net::TcpStream::connect(("127.0.0.1", 18101))
         .await
         .expect_err("停止后端口必须释放");
@@ -145,20 +158,27 @@ async fn start_requires_a_selected_core() {
     assert!(!core.root.join("sing-box.pid").exists());
 }
 
-/// TUN 仍拒绝；系统代理偏好在非 Windows 不产生运行失败（如实忽略，不接管）。
+/// TUN 在所有平台都拒绝（Windows 也不会进入提权/守护路径）。
 #[tokio::test]
-async fn start_rejects_tun_and_ignores_proxy_pref_off_windows() {
+async fn start_rejects_tun() {
     let core = test_core();
     seed_subscription(&core.root);
     seed_singbox(&core, 18121, 18122);
     edit_config(&core.root, |config| config.tun_enabled = true);
     let error = core.runtime.start().await.expect_err("tun rejected");
     assert!(error.to_string().contains("未授权 TUN"), "{error}");
-    edit_config(&core.root, |config| {
-        config.tun_enabled = false;
-        config.system_proxy_enabled = true;
-    });
-    // 非 Windows：已保存偏好不接管也不失败；支持性如实上报。
+    assert!(!core.runtime.status().await.running);
+}
+
+/// 非 Windows：已保存系统代理偏好不接管、不失败，支持性如实上报。
+/// Windows 会走真实守护/权限路径，不在本纯 fixture 用例中断言。
+#[cfg(not(windows))]
+#[tokio::test]
+async fn start_ignores_proxy_pref_off_windows() {
+    let core = test_core();
+    seed_subscription(&core.root);
+    seed_singbox(&core, 18121, 18122);
+    edit_config(&core.root, |config| config.system_proxy_enabled = true);
     let outcome = core
         .runtime
         .start()
@@ -269,7 +289,9 @@ async fn status_poll_detects_unexpected_exit_and_recovers() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     let exit_error = exit_error.expect("异常退出必须被记录");
-    assert!(exit_error.contains("异常退出"), "{exit_error}");
+    if let CoreExit::Failed(detail) = &exit_error {
+        assert!(!detail.is_empty(), "失败证据不能为空");
+    }
 
     // 异常退出后可再次启动（残留已清）。
     let outcome = core.runtime.start().await.expect("restart after exit");

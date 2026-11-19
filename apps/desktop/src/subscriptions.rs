@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use lanpath_client::{
     CachedSubscriptionContent, SubFormat, Subscription, SubscriptionSource, SubscriptionStore,
@@ -33,13 +34,62 @@ static SERVICES: OnceLock<std::sync::Mutex<HashMap<PathBuf, Weak<Subscriptions>>
 /// 避免旧结果覆盖新状态）。
 #[derive(Debug)]
 pub(crate) enum RefreshStatus {
-    Updated { node_count: u64, format: SubFormat },
-    Failed { error: String },
+    Updated {
+        node_count: u64,
+        format: SubFormat,
+    },
+    Failed {
+        error: String,
+    },
     Stale,
+    /// 同一数据根已有刷新在途；本次没有发起网络请求。
+    Busy,
+}
+
+/// 同根共享的刷新活动：离页后 UI owner 可能已销毁，但 background worker
+/// 仍在写盘；活动与完成版本必须由业务句柄持有，供新页面和 App 级摘要读取。
+#[derive(Default)]
+struct SharedRefreshActivity {
+    current: Mutex<Option<Uuid>>,
+    revision: AtomicU64,
+}
+
+static REFRESH_ACTIVITY: OnceLock<Mutex<HashMap<PathBuf, Weak<SharedRefreshActivity>>>> =
+    OnceLock::new();
+
+fn refresh_activity_for(root: &Path) -> Arc<SharedRefreshActivity> {
+    let mut activities = REFRESH_ACTIVITY
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(activity) = activities.get(root).and_then(Weak::upgrade) {
+        return activity;
+    }
+    let activity = Arc::new(SharedRefreshActivity::default());
+    activities.insert(root.to_path_buf(), Arc::downgrade(&activity));
+    activity
+}
+
+/// 刷新预约 guard：业务返回、失败或取消都清除在途标记并推进版本。
+struct RefreshActivityGuard {
+    shared: Arc<SharedRefreshActivity>,
+    id: Uuid,
+}
+
+impl Drop for RefreshActivityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut current) = self.shared.current.lock()
+            && *current == Some(self.id)
+        {
+            *current = None;
+        }
+        self.shared.revision.fetch_add(1, Ordering::Release);
+    }
 }
 
 pub(crate) struct Subscriptions {
     root: Arc<DataRoot>,
+    activity: Arc<SharedRefreshActivity>,
 }
 
 impl Subscriptions {
@@ -69,9 +119,41 @@ impl Subscriptions {
         if let Some(service) = services.get(&key).and_then(Weak::upgrade) {
             return Ok(service);
         }
-        let service = Arc::new(Self { root });
+        let activity = refresh_activity_for(root.path());
+        let service = Arc::new(Self { root, activity });
         services.insert(key, Arc::downgrade(&service));
         Ok(service)
+    }
+
+    /// 当前同根在途刷新的订阅 id（新页面据此恢复 busy 状态）。
+    pub(crate) fn refresh_activity(&self) -> Option<Uuid> {
+        self.activity
+            .current
+            .lock()
+            .ok()
+            .and_then(|current| *current)
+    }
+
+    /// 刷新活动版本：完成时推进，供页面/App 级摘要检测需要重读。
+    pub(crate) fn refresh_activity_revision(&self) -> u64 {
+        self.activity.revision.load(Ordering::Acquire)
+    }
+
+    fn try_begin_refresh(&self, id: Uuid) -> Option<RefreshActivityGuard> {
+        let mut current = self
+            .activity
+            .current
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if current.is_some() {
+            return None;
+        }
+        *current = Some(id);
+        self.activity.revision.fetch_add(1, Ordering::Release);
+        Some(RefreshActivityGuard {
+            shared: self.activity.clone(),
+            id,
+        })
     }
 
     fn store(&self) -> SubscriptionStore {
@@ -208,6 +290,11 @@ impl Subscriptions {
         id: Uuid,
         config: &lanpath_client::ClientConfig,
     ) -> LanpathResult<RefreshStatus> {
+        // 同根只允许一个刷新在途。预约持有到写回/失败结束；离页只销毁页面
+        // owner，不会提前清除该业务事实。
+        let Some(_activity) = self.try_begin_refresh(id) else {
+            return Ok(RefreshStatus::Busy);
+        };
         let subscription = {
             let _guard = self.root.business_guard();
             self.store()

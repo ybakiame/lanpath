@@ -1,7 +1,7 @@
 _version: 1
 
 app.title: Lanpath NSH Desktop
-app.tagline: 纯 Rust · NSH 0.5.0 · 订阅新增/刷新与核心查询/下载按需联网；核心校验并启动仅限用户态 loopback，系统代理经独立守护精确接管（仅 Windows），TUN/VPN 不接管
+app.tagline: 循径而行，径达悠远。
 
 nav.subscriptions: 订阅
 nav.request_settings: 请求设置
@@ -11,13 +11,175 @@ nav.config: 配置
 nav.logs: 日志
 nav.backup: 备份
 nav.appearance: 外观
+nav.overview: 概览
+nav.group.workspace: 工作区
+nav.group.core_config: 核心配置
+nav.group.tools: 工具与恢复
+nav.group.settings: 设置
 
+status.summary: 订阅：%{subscription} · 核心：%{core}
+status.none: 无
+
+overview.title: 概览
+overview.subtitle: 主路径：当前订阅 → 核心 → 校验并启动 → 真实状态；只显示真实状态与当前可执行的下一步
+overview.subscription.title: 当前订阅
+overview.subscription.none: 尚未设置生效订阅
+overview.subscription.nodes: "%{count} 个节点"
+overview.subscription.nodes_unknown: 未获取节点
+overview.subscription.format: 格式 %{format}
+overview.subscription.manage: 管理订阅…
+overview.core.title: 核心
+overview.core.none: 尚未选择核心
+overview.core.choose: 选择核心…
+overview.runtime.title: 运行状态
+overview.runtime.start: 校验并启动
+overview.runtime.stop: 停止
+overview.steps.title: 开始之前
+overview.steps.add: 添加订阅
+overview.steps.refresh: 刷新节点
+overview.steps.core: 选择核心
+overview.steps.start: 校验并启动
+overview.steps.done: 已完成
+overview.steps.go_subscriptions: 去订阅页
+overview.steps.go_core: 去核心页
+overview.proxy.confirm_at_core: 系统代理接管的一次性确认请在核心页完成
+overview.proxy.go_core: 前往核心页
+
+subscription.more: 更多
+subscription.refreshing: 正在刷新…
+subscription.delete_confirm: 确认删除
+
+subscription.title: 订阅
+subscription.subtitle: 真实订阅列表 · 保存到 NSH 桌面独立数据根 · 仅新增/刷新时按需联网，不启动核心/系统代理
+subscription.count: 共 %{count} 个订阅
+subscription.empty: 尚无订阅。
+subscription.load_failed: 加载订阅失败:%{error}
+subscription.profiles_load_failed: 加载覆写模板失败:%{error}
+subscription.adding_refreshing: 已新增订阅，正在刷新…
+subscription.added_refresh_busy: 已新增订阅；有刷新在途，请稍后手动刷新
+subscription.add_failed: 新增订阅失败:%{error}
+subscription.refreshing_busy: 正在刷新订阅…
+subscription.refresh_done: 刷新完成：%{count} 个节点（%{format}）
+subscription.refresh_failed: 刷新订阅失败:%{error}
+subscription.refresh_stale: 刷新期间订阅已被修改或删除，结果未写入
+subscription.refresh_other_in_progress: 另一个订阅刷新正在进行，请完成后再试
+subscription.root_unavailable: 打开数据根失败
+subscription.unknown: 未知订阅
+subscription.active_mark: 当前生效
+subscription.enabled_on: 已启用
+subscription.enabled_off: 已停用
+subscription.nodes: "%{count} 个节点"
+subscription.nodes_unknown: 未获取节点
+subscription.format: 格式 %{format}
+subscription.error_prefix: 错误：%{error}
+subscription.binding: 覆写：%{name}
+subscription.binding_invalid: 覆写模板引用失效，请重新绑定
+subscription.action.refresh: 刷新
+subscription.action.edit: 编辑
+subscription.action.source: 原文
+subscription.action.activate: 设为生效
+subscription.action.delete: 删除
+subscription.delete_title: 删除订阅“%{name}”？
+subscription.delete_description: 仅移除 NSH 桌面数据根中的记录与本地缓存，不影响 Tauri/GPUI/apps/nsh 数据。
+subscription.delete_done: 订阅与本地缓存已删除
+subscription.delete_failed: 删除订阅失败:%{error}
+subscription.enabled_updated: 订阅可用状态已更新
+subscription.enable_failed: 切换启用状态失败:%{error}
+subscription.activate_done: 已设为当前生效订阅
+subscription.activate_failed: 设置生效订阅失败:%{error}
+subscription.enabled_a11y: 启用订阅 %{name}
+subscription.name_placeholder: 订阅名称
+subscription.url_placeholder: 订阅地址（https://…）
+subscription.ua_placeholder: User-Agent（可选，留空用共享默认 clash.meta）
+subscription.add: 新增订阅
+subscription.edit_title: 编辑订阅“%{name}”
+subscription.edit_url_hint: 地址变更会清除旧原文/缓存，保存后需重新刷新
+subscription.binding_label: 覆写模板（配置合成时应用）
+subscription.cancel: 取消
+subscription.save: 保存修改
+subscription.discard_title: 放弃未保存的修改？
+subscription.discard_description: 草稿尚未保存，放弃后将丢失本次修改。
+subscription.discard_confirm: 放弃修改
+subscription.discard_cancel: 继续编辑
+subscription.bind_none: 无覆写
+subscription.save_failed: 保存修改失败:%{error}
+subscription.url_changed_notice: 已保存修改；URL 已变更，请重新刷新获取新内容
+subscription.saved_notice: 已保存修改
+subscription.source_title: 订阅原文（只读）：%{name}
+subscription.source_format: 格式：%{format}
+subscription.source_missing: “%{name}”还没有已保存原文，请先刷新
+subscription.source_load_failed: 读取订阅原文失败:%{error}
+
+runtime.api_port: API %{port}
+runtime.api_off: API 关闭
+runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · 已运行 %{uptime} 秒"
+runtime.status.starting: 正在启动
+runtime.status.stopping: 正在停止
+runtime.status.operation: "%{operation}…"
+runtime.status.operation_stage: "%{operation}：%{stage}…"
+runtime.status.running: 运行中：%{summary}
+runtime.status.stopped: 未运行
+runtime.command.start: 正在校验并启动核心…
+runtime.command.stop: 正在停止核心…
+runtime.command.restart: 正在按新偏好安全重启核心…
+runtime.error.unavailable: 打开核心运行时失败
+runtime.error.start_failed: 启动核心失败:%{error}
+runtime.error.stop_failed: 停止核心失败:%{error}
+runtime.error.restart_start_failed: 已停止核心，但按新偏好重新启动失败:%{error}
+runtime.error.poisoned: 任务状态锁中毒
+runtime.error.incomplete: 任务未完成
+runtime.start_result: 已完成二进制校验并启动：%{core_type} %{version} · mixed %{mixed} · %{api} · %{nodes} 个节点 · %{warnings} 条警告
+runtime.start_result_missing: · 缺失规则集 %{count} 个
+runtime.stop.forced: 已停止核心（强制终止并回收本次进程）
+runtime.stop.already: 核心进程早已退出，无需强制（已清理状态）
+
+core.proxy.toggle_a11y: 接管系统代理
+common.switch: 开关
 common.cancel: 取消
 common.confirm: 确认
 common.close: 关闭
 common.save: 保存
 common.selected: 已选择：%{name}
 common.current: 当前生效：%{name}
+
+status.subscription_read_failed: 当前订阅读取失败：%{error}；保留上次有效值
+status.core_read_failed: 核心选择读取失败：%{error}；保留上次有效值
+status.summary_error_short: " · 摘要读取失败"
+status.proxy_recovery_short: " · 系统代理需要恢复"
+
+overview.summary.problem_title: 读取当前状态时遇到问题
+overview.proxy.state: 系统代理偏好：%{preference} · 实际接管：%{ownership}
+overview.proxy.recovery_warning: 系统代理需要恢复；恢复只处理本应用持有的记录，不会覆盖未知外来代理。
+overview.proxy.recover: 恢复系统代理
+
+runtime.stage.read_settings: 读取已保存设置
+runtime.stage.validate_binary: 校验核心二进制
+runtime.stage.preflight_ports: 预检监听端口
+runtime.stage.compose_config: 合成配置
+runtime.stage.validate_config: 校验配置
+runtime.stage.start_process: 启动核心进程
+runtime.stage.wait_ready: 等待核心就绪
+runtime.stage.restore_proxy_and_stop: 恢复系统代理并停止核心进程
+runtime.exit.exited: 核心进程已退出
+runtime.exit.failed: 核心进程异常退出：%{error}
+runtime.command.restore_proxy: 正在恢复系统代理…
+runtime.error.restore_proxy_failed: 恢复系统代理失败：%{error}
+runtime.error.proxy_unsupported: 系统代理守护仅支持 Windows
+runtime.proxy.unowned: 未接管
+runtime.proxy.owned: 本应用持有
+runtime.proxy.recovery_required: 需要恢复
+runtime.proxy.unsupported: 系统代理守护不可用
+runtime.proxy.unknown: 状态未知：%{error}
+runtime.proxy.preference_on: 已开启
+runtime.proxy.preference_off: 已关闭
+runtime.proxy.preference_unknown: 未知
+runtime.proxy.restored: 已按本应用记录恢复系统代理（无遗留记录时无动作）
+
+core.proxy.change_busy: 核心启动或停止进行中；完成后再修改系统代理偏好。
+core.proxy.save_failed: 保存系统代理偏好失败：%{error}
+core.proxy.saved_next_start: 系统代理偏好已保存；下次启动核心时经独立守护接管/恢复
+core.proxy.saved_off: 系统代理偏好已关闭
+core.proxy.restart_unavailable: 当前有核心命令在途；系统代理偏好未更改，请稍后重试。
 
 appearance.title: 外观
 appearance.subtitle: 主题、外观模式、界面语言与动效 · 选择立即生效并保存
@@ -34,8 +196,13 @@ appearance.language.en: English
 appearance.motion.system: 跟随系统
 appearance.motion.reduce: 减少动效
 appearance.theme.default_mark: 默认
-appearance.scale_note: 界面缩放跟随系统文本缩放（当前 %{percent}%）；NSH 0.5.0 不提供应用级缩放覆盖，不在此提供不生效的选项
+appearance.scale_note: 界面缩放跟随系统文本缩放（当前 %{percent}%）；NSH 0.5.1 不提供应用级缩放覆盖，不在此提供不生效的选项
 appearance.hover_preview: 指向主题可预览，点击应用并保存
+appearance.previewing: 正在预览：%{name}；点击应用并保存
+appearance.theme.a11y: 主题：%{name}
+appearance.save_failed: 外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。
+appearance.section.material: 窗口材质与不透明度
+appearance.material_note: NSH 0.5.1 的主窗口材质（backdrop）仅为启动配置，应用内没有运行时切换窗口材质或窗口不透明度的 API；此处不提供存而不生效的选项
 
 gallery.title: 组件画廊
 gallery.subtitle: 仅开发验收使用（--ui-gallery）· 普通用户导航没有此入口
@@ -99,3 +266,66 @@ gallery.motion.press: 按下缩放 0.97 / 0.95
 gallery.motion.reduced_on: 已按减少动效渲染（立即可读）
 gallery.motion.spinning: 旋转中（循环播放）
 gallery.theme.pick: 点击应用主题，指向预览
+
+# Rules, diagnostics and TypeScript overrides
+nav.rules: "规则"
+nav.diagnostics: "诊断"
+rules.title: "规则"
+rules.subtitle: "为域名、应用和网段选择出口。规则按顺序匹配，保存后重启核心应用。"
+rules.saved: "规则已保存，下次启动或重启核心时应用。"
+rules.list: "规则顺序"
+rules.search: "筛选规则"
+rules.quick: "快速添加"
+rules.batch: "批量输入"
+rules.domain: "精确域名"
+rules.suffix: "域名后缀"
+rules.keyword: "域名关键词"
+rules.cidr: "IP 网段"
+rules.process: "进程名"
+rules.port: "目标端口"
+rules.proxy: "代理"
+rules.direct: "直连"
+rules.reject: "拦截"
+rules.kind: "匹配类型"
+rules.target: "匹配值"
+rules.action: "出口"
+rules.lines: "每行一条规则"
+rules.first: "插入最前（优先匹配）"
+rules.save_edit: "保存修改"
+rules.add: "添加规则"
+rules.reset: "清空编辑"
+rules.edit: "编辑"
+rules.disable: "停用"
+rules.enable: "启用"
+rules.up: "上移"
+rules.down: "下移"
+rules.delete: "删除"
+rules.empty: "没有匹配的规则。"
+profile.editor: "TypeScript 覆写"
+profile.name: "模板名称"
+profile.url: "远程 TS URL（可选）"
+profile.url_hint: "远程 → 本地，合成时下载；下载失败沿用缓存。"
+profile.source: "本地 TypeScript（可选）"
+profile.source_hint: "function main(config: any) { return config; }\n支持类型注解；同步执行，不支持 import、网络或文件访问。"
+profile.cancel: "取消"
+profile.save: "保存"
+profile.discard_question: "有未保存修改，要丢弃吗？"
+profile.keep: "继续编辑"
+profile.discard: "丢弃修改"
+diagnostics.title: "诊断"
+diagnostics.subtitle: "分别检查系统解析、直连、已保存的 DNS 上游和核心代理链路。各步骤独立判断。"
+diagnostics.target: "目标域名"
+diagnostics.run: "开始诊断"
+diagnostics.trace: "检查本地规则"
+diagnostics.add_rule: "为此域名添加规则"
+diagnostics.running: "正在检查网络，单步超时 8 秒…"
+diagnostics.summary: "目标 %{target} · 完成于 %{time} · %{failed} 项失败"
+diagnostics.empty: "尚未运行诊断。"
+diagnostics.local_title: "本地规则预估"
+diagnostics.local_result: "首个可判定出口：%{outbound}；之前有 %{uncertain} 条规则缺少上下文。"
+diagnostics.no_match: "未匹配"
+diagnostics.local_hint: "仅检查已保存的本地规则；不含默认规则、远程规则集、进程与端口上下文，不代表运行核心的实际路径。"
+diagnostics.ok: "通过"
+diagnostics.fail: "失败"
+diagnostics.skip: "跳过"
+diagnostics.info: "说明"

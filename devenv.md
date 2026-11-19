@@ -1,8 +1,8 @@
 # Lanpath 开发环境（standalone devenv）
 
-本仓库使用独立的 devenv CLI 管理 Nix 开发环境，不再以项目 Flake 包装 shell。`devenv.yaml` 声明输入，`devenv.lock` 是唯一项目环境锁文件，`devenv.nix` 导入 `nix/` 下的工具、桌面、Android 和共用命令模块。入口与锁定机制见 [ADR-0015](docs/adr/0015-standalone-devenv.md)。
+本仓库使用独立的 devenv CLI 管理 Nix 开发环境，不再以项目 Flake 包装 shell。`devenv.yaml` 声明输入，`devenv.lock` 是唯一项目环境锁文件，`devenv.nix` 导入 `nix/` 下的工具、桌面、Android 和共用命令模块。
 
-本地编译、运行、测试及提交钩子使用该环境。Windows CI 保留原生锁定工具链例外；GPUI 本机 Windows 实验例外与授权边界见 [开发指南](docs/development.md)。本说明的 Linux/WSL 环境不构成新增平台支持承诺。
+本地编译、运行、测试及提交钩子使用该环境。Windows 原生工具链使用约定见 [AGENTS.md](AGENTS.md)。本说明的 Linux/WSL 环境不构成新增平台支持承诺。
 
 ## 1. 前置：Nix 与固定的 devenv CLI
 
@@ -38,7 +38,7 @@ devenv shell -- bash -c 'adb devices; go version; bun --version'
 
 已激活 shell 中的 `lanpath-*` 共用命令会自行切回 Git 根，因此可以从仓库子目录调用。可选的 direnv 入口使用已提交的 `.envrc`，审核后运行 `direnv allow`；不要写回 `use flake` 或另建项目环境锁文件。
 
-进入 shell 只准备环境，不自动安装项目依赖、构建 AAR/应用、启动代理、签名或发布。Husky 保持唯一提交检查入口，不启用 devenv git-hooks。具体构建顺序与验证范围见 [开发指南](docs/development.md) 和 [验证指南](docs/testing.md)。
+进入 shell 只准备环境，不自动安装项目依赖、构建 AAR/应用、启动代理、签名或发布。Husky 保持唯一提交检查入口，不启用 devenv git-hooks。构建顺序与验证范围见 [AGENTS.md](AGENTS.md)。
 
 ## 3. 覆盖的依赖
 
@@ -68,7 +68,7 @@ SDK 包增删走声明配置和输入锁定，不在不可变的 Nix store 中�
 
 首次准备可能下载 Android SDK/NDK、CLI 辅助程序和其他 Nix 构建依赖。项目配置使用 `cache.nixos.org` 与 devenv 官方签名缓存；缓存未命中时仍可能从源码构建。standalone CLI 管理输入锁定与求值缓存，但实际命中、下载量及耗时取决于配置和缓存状态，不承诺固定体积、时长或编译加速。
 
-WSL GUI 仍依赖现有 WSLg/宿主图形能力；ADB 设备选择、授权和连接排错按 [Android 调试 skill](.agents/skills/lanpath-android-debug/SKILL.md) 执行，不因进入环境擅自重启宿主 ADB server。
+WSL GUI 仍依赖现有 WSLg/宿主图形能力；ADB 操作前先通过 `adb devices` 核对目标设备和授权状态，不因进入环境擅自重启宿主 ADB server。
 
 ## 4. 输入与工具更新边界
 

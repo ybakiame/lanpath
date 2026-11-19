@@ -1,4 +1,4 @@
-//! Headless 画廊测试（`nsh_testing::Headless`，NSH 0.5.0）：仅开发验收
+//! Headless 画廊测试（`nsh_testing::Headless`，NSH 0.5.1）：仅开发验收
 //! 的组件画廊（`--ui-gallery` 同一根构建链）——分区完整性、交互状态、
 //! 确认对话框、reduced motion 渲染与主题预览。
 
@@ -38,18 +38,84 @@ fn gallery_shows_every_section() {
 }
 
 /// 按钮状态真实可交互：切换“加载中”复选框后，loading 按钮在禁用/
-/// 可用之间真实变化。
+/// 可用之间真实变化，spinner 也随信号出现/消失而不是只画首帧。
 #[test]
 fn gallery_button_loading_state_reacts() {
     let (_dir, entries) = common::data_root();
     let mut app = start_gallery(entries).0;
     app.wait_for("组件画廊").unwrap();
-    // 初始：加载中开关开启（信号默认 true）——加载按钮禁用。
+    // 初始：加载中开关开启（信号默认 true）——加载按钮禁用且显示指示器。
     assert!(!app.screen().enabled("role:button[加载中]").unwrap());
+    assert!(
+        app.screen()
+            .matches("id:loading-button >> id:button-loading-indicator")
+            .unwrap()
+    );
+    assert!(
+        !app.screen()
+            .matches("id:prefix-loading-button >> text:◆")
+            .unwrap()
+    );
     app.press("role:checkbox[加载中]").unwrap();
     assert!(app.screen().enabled("role:button[加载中]").unwrap());
+    assert!(
+        !app.screen()
+            .matches("id:loading-button >> id:button-loading-indicator")
+            .unwrap()
+    );
+    assert!(
+        app.screen()
+            .matches("id:prefix-loading-button >> text:◆")
+            .unwrap(),
+        "loading 结束后 prefix 必须恢复"
+    );
     app.press("role:checkbox[加载中]").unwrap();
     assert!(!app.screen().enabled("role:button[加载中]").unwrap());
+    assert!(
+        app.screen()
+            .matches("id:loading-button >> id:button-loading-indicator")
+            .unwrap()
+    );
+    assert!(
+        !app.screen()
+            .matches("id:prefix-loading-button >> text:◆")
+            .unwrap()
+    );
+    // 第二次 loading 结束后 prefix 仍由工厂重建，不是一次性元素。
+    app.press("role:checkbox[加载中]").unwrap();
+    assert!(
+        app.screen()
+            .matches("id:prefix-loading-button >> text:◆")
+            .unwrap()
+    );
+}
+
+/// 复选框有可见勾选标记与 checked 状态，不只依赖颜色。
+#[test]
+fn gallery_checkbox_shows_checked_state_and_mark() {
+    let (_dir, entries) = common::data_root();
+    let mut app = start_gallery(entries).0;
+    app.wait_for("组件画廊").unwrap();
+    let checkbox = "role:checkbox[加载中]";
+    assert_eq!(
+        app.screen().accessibility_state(checkbox).unwrap().checked,
+        Some(nsh_core::Checked::True)
+    );
+    assert!(
+        app.screen()
+            .matches("role:checkbox[加载中] >> text:✓")
+            .unwrap()
+    );
+    app.press(checkbox).unwrap();
+    assert_eq!(
+        app.screen().accessibility_state(checkbox).unwrap().checked,
+        Some(nsh_core::Checked::False)
+    );
+    assert!(
+        !app.screen()
+            .matches("role:checkbox[加载中] >> text:✓")
+            .unwrap()
+    );
 }
 
 /// 画廊确认对话框：打开 → 内容呈现 → 确认回调执行（状态文本出现）。
@@ -103,8 +169,14 @@ fn gallery_theme_card_applies_and_persists() {
             .matches("id:gallery-theme-amethyst >> text:✓")
             .unwrap()
     );
+    assert!(
+        app.screen()
+            .selected("role:button[主题：amethyst]")
+            .unwrap()
+    );
     app.press("id:gallery-theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
     assert!(
         app.screen()
             .matches("id:gallery-theme-ocean >> text:✓")
@@ -158,14 +230,31 @@ fn gallery_with_reduced_motion_stays_readable() {
     let seen = texts(&app);
     assert!(seen.contains(&"组件画廊"), "{seen:?}");
     assert!(seen.contains(&"已按减少动效渲染（立即可读）"), "{seen:?}");
-    // reduced 下循环动效开关仍可操作且立即可读：`play` 尊重减少动效
-    // （立即落末帧、不持续旋转），状态文本可观察地开关。
-    app.press("role:button[动效演示（进入 / 按下 / 循环）]")
-        .unwrap();
-    app.wait_for("旋转中（循环播放）").unwrap();
+    // reduced 下循环动效不启动：按下后状态仍可观察，但不显示持续旋转，
+    // 内容与控件保持可读可用。
     app.press("role:button[动效演示（进入 / 按下 / 循环）]")
         .unwrap();
     assert!(!app.screen().shows("旋转中（循环播放）"));
+    assert!(app.screen().shows("已按减少动效渲染（立即可读）"));
+    assert!(
+        app.screen()
+            .enabled("role:button[动效演示（进入 / 按下 / 循环）]")
+            .unwrap()
+    );
+}
+
+/// 仅应用内“减少动效”偏好（引擎系统 flag 未开）也必须约束循环演示，
+/// 不能只靠环境级 reduced motion。
+#[test]
+fn gallery_app_reduced_motion_preference_skips_looping_demo() {
+    let (_dir, mut entries) = common::data_root();
+    entries.insert("reduce_motion".to_owned(), "reduce".to_owned());
+    let mut app = start_gallery(entries).0;
+    app.wait_for("已按减少动效渲染（立即可读）").unwrap();
+    app.press("role:button[动效演示（进入 / 按下 / 循环）]")
+        .unwrap();
+    assert!(!app.screen().shows("旋转中（循环播放）"));
+    assert!(app.screen().shows("已按减少动效渲染（立即可读）"));
 }
 
 /// 画廊语言跟随存储偏好：预置 en 时分区标题为英文。

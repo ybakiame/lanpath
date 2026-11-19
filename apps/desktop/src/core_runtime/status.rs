@@ -5,19 +5,28 @@
 use std::sync::atomic::Ordering;
 
 use super::CoreRuntime;
-use super::types::{CoreStatus, SessionSummary};
+use super::types::{CoreExit, CoreStatus, SessionSummary};
 use crate::core_runtime::{PHASE_STARTING, PHASE_STOPPING};
 
 impl CoreRuntime {
+    /// 诊断只使用当前会话启动时的固定设置；后续保存值不冒充运行事实。
+    pub(crate) fn diagnostic_context(&self) -> Option<(lanpath_client::ClientConfig, Vec<String>)> {
+        self.active.lock().ok().and_then(|active| {
+            active
+                .as_ref()
+                .map(|info| (info.config.clone(), info.missing_rule_sets.clone()))
+        })
+    }
+
     /// 真实状态 poll：每次调用都核验核心进程活性；异常退出在此被发现并
     /// 记录（不依赖按钮状态）。系统代理 ownership 同一快照如实上报。
     pub(crate) async fn status(&self) -> CoreStatus {
         let operation = match self.phase.load(Ordering::Acquire) {
-            PHASE_STARTING => Some("正在启动"),
-            PHASE_STOPPING => Some("正在停止"),
+            PHASE_STARTING => Some(super::types::CoreOperation::Starting),
+            PHASE_STOPPING => Some(super::types::CoreOperation::Stopping),
             _ => None,
         };
-        let stage = self.stage.lock().ok().and_then(|slot| slot.clone());
+        let stage = self.stage.lock().ok().and_then(|slot| *slot);
         let proxy = if self.proxy_supported() {
             Some(self.proxy_ownership())
         } else {
@@ -39,13 +48,13 @@ impl CoreRuntime {
             && !manager.is_running().await
         {
             let detail = manager.last_error().await;
-            let message = if detail.is_empty() {
-                "核心进程已退出".to_owned()
+            let exit = if detail.is_empty() {
+                CoreExit::Exited
             } else {
-                format!("核心进程异常退出：{detail}")
+                CoreExit::Failed(detail)
             };
-            if let Ok(mut exit) = self.unexpected_exit.lock() {
-                *exit = Some(message);
+            if let Ok(mut slot) = self.unexpected_exit.lock() {
+                *slot = Some(exit);
             }
             *slot = None;
             if let Ok(mut active) = self.active.lock() {
@@ -76,7 +85,7 @@ impl CoreRuntime {
         })
     }
 
-    pub(super) fn exit_snapshot(&self) -> Option<String> {
+    pub(super) fn exit_snapshot(&self) -> Option<CoreExit> {
         self.unexpected_exit
             .lock()
             .ok()

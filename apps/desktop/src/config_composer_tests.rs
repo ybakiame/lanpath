@@ -497,7 +497,7 @@ async fn compose_applies_profile_remote_and_local_overrides_to_the_json() {
         ),
         Route::ok(
             "/ovr.js",
-            "function main(config){ config.__chain = (config.__chain || \"\") + \"R\"; config.remote_js_marker = true; return config; }",
+            "function main(config){ config.__chain = (config.__chain || \"\") + \"R\"; config.remote_js_marker = true; config.log.level = \"debug\"; return config; }",
         ),
     ]);
     let temporary = tempfile::tempdir().unwrap();
@@ -505,15 +505,8 @@ async fn compose_applies_profile_remote_and_local_overrides_to_the_json() {
     let id = add_active(&subscriptions, "覆写订阅", "https://example.com/o.yaml");
     seed_cache(temporary.path(), id);
     let profile = profiles
-        .save(
-            None,
-            "合成模板",
-            "log:\n  level: trace\nlocal_yaml_marker: true\n".to_owned(),
-            "function main(config){ config.__chain = (config.__chain || \"\") + \"L\"; config.local_js_marker = true; return config; }"
-                .to_owned(),
-            Some(server.url("/ovr.yaml")),
-            Some(server.url("/ovr.js")),
-        )
+        .save(None, "合成模板", "function main(config){ config.__chain = (config.__chain || \"\") + \"L\"; config.local_js_marker = true; config.log.level = \"trace\"; return config; }"
+                .to_owned(), Some(server.url("/ovr.js")))
         .unwrap();
     let updated = subscriptions
         .load()
@@ -538,16 +531,16 @@ async fn compose_applies_profile_remote_and_local_overrides_to_the_json() {
 
     let preview = composer.compose().await.expect("compose with overrides");
     let value = parsed_json(&preview);
-    // 远程 YAML 生效，且本地 YAML 在远程之后应用（level 覆盖为 trace）。
-    assert_eq!(value["remote_yaml_marker"], true);
-    assert_eq!(value["local_yaml_marker"], true);
+    // 旧远程/本地 YAML 均忽略；TS 链仍可修改 log。
+    assert!(value["remote_yaml_marker"].is_null());
+    assert!(value["local_yaml_marker"].is_null());
     assert_eq!(value["log"]["level"], "trace");
-    // 远程 JS 先执行、本地 JS 后执行，链式结果完整保留。
+    // 远程 TS 先执行、本地 TS 后执行，链式结果完整保留。
     assert_eq!(value["__chain"], "RL");
     assert_eq!(value["remote_js_marker"], true);
     assert_eq!(value["local_js_marker"], true);
     // 远程覆写确实经已保存策略从本地服务器取到。
-    assert_eq!(server.count_path("/ovr.yaml"), 1);
+    assert_eq!(server.count_path("/ovr.yaml"), 0);
     assert_eq!(server.count_path("/ovr.js"), 1);
 }
 
@@ -563,9 +556,7 @@ async fn compose_surfaces_remote_override_failure_warnings() {
             None,
             "降级模板",
             String::new(),
-            String::new(),
-            Some(server.url("/missing.yaml")),
-            None,
+            Some(server.url("/missing.ts")),
         )
         .unwrap();
     let updated = subscriptions
@@ -597,7 +588,7 @@ async fn compose_surfaces_remote_override_failure_warnings() {
         preview
             .warnings()
             .iter()
-            .any(|warning| warning.contains("profile remote yaml fetch failed")),
+            .any(|warning| warning.contains("profile remote js fetch failed")),
         "{:?}",
         preview.warnings()
     );
@@ -666,9 +657,7 @@ async fn compose_rejects_a_missing_bound_profile() {
     let (subscriptions, profiles, composer) = services(temporary.path());
     let id = add_active(&subscriptions, "失联订阅", "https://example.com/l.yaml");
     seed_cache(temporary.path(), id);
-    let profile = profiles
-        .save(None, "将删除", String::new(), String::new(), None, None)
-        .unwrap();
+    let profile = profiles.save(None, "将删除", String::new(), None).unwrap();
     let updated = subscriptions
         .load()
         .unwrap()

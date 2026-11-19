@@ -4,17 +4,21 @@
 
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(unix)]
 use lanpath_client::RequestProxyMode;
 use lanpath_common::CoreType;
 
 use super::CoreInventory;
 
-/// 数据根内的库存二进制路径（按共享 on-disk 命名规则）。
+/// 数据根内的库存二进制路径（按共享 on-disk 命名规则）。仅 Unix 测试
+/// 直接构造该路径；Windows 使用真实 PE fixture。
+#[cfg(unix)]
 fn binary_at(root: &Path, core_type: CoreType, version: &str) -> PathBuf {
     let name = if cfg!(windows) {
         format!("{}.exe", core_type.binary_name())
@@ -25,6 +29,15 @@ fn binary_at(root: &Path, core_type: CoreType, version: &str) -> PathBuf {
         .join(core_type.binary_name())
         .join(version)
         .join(name)
+}
+
+/// 库存以 canonical path 归属；Windows 的 `tempdir` 常是 `C:\...`，而
+/// `DataRoot` 会规范化为 `\\?\C:\...`。测试种子必须使用与库存相同的根，
+/// 否则 `select/delete` 会把真实库存文件判为“outside this inventory”。
+/// 使用该 helper 的 select 用例依赖 Unix 脚本 version probe，当前只在 Unix 编译。
+#[cfg(unix)]
+fn canonical_temp_root(dir: &tempfile::TempDir) -> PathBuf {
+    std::fs::canonicalize(dir.path()).expect("canonicalize temporary data root")
 }
 
 /// 种子一个可真实 version probe 的脚本核心（Unix）。
@@ -39,16 +52,6 @@ fn seed_script_core(root: &Path, core_type: CoreType, version: &str, reported: &
     std::fs::write(&path, format!("#!/bin/sh\necho '{output}'\n")).unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path
-}
-
-/// 种子一个不可执行的库存元数据文件（Windows 原生场景不执行 probe，
-/// 行为由主代理验收；此处仅用于列表/删除路径）。
-#[cfg(not(unix))]
-fn seed_script_core(root: &Path, core_type: CoreType, version: &str, _reported: &str) -> PathBuf {
-    let path = binary_at(root, core_type, version);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, b"inventory fixture").unwrap();
     path
 }
 
@@ -240,13 +243,15 @@ fn empty_root_lists_no_cores_and_no_active() {
     assert!(inventory.active_core().unwrap().is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn type_switch_lists_independent_inventories_and_active_survives() {
-    let root = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let root = canonical_temp_root(&dir);
     // 先开数据根（写入归属标记），再预置库存文件与配置。
-    let inventory = CoreInventory::for_root(root.path()).unwrap();
-    let singbox = seed_script_core(root.path(), CoreType::SingBox, "1.2.3", "1.2.3");
-    let mihomo = seed_script_core(root.path(), CoreType::Mihomo, "1.19.29", "1.19.29");
+    let inventory = CoreInventory::for_root(&root).unwrap();
+    let singbox = seed_script_core(&root, CoreType::SingBox, "1.2.3", "1.2.3");
+    let mihomo = seed_script_core(&root, CoreType::Mihomo, "1.19.29", "1.19.29");
     inventory.select(CoreType::SingBox, &singbox).unwrap();
 
     let singbox_list = inventory.list_local(CoreType::SingBox).unwrap();
@@ -267,18 +272,20 @@ fn type_switch_lists_independent_inventories_and_active_survives() {
     assert_eq!(active.core_type(), CoreType::Mihomo);
     assert_eq!(active.version(), "1.19.29");
     assert!(!inventory.list_local(CoreType::SingBox).unwrap()[0].is_active());
-    let config = lanpath_client::ClientConfig::load(root.path()).unwrap();
+    let config = lanpath_client::ClientConfig::load(&root).unwrap();
     assert_eq!(config.core_type, CoreType::Mihomo);
     assert_eq!(config.core_binary, mihomo);
 }
 
+#[cfg(unix)]
 #[test]
 fn select_preserves_existing_config_fields_and_request_policy() {
-    let root = tempfile::tempdir().unwrap();
-    let inventory = CoreInventory::for_root(root.path()).unwrap();
-    let selected = seed_script_core(root.path(), CoreType::SingBox, "1.2.3", "1.2.3");
+    let dir = tempfile::tempdir().unwrap();
+    let root = canonical_temp_root(&dir);
+    let inventory = CoreInventory::for_root(&root).unwrap();
+    let selected = seed_script_core(&root, CoreType::SingBox, "1.2.3", "1.2.3");
     let mut config = lanpath_client::ClientConfig::new(
-        root.path().to_path_buf(),
+        root.clone(),
         "https://hub.example",
         "token",
         PathBuf::new(),
@@ -287,11 +294,11 @@ fn select_preserves_existing_config_fields_and_request_policy() {
     config.request_proxy_url = "http://127.0.0.1:8080".into();
     config.mixed_port = 18765;
     config.save().unwrap();
-    let before = lanpath_client::ClientConfig::load(root.path()).unwrap();
+    let before = lanpath_client::ClientConfig::load(&root).unwrap();
 
     inventory.select(CoreType::SingBox, &selected).unwrap();
 
-    let after = lanpath_client::ClientConfig::load(root.path()).unwrap();
+    let after = lanpath_client::ClientConfig::load(&root).unwrap();
     assert_eq!(after.core_binary, selected);
     assert_eq!(after.core_type, CoreType::SingBox);
     assert_eq!(after.request_proxy_mode, before.request_proxy_mode);
@@ -300,34 +307,38 @@ fn select_preserves_existing_config_fields_and_request_policy() {
     assert_eq!(after.hub_url, before.hub_url);
     assert_eq!(after.active_subscription_id, before.active_subscription_id);
     // 统一 TOML 布局：配置与选择都只写 app.toml，不再产生 client.json。
-    assert!(lanpath_client::settings::app_settings_path(root.path()).is_file());
-    assert!(!root.path().join("client.json").exists());
+    assert!(lanpath_client::settings::app_settings_path(&root).is_file());
+    assert!(!root.join("client.json").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn select_on_fresh_install_persists_direct_request_default() {
-    let root = tempfile::tempdir().unwrap();
-    let inventory = CoreInventory::for_root(root.path()).unwrap();
-    let selected = seed_script_core(root.path(), CoreType::SingBox, "1.2.3", "1.2.3");
+    let dir = tempfile::tempdir().unwrap();
+    let root = canonical_temp_root(&dir);
+    let inventory = CoreInventory::for_root(&root).unwrap();
+    let selected = seed_script_core(&root, CoreType::SingBox, "1.2.3", "1.2.3");
     inventory.select(CoreType::SingBox, &selected).unwrap();
 
-    let config = lanpath_client::ClientConfig::load(root.path()).unwrap();
+    let config = lanpath_client::ClientConfig::load(&root).unwrap();
     assert_eq!(config.core_binary, selected);
     assert_eq!(
         config.request_proxy_mode,
         RequestProxyMode::None,
         "新装默认请求策略必须固化为直连，不能被核心选择改回 System"
     );
-    assert!(lanpath_client::settings::app_settings_path(root.path()).is_file());
-    assert!(!root.path().join("client.json").exists());
+    assert!(lanpath_client::settings::app_settings_path(&root).is_file());
+    assert!(!root.join("client.json").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn delete_active_rejected_and_inactive_removed() {
-    let root = tempfile::tempdir().unwrap();
-    let inventory = CoreInventory::for_root(root.path()).unwrap();
-    let active = seed_script_core(root.path(), CoreType::SingBox, "1.2.3", "1.2.3");
-    let inactive = seed_script_core(root.path(), CoreType::SingBox, "1.2.2", "1.2.2");
+    let dir = tempfile::tempdir().unwrap();
+    let root = canonical_temp_root(&dir);
+    let inventory = CoreInventory::for_root(&root).unwrap();
+    let active = seed_script_core(&root, CoreType::SingBox, "1.2.3", "1.2.3");
+    let inactive = seed_script_core(&root, CoreType::SingBox, "1.2.2", "1.2.2");
     inventory.select(CoreType::SingBox, &active).unwrap();
 
     assert!(inventory.delete(CoreType::SingBox, &active).is_err());

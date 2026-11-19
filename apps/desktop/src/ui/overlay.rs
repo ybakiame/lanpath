@@ -211,3 +211,41 @@ pub fn tooltip(trigger: impl Interactive, content: impl Fn() -> String + 'static
         )
         .into_element()
 }
+
+/// 居中的编辑弹层：共用遮罩、焦点、进入动效与 Escape 行为。
+pub fn editor_dialog(
+    title: impl Fn() -> String + 'static,
+    on_cancel: impl Fn() + 'static,
+    content: impl IntoElement,
+) -> AnyElement {
+    let mut card = view().child(content);
+    if !super::prefs::prefs().reduced.get() {
+        let enter = nsh_core::prelude::motion().entering(
+            MotionSpec::new(KeyframeTiming::new(motion::SLOW_MS).easing(Easing::EaseOut))
+                .track(
+                    MotionChannel::Opacity,
+                    [Keyframe::new(0.0), Keyframe::new(1.0)],
+                )
+                .track(
+                    MotionChannel::TranslateY,
+                    [
+                        Keyframe::new(motion::DISTANCE_DIALOG_PT),
+                        Keyframe::new(0.0),
+                    ],
+                ),
+        );
+        card = card.bind_motion(&enter);
+    }
+    dialog()
+        .label(move || SharedString::from(title()))
+        .on_cancel(on_cancel)
+        .child(
+            view()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .bg(transparent_black().opacity(0.4))
+                .child(card),
+        )
+        .into_element()
+}

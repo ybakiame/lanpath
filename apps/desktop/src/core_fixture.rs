@@ -6,51 +6,11 @@
 //! 新依赖。编译产物在临时目录，随测试进程退出清理。
 
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+#[path = "../tests/support/core_build.rs"]
+mod core_build;
 
-/// 编译后的假核心二进制路径（进程内只编译一次）。
 pub(crate) fn compiled_core() -> &'static Path {
-    static COMPILED: LazyLock<(tempfile::TempDir, PathBuf)> = LazyLock::new(|| {
-        let directory = tempfile::tempdir().expect("fixture tempdir");
-        let executable = std::env::current_exe().expect("current test binary");
-        let dependencies = executable.parent().expect("deps directory");
-        let rlib = |prefix: &str| {
-            std::fs::read_dir(dependencies)
-                .expect("read deps directory")
-                .map(|entry| entry.expect("deps entry").path())
-                .find(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".rlib"))
-                })
-                .unwrap_or_else(|| panic!("Cargo-built {prefix} library"))
-        };
-        let output = std::process::Command::new("rustc")
-            .args([
-                "--edition=2024",
-                "--crate-name=lanpath_desktop_core_fixture",
-            ])
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/core_fixture.rs"
-            ))
-            .arg("--extern")
-            .arg(format!("serde_json={}", rlib("libserde_json-").display()))
-            .arg("-L")
-            .arg(format!("dependency={}", dependencies.display()))
-            .arg("-o")
-            .arg(directory.path().join("core-fixture"))
-            .output()
-            .expect("run rustc for the core fixture");
-        assert!(
-            output.status.success(),
-            "core fixture compile failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let binary = directory.path().join("core-fixture");
-        (directory, binary)
-    });
-    &COMPILED.1
+    core_build::compiled_core_fixture()
 }
 
 /// 把假核心复制为库存布局 `cores/<binary>/<version>/<文件名>`（共享 on-disk

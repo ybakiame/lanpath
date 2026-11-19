@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：备份页导出
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：备份页导出
 //! （掩码口令 ≥12 / 生成强密码 / 原生保存对话框注入 / 真实 age 字节 /
 //! 不覆盖已有文件）、导入（原生打开对话框注入 / 错误密码脱敏 / 摘要 /
 //! 改密码即弃预览）、恢复确认（停止核心准备 pending / 待重启横幅 /
@@ -47,7 +47,7 @@ fn temp_target(name: &str) -> PathBuf {
 fn navigating_to_the_backup_page_shows_export_and_import_scope() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_backup(&mut app);
     let seen = texts(&app);
     for expected in [
@@ -70,7 +70,7 @@ fn navigating_to_the_backup_page_shows_export_and_import_scope() {
 fn export_writes_real_age_bytes_to_the_picked_path() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_backup(&mut app);
 
     // 弱口令：明确错误，不打开对话框。
@@ -108,7 +108,7 @@ fn export_writes_real_age_bytes_to_the_picked_path() {
 fn generate_password_fills_a_strong_shared_password() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_backup(&mut app);
     app.press("id:backup-generate-password").unwrap();
     app.wait_for("text:/已生成随机强密码/").unwrap();
@@ -130,7 +130,7 @@ fn generate_password_fills_a_strong_shared_password() {
 fn export_never_overwrites_an_existing_file() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_backup(&mut app);
 
     let target = temp_target("existing.zip.age");
@@ -154,7 +154,7 @@ fn export_never_overwrites_an_existing_file() {
 fn import_previews_summary_and_discards_on_password_change() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     // 造一份真实备份：经 UI 导出当前根（0 订阅）。
     open_backup(&mut app);
     let backup_file = temp_target("import-source.zip.age");
@@ -218,7 +218,7 @@ fn confirmed_restore_marks_pending_blocks_writes_and_requires_restart() {
     let server = TestServer::new(vec![TestRoute::ok("/a.yaml", YAML)]);
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::open_subscriptions(&mut app);
 
     // 订阅页新增并自动刷新成功（2 节点）。
     app.type_text("id:subscription-name", "备份订阅").unwrap();
@@ -241,8 +241,9 @@ fn confirmed_restore_marks_pending_blocks_writes_and_requires_restart() {
     // 删除订阅（确认对话框）。
     app.press("订阅").unwrap();
     app.wait_for("备份订阅").unwrap();
-    app.press("id:subscription-row-备份订阅 >> text:删除")
+    app.press("id:subscription-row-备份订阅 >> text:更多")
         .unwrap();
+    app.press("id:subscription-delete").unwrap();
     app.wait_for("删除订阅“备份订阅”？").unwrap();
     app.press("确认删除").unwrap();
     app.wait_for("尚无订阅。").unwrap();
@@ -291,8 +292,7 @@ fn confirmed_restore_marks_pending_blocks_writes_and_requires_restart() {
     );
 
     // 业务写被拒（订阅新增）：真实错误上屏。
-    app.press("订阅").unwrap();
-    app.wait_for("尚无订阅。").unwrap();
+    common::open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "拒绝新增").unwrap();
     app.type_text("id:subscription-url", &server.url("/a.yaml"))
         .unwrap();
@@ -313,7 +313,7 @@ fn startup_restored_notice_shows_summary_and_acknowledge_clears_it() {
     let (dir, entries) = data_root();
     {
         let mut app = start_app(entries.clone()).0;
-        app.wait_for("尚无订阅。").unwrap();
+        common::wait_ready(&mut app);
     }
     // 直接在盘上构造“上次启动已应用恢复”的状态（与启动事务同一共享函数）。
     stage_applied_restore(dir.path());
@@ -338,7 +338,7 @@ fn startup_failed_restore_shows_the_real_error_banner() {
     let (dir, entries) = data_root();
     {
         let mut app = start_app(entries.clone()).0;
-        app.wait_for("尚无订阅。").unwrap();
+        common::wait_ready(&mut app);
     }
     std::fs::write(
         dir.path().join(".backup-failed"),

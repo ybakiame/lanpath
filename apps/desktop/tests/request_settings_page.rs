@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.0）：请求设置页的模式
+//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：请求设置页的模式
 //! 选择、自定义代理与 GitHub 前缀保存/重开、非法输入脱敏、重置恢复，
 //! 以及两条真实联网路径：页面保存 Custom 后经订阅刷新验证请求确实走
 //! 新代理（本线程 127.0.0.1 HTTP server 以绝对形式收到请求）；Core 模式
@@ -24,7 +24,7 @@ fn open_request_settings(app: &mut nsh_testing::Headless) {
 fn navigating_to_the_request_settings_page_shows_modes_and_scope_notes() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
     let seen = texts(&app);
     for expected in [
@@ -48,7 +48,7 @@ fn navigating_to_the_request_settings_page_shows_modes_and_scope_notes() {
 fn fresh_root_defaults_to_direct_and_never_writes_config_on_read() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     let app_toml = dir.path().join("app.toml");
     assert!(app_toml.is_file(), "数据根初始化必须已建 app.toml");
     let before = std::fs::read(&app_toml).unwrap();
@@ -73,7 +73,7 @@ fn fresh_root_defaults_to_direct_and_never_writes_config_on_read() {
 fn saving_custom_mode_with_url_and_prefix_persists_and_reopens() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
 
     app.press("id:request-mode-custom").unwrap();
@@ -130,7 +130,7 @@ fn saving_custom_mode_with_url_and_prefix_persists_and_reopens() {
 fn switching_modes_keeps_the_custom_url_draft() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
 
     app.press("id:request-mode-custom").unwrap();
@@ -160,7 +160,7 @@ fn switching_modes_keeps_the_custom_url_draft() {
 fn invalid_custom_proxy_shows_a_redacted_error_and_keeps_the_draft() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     let app_toml = dir.path().join("app.toml");
     let before = std::fs::read(&app_toml).unwrap();
     open_request_settings(&mut app);
@@ -199,7 +199,7 @@ fn invalid_custom_proxy_shows_a_redacted_error_and_keeps_the_draft() {
 fn resetting_a_dirty_draft_asks_and_restores_the_saved_values() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
     // 先保存一份“跟随系统”为基线。
     app.press("id:request-mode-system").unwrap();
@@ -243,7 +243,7 @@ fn subscription_refresh_goes_through_the_ui_saved_custom_proxy() {
     let proxy = TestServer::new(vec![TestRoute::ok(proxied_path, YAML)]);
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
     app.press("id:request-mode-custom").unwrap();
     app.type_text("id:request-custom-url", &proxy.url(""))
@@ -252,8 +252,7 @@ fn subscription_refresh_goes_through_the_ui_saved_custom_proxy() {
     app.wait_for_within("text:/请求设置已保存/", Duration::from_secs(10))
         .unwrap();
 
-    app.press("订阅").unwrap();
-    app.wait_for("尚无订阅。").unwrap();
+    common::open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "代理订阅").unwrap();
     app.type_text("id:subscription-url", "http://192.0.2.99/proxied.yaml")
         .unwrap();
@@ -276,7 +275,7 @@ fn core_mode_refresh_fails_for_real_when_the_core_is_not_running() {
     // 先初始化数据根（写归属标记），再预置 mixed_port 指向本机闲置端口。
     {
         let mut first = start_app(entries.clone()).0;
-        first.wait_for("尚无订阅。").unwrap();
+        common::wait_ready(&mut first);
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let idle_port = listener.local_addr().unwrap().port();
@@ -286,7 +285,7 @@ fn core_mode_refresh_fails_for_real_when_the_core_is_not_running() {
     config.save().unwrap();
 
     let mut app = start_app(entries).0;
-    app.wait_for("尚无订阅。").unwrap();
+    common::wait_ready(&mut app);
     open_request_settings(&mut app);
     app.press("id:request-mode-core").unwrap();
     app.press("保存").unwrap();
@@ -299,8 +298,7 @@ fn core_mode_refresh_fails_for_real_when_the_core_is_not_running() {
     );
     assert_eq!(saved.mixed_port, idle_port);
 
-    app.press("订阅").unwrap();
-    app.wait_for("尚无订阅。").unwrap();
+    common::open_subscriptions(&mut app);
     app.type_text("id:subscription-name", "核心负例").unwrap();
     app.type_text("id:subscription-url", "https://example.com/core.yaml")
         .unwrap();

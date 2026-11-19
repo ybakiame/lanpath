@@ -19,8 +19,11 @@ devenv.local.nix
 devenv.local.yaml
 /.android/
 /local.properties
+apps/desktop/local.properties
 .direnv/
 .reference/
 
 **/.kotlin/
 **/.nsh/
+
+.work/

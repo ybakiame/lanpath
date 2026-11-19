@@ -32,8 +32,12 @@ fn saving_preference_preserves_unrelated_fields() {
     config.request_proxy_mode = RequestProxyMode::Custom;
     config.request_proxy_url = "http://127.0.0.1:8899".into();
     config.mitm_enabled = true;
-    config.core_binary = std::path::PathBuf::from("/tmp/not-a-real-core");
+    config.core_binary = root.path().join("not-a-real-core");
     config.save().expect("save unrelated fields");
+    // 以落盘后重新读取的规范值为基线：Windows 会把路径规范化为
+    // `\\?\C:\...`，不能拿原始字符串比较。
+    let before =
+        crate::request_settings::load_request_config(root.path()).expect("reload baseline");
 
     save_preference(&root, true).expect("save preference");
 
@@ -45,10 +49,7 @@ fn saving_preference_preserves_unrelated_fields() {
     assert_eq!(merged.request_proxy_mode, RequestProxyMode::Custom);
     assert_eq!(merged.request_proxy_url, "http://127.0.0.1:8899");
     assert!(merged.mitm_enabled);
-    assert_eq!(
-        merged.core_binary,
-        std::path::PathBuf::from("/tmp/not-a-real-core")
-    );
+    assert_eq!(merged.core_binary, before.core_binary);
 }
 
 #[test]

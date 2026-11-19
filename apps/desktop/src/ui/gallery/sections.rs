@@ -69,6 +69,14 @@ pub(super) fn buttons_section() -> AnyElement {
                         ),
                     )
                     .child(
+                        view().test_id("prefix-loading-button").child(
+                            button::button(button::ButtonVariant::Secondary)
+                                .label(|| t!("gallery.action.press_me"))
+                                .loading(move || loading.get())
+                                .prefix(|| text("◆").text_size(px(13.0)).into_element()),
+                        ),
+                    )
+                    .child(
                         button::button(button::ButtonVariant::Outline)
                             .label(move || t!("gallery.state.disabled"))
                             .disabled(move || disabled.get()),
@@ -184,11 +192,14 @@ pub(super) fn selection_section() -> AnyElement {
                             prefs::LanguagePref::En => Some(SharedString::from("en")),
                         },
                         move |chosen| {
-                            prefs::prefs().apply_language(match chosen.as_deref() {
+                            let result = prefs::prefs().apply_language(match chosen.as_deref() {
                                 Some("zh-CN") => prefs::LanguagePref::ZhCn,
                                 Some("en") => prefs::LanguagePref::En,
                                 _ => prefs::LanguagePref::System,
                             });
+                            if result.is_err() {
+                                feedback::show_toast(t!("appearance.save_failed"));
+                            }
                         },
                     ))
                     .child(select::switch(switched, move |next| switched.set(next)))

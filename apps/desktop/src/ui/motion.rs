@@ -1,4 +1,4 @@
-//! 动效 token（DESIGN.md 7）：时长 instant/fast/base/slow/slower、距离
+//! 动效 token：时长 instant/fast/base/slow/slower、距离
 //! 4/8/16pt、press 缩放 0.97（按钮）/0.95（图标按钮）。组件层一律经
 //! [`motion_duration`] 取时长——用户或系统要求减少动效（平台
 //! `reduce_motion()` 或本应用偏好）时返回 0，过渡立即可读。
