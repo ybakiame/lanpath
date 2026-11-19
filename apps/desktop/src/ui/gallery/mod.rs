@@ -1,8 +1,7 @@
-//! 组件画廊：仅开发验收（`--ui-gallery` 启动，普通用户导航没有
-//! 入口）。覆盖各 variant/size、交互状态、主题、明暗、语言与
-//! reduced motion；在系统缩放（75–150%）场景下同样可读可用。NSH
-//! 0.5.1 无应用级缩放 API，画廊不提供、也不声称有应用内缩放控件。
-//! 供 Windows UIA 与截图验收。分区内容在 `sections.rs`。
+//! Development-only component gallery, opened with --ui-gallery.
+//! Covers shared variants, states, themes, languages and reduced motion.
+//! System text scaling is reflected without an application-level override.
+//! Sections live in sections.rs; Windows UIA and screenshots verify the result.
 
 mod sections;
 
@@ -30,6 +29,7 @@ pub fn gallery_view() -> impl IntoElement {
         .flex_col()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
+        .child(super::title_bar::title_bar())
         .child(
             scroll().flex_1().child(
                 view()

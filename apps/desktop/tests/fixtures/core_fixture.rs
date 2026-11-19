@@ -247,9 +247,13 @@ fn spawn_listener(host: &str, port: u16, http: bool, delay_ms: u64) {
                 let mut buffer = [0_u8; 4096];
                 let _ = stream.read(&mut buffer);
                 let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"version\":\"fixture\"}",
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 21\r\nConnection: close\r\n\r\n{\"version\":\"fixture\"}",
                 );
             }
+            // Let the probing client close first. An eager server close leaves
+            // the fixture's fixed port in TIME_WAIT and makes restart tests race.
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+            let _ = stream.read(&mut [0_u8; 1]);
         }
     });
 }

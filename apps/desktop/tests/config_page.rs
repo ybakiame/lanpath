@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：配置页共享合成预览。
+//! Headless 测试（`nsh_testing::Headless`）：配置页共享合成预览。
 //! 每个场景使用独立临时数据根（见 `common::data_root`）；联网用例经
 //! `common::TestServer` 本地真实 HTTP 服务器（含自定义代理的绝对形式请求），
 //! 不依赖互联网。

@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：请求设置页的模式
+//! Headless 测试（`nsh_testing::Headless`）：请求设置页的模式
 //! 选择、自定义代理与 GitHub 前缀保存/重开、非法输入脱敏、重置恢复，
 //! 以及两条真实联网路径：页面保存 Custom 后经订阅刷新验证请求确实走
 //! 新代理（本线程 127.0.0.1 HTTP server 以绝对形式收到请求）；Core 模式

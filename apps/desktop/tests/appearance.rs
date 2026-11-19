@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：侧栏导航、外观页
+//! Headless 测试（`nsh_testing::Headless`）：侧栏导航、外观页
 //! 多主题/模式/语言/动效的真实切换、持久化与恢复、语言切换不重建
 //! 业务状态。每个场景使用独立临时数据根（界面语言预置 zh-CN）。
 

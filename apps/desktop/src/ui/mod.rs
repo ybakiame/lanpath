@@ -26,6 +26,7 @@ pub mod prefs;
 pub mod select;
 pub mod theme;
 pub mod theme_preview;
+pub mod title_bar;
 
 pub use button::{ButtonSize, ButtonVariant, IconButton, button, icon_button};
 pub use data::table;

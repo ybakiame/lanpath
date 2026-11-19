@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：日志页真实内存/磁盘
+//! Headless 测试（`nsh_testing::Headless`）：日志页真实内存/磁盘
 //! 分区、级别筛选、暂停/刷新、详情、清空确认与导出。采集走真实 tracing
 //! 路径（`lanpath_*` target 经全局采集层进入本应用数据根的缓冲与磁盘）；
 //! 导出经 NSH 原生保存对话框（headless 注入选定路径）。
@@ -350,4 +350,53 @@ fn subscription_actions_are_captured_before_the_first_logs_page_visit() {
     app.press("日志").unwrap();
     app.wait_for("text:/新增订阅：启动采集验证/").unwrap();
     assert!(!texts(&app).iter().any(|text| text.contains("private.yaml")));
+}
+
+/// Switching logs updates the editor; empty files and failures clear the previous document.
+#[test]
+fn disk_editor_switches_files_and_clears_stale_content() {
+    let (dir, mut app) = open_logs_page();
+    let logs = dir.path().join("logs");
+    std::fs::write(
+        logs.join("app.log.first"),
+        "first-log-visible\n第二行日志\n",
+    )
+    .unwrap();
+    std::fs::write(logs.join("app.log.second"), "second-log-visible\n").unwrap();
+    std::fs::write(logs.join("app.log.empty"), "").unwrap();
+    app.press("磁盘日志").unwrap();
+    app.wait_for("id:logs-disk-status").unwrap();
+    app.press("app.log.first").unwrap();
+    app.wait_for("text:/first-log-visible/").unwrap();
+    let nodes = app.screen().layout_nodes();
+    let editor = nodes
+        .iter()
+        .find(|n| n.test_id.as_deref() == Some("disk-log-tail"))
+        .unwrap();
+    assert!(editor.bounds.size.height.0 > 200.0, "{editor:?}");
+    assert!(editor.bounds.size.width.0 > 200.0, "{editor:?}");
+    app.press("app.log.second").unwrap();
+    app.wait_for("text:/second-log-visible/").unwrap();
+    assert!(
+        !texts(&app)
+            .iter()
+            .any(|text| text.contains("first-log-visible"))
+    );
+    app.press("app.log.empty").unwrap();
+    app.wait_for("文件为空或尚未选择日志文件").unwrap();
+    assert!(
+        !texts(&app)
+            .iter()
+            .any(|text| text.contains("second-log-visible"))
+    );
+    app.press("app.log.first").unwrap();
+    app.wait_for("text:/first-log-visible/").unwrap();
+    std::fs::remove_file(logs.join("app.log.second")).unwrap();
+    app.press("app.log.second").unwrap();
+    app.wait_for("text:/文件可能已删除/").unwrap();
+    assert!(
+        !texts(&app)
+            .iter()
+            .any(|text| text.contains("first-log-visible"))
+    );
 }

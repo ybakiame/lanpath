@@ -176,6 +176,7 @@ pub fn App() -> impl IntoElement {
         .flex_col()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
+        .child(ui::title_bar::title_bar())
         .child(ui::feedback::toast_host())
         .child(when(
             move || failure_state.get().is_some(),
@@ -316,45 +317,52 @@ fn startup_failure(error: Signal<Option<String>>) -> impl IntoElement {
 }
 
 fn sidebar(page: Signal<Page>) -> impl IntoElement {
-    scroll().w(px(216.0)).flex_none().child(
-        view()
-            .w_full()
-            .flex_none()
-            .flex_col()
-            .p_4()
-            .gap_2()
-            .bg(move || theme().sidebar)
-            .border_r(px(1.0))
-            .border_color(move || theme().sidebar_border)
-            .text_color(move || theme().sidebar_foreground)
-            .child(
-                text(|| t!("app.title"))
-                    .text_size(px(17.0))
-                    .font_weight(FontWeight::MEDIUM),
-            )
-            .child(
-                text(|| t!("app.tagline"))
-                    .text_size(px(12.0))
-                    .text_color(move || theme().muted_foreground),
-            )
-            .child(ui::layout::separator())
-            // 导航分组：只列入本切片真实实现的页面入口。
-            .child(nav_group("nav.group.workspace"))
-            .child(nav_item(page, Page::Overview))
-            .child(nav_item(page, Page::Subscription))
-            .child(nav_group("nav.group.core_config"))
-            .child(nav_item(page, Page::Core))
-            .child(nav_item(page, Page::Profiles))
-            .child(nav_item(page, Page::RequestSettings))
-            .child(nav_item(page, Page::Config))
-            .child(nav_item(page, Page::Rules))
-            .child(nav_group("nav.group.tools"))
-            .child(nav_item(page, Page::Diagnostics))
-            .child(nav_item(page, Page::Logs))
-            .child(nav_item(page, Page::Backup))
-            .child(nav_group("nav.group.settings"))
-            .child(nav_item(page, Page::Appearance)),
-    )
+    view()
+        .w(px(216.0))
+        .flex_none()
+        .min_h(px(0.0))
+        .test_id("app-sidebar")
+        .bg(move || theme().sidebar)
+        .border_r(px(1.0))
+        .border_color(move || theme().sidebar_border)
+        .child(
+            scroll().flex_1().min_h(px(0.0)).child(
+                view()
+                    .w_full()
+                    .flex_none()
+                    .flex_col()
+                    .p_4()
+                    .gap_2()
+                    .text_color(move || theme().sidebar_foreground)
+                    .child(
+                        text(|| t!("app.title"))
+                            .text_size(px(17.0))
+                            .font_weight(FontWeight::MEDIUM),
+                    )
+                    .child(
+                        text(|| t!("app.tagline"))
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground),
+                    )
+                    .child(ui::layout::separator())
+                    // 导航分组：只列入本切片真实实现的页面入口。
+                    .child(nav_group("nav.group.workspace"))
+                    .child(nav_item(page, Page::Overview))
+                    .child(nav_item(page, Page::Subscription))
+                    .child(nav_group("nav.group.core_config"))
+                    .child(nav_item(page, Page::Core))
+                    .child(nav_item(page, Page::Profiles))
+                    .child(nav_item(page, Page::RequestSettings))
+                    .child(nav_item(page, Page::Config))
+                    .child(nav_item(page, Page::Rules))
+                    .child(nav_group("nav.group.tools"))
+                    .child(nav_item(page, Page::Diagnostics))
+                    .child(nav_item(page, Page::Logs))
+                    .child(nav_item(page, Page::Backup))
+                    .child(nav_group("nav.group.settings"))
+                    .child(nav_item(page, Page::Appearance)),
+            ),
+        )
 }
 
 /// 分组标签（静态展示，本切片不做折叠交互）。

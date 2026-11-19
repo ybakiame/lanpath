@@ -1,6 +1,6 @@
 # Lanpath NSH Desktop
 
-`apps/desktop` 是当前 NSH Windows 桌面实验目标（Rust、NSH 0.5.1），
+`apps/desktop` 是当前 NSH Windows 桌面实验目标（Rust、NSH 0.6.0），
 程序名 `lanpath-desktop-nsh.exe`，应用身份 `com.ybakiame.lanpath.desktop.nsh`。
 与 Tauri、GPUI 和最小 NSH 验证应用独立，不读取或迁移它们的数据。
 
@@ -55,6 +55,8 @@ Linux 使用 `$XDG_DATA_HOME/lanpath-desktop-nsh` 或
 
 ## 当前功能
 
+Windows 使用带内嵌应用图标的自定义标题栏；窗口按钮、双击最大化、拖动与贴靠沿用系统行为。磁盘日志以只读编辑器展示，可滚动、选择和复制正文。
+
 - 概览、订阅与核心：添加/刷新订阅，选择当前订阅，双核心库存与真实配置校验、启停。
 - 规则：六类常用匹配、快速表单、批量简写、筛选、编辑、启停、排序和删除；重启核心生效。
 - 诊断：系统 DNS、直连 TCP、已保存 DNS 上游、mixed/Clash 检查及本地规则预估。
@@ -63,6 +65,6 @@ Linux 使用 `$XDG_DATA_HOME/lanpath-desktop-nsh` 或
 
 核心仅运行用户态 loopback mixed 和 Clash API；Windows 系统代理经独立普通权限
 守护接管/恢复。没有 TUN/VPN 或 MITM，未完成生产切换与发布。部分既有页面
-尚未完成英文翻译，NSH 0.5.1 Windows 的完整 Tab 导航仍有限制。
+尚未完成英文翻译，完整键盘与屏幕阅读器体验仍在完善。
 
 开发方案、设计稿、验收记录及历史工作日志统一放在本地 `.work/`。

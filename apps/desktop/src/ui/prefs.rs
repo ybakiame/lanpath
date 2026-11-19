@@ -1,13 +1,8 @@
-//! 外观偏好：主题、外观模式、界面语言、动效——统一持久化到 NSH
-//! storage 并经信号驱动运行时切换（`set_tokens` / `set_color_scheme` /
-//! `set_locale`），切换不重建组件树与业务运行状态。
-//! 界面缩放是明确的不支持项：NSH 0.5.1 的 `font_scale` 仅平台可读，
-//! 没有应用级覆盖 API，因此不提供存而不生效的缩放选项（见
-//! `appearance.scale_note` 与 README）。
-//!
-//! 持久化边界：`Storage::set_item` 同步报告配额拒绝；平台后端把已接受的
-//! 变更异步写入磁盘，后端写失败由宿主记录，应用侧不可观测。因此本模块
-//! 只承诺“已接受并立即生效”，不把同步返回当作磁盘持久化证明。
+//! Appearance preferences persisted through NSH storage and reactive bindings.
+//! Applying tokens, color scheme or locale preserves the component tree and business state.
+//! Text scale follows the platform; the app offers no ineffective scale override.
+//! Storage reports synchronous acceptance, while the host owns asynchronous disk writes.
+//! An accepted write is not evidence that the host has flushed it to disk.
 
 use nsh_core::i18n::set_locale;
 use nsh_core::platform::Locale;

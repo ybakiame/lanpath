@@ -43,7 +43,7 @@ apps/nsh 为 Rust NSH 实验性目标，支持 sing-box 与 Mihomo(仅运行) �
 实验阶段仅支持便携安装模式，方便数据隔离与测试。
 Android 后续仍复用 Kotlin VpnService 与 Go/libbox。
 
-apps/desktop(nsh) 为 `nsh-validation` 分支上的 NSH Windows 迁移目标：纯 Rust NSH 0.5.1、独立 Cargo
+apps/desktop(nsh) 为 `nsh-validation` 分支上的 NSH Windows 迁移目标：纯 Rust NSH 0.6.0、独立 Cargo
 项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移 Tauri/GPUI/apps/nsh 数据；
 核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback）。Windows 系统代理经本任务授权的
 独立普通权限同映像守护精确接管/恢复（owner 为本数据根 UUID，GUI 侧绝不直写注册表；接管失败

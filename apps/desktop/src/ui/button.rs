@@ -26,8 +26,7 @@ pub enum ButtonVariant {
     Destructive,
 }
 
-/// 按钮尺寸。`Content` 为内容
-/// 自适应高度（卡片式前缀槽等复合内容使用，不裁剪子内容）。
+/// Button sizes; Content fits compound content without a fixed height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonSize {
     Sm,
@@ -161,7 +160,6 @@ pub struct Button {
     full_width: bool,
 }
 
-/// 一个语义按钮。
 pub fn button(variant: ButtonVariant) -> Button {
     Button {
         variant,
@@ -280,6 +278,7 @@ impl IntoElement for Button {
         }
         let mut el = el
             .px(px(size.pad_x()))
+            .justify_center()
             .items_center()
             .gap_2()
             .rounded(move || theme().radius)
@@ -326,7 +325,8 @@ impl IntoElement for Button {
 
         let loading_for_content = loading.clone();
         let prefix = self.prefix;
-        let leading: AnyElement = when(
+        let has_leading = prefix.is_some() || loading.is_some();
+        let leading = when(
             move || loading_for_content.as_ref().as_ref().is_some_and(|f| f()),
             || {
                 view()
@@ -334,14 +334,15 @@ impl IntoElement for Button {
                     .child(super::feedback::spinner())
                     .into_element()
             },
-        )
-        .otherwise(move || {
-            prefix
-                .as_ref()
-                .map_or_else(|| view().into_element(), |build| build())
-        })
-        .into_element();
-        let mut children: Vec<AnyElement> = vec![leading];
+        );
+        let leading = match prefix {
+            Some(build) => leading.otherwise(move || build()).into_element(),
+            None => leading.into_element(),
+        };
+        let mut children: Vec<AnyElement> = Vec::new();
+        if has_leading {
+            children.push(leading);
+        }
         if let Some(label) = self.label {
             children.push(
                 text(label)
@@ -350,13 +351,12 @@ impl IntoElement for Button {
                     .into_element(),
             );
         }
-        // test_id 挂在按钮内部的内容锚点上：测试/自动化按 id 解析后向上
-        // 即找到 Press 处理器（挂在按钮外层的 id 不在按压目标的祖先链上，
-        // 裸 id 按压会失败）。
+        // Keep the content anchor inside the button so test presses reach its handler.
         let content: AnyElement = view()
             .flex_row()
             .items_center()
             .gap_2()
+            .when(!full_width, |content| content.justify_center())
             .when(full_width, |content| content.w_full())
             .children(children)
             .into_element();
@@ -379,7 +379,6 @@ pub struct IconButton {
     accessibility_label: Option<Box<dyn Fn() -> SharedString>>,
 }
 
-/// 一个图标按钮。
 pub fn icon_button() -> IconButton {
     IconButton {
         size: 32.0,

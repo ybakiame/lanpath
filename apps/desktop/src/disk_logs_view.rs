@@ -40,12 +40,18 @@ impl DiskState {
                 self.files.set(names);
                 self.read_tail();
             }
-            Err(error) => self.error.set(Some(format!("读取日志目录失败:{error}"))),
+            Err(error) => {
+                self.files.set(Vec::new());
+                self.selected.set(None);
+                self.tail.set(String::new());
+                self.error.set(Some(format!("读取日志目录失败:{error}")));
+            }
         }
     }
 
     fn read_tail(&self) {
         self.error.set(None);
+        self.tail.set(String::new());
         let Some(name) = self.selected.get() else {
             self.tail.set(String::new());
             return;
@@ -134,24 +140,24 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
                 .flex_1()
                 .flex_row()
                 .gap_2()
-                .min_h(px(120.0))
-                .child(view().w(px(200.0)).flex_none().child(scroll().child(
-                    view().flex_col().gap_1().child(each(
-                        file_list.files,
-                        |name: &String| name.clone(),
-                        move |name, _index| disk_file_row(file_list.clone(), name),
-                    )),
-                )))
+                .min_h(px(0.0))
+                .test_id("disk-log-split")
                 .child(
-                    scroll().flex_1().min_w(px(0.0)).child(
-                        view().p_2().child(
-                            text(move || tail.tail.get().clone())
-                                .test_id("disk-log-tail")
-                                .selectable(true)
-                                .text_size(px(12.0)),
+                    view()
+                        .w(px(200.0))
+                        .flex_none()
+                        .min_h(px(0.0))
+                        .child(
+                            scroll()
+                                .flex_1()
+                                .child(view().flex_col().gap_1().child(each(
+                                    file_list.files,
+                                    |name: &String| name.clone(),
+                                    move |name, _index| disk_file_row(file_list.clone(), name),
+                                ))),
                         ),
-                    ),
-                ),
+                )
+                .child(crate::ui::data::log_viewer(tail.tail)),
         )
         .child(when(
             move || tail.exported.get().is_some(),

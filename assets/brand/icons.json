@@ -1,0 +1,8 @@
+{
+  "default": "lanpath.svg",
+  "bg_color": "#292D63",
+  "android_bg": "lanpath-background.svg",
+  "android_fg": "lanpath-mark.svg",
+  "android_fg_scale": 100,
+  "android_monochrome": "lanpath-mark.svg"
+}

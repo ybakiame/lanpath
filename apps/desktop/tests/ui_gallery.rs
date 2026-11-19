@@ -1,4 +1,4 @@
-//! Headless 画廊测试（`nsh_testing::Headless`，NSH 0.5.1）：仅开发验收
+//! Headless 画廊测试（`nsh_testing::Headless`）：仅开发验收
 //! 的组件画廊（`--ui-gallery` 同一根构建链）——分区完整性、交互状态、
 //! 确认对话框、reduced motion 渲染与主题预览。
 

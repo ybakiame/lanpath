@@ -18,8 +18,21 @@ pub fn select(
     base_select()
         .items(items)
         .value(move || nsh_base::SelectValue::from(value()))
+        .offset(px(4.0))
+        .item_class("rounded-md focus:bg-accent focus:text-accent-foreground selected:bg-secondary selected:text-secondary-foreground disabled:opacity-50")
+        .render_item(|item: &nsh_base::SelectEntry| {
+            view().h(px(32.0)).flex_row().items_center().px(px(8.0))
+                .child(text(item.title.clone()).text_size(px(14.0)))
+        })
         .trigger(
             view()
+                .w_full()
+                .h(px(40.0))
+                .px(px(12.0))
+                .rounded(move || theme().radius)
+                .border(px(1.0))
+                .border_color(move || theme().input)
+                .bg(move || theme().background)
                 .flex_row()
                 .items_center()
                 .justify_between()
@@ -35,16 +48,10 @@ pub fn select(
                 .child(text("▾")),
         )
         .min_w(px(160.0))
-        .h(px(40.0))
-        .px(px(12.0))
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().input)
-        .bg(move || theme().background)
         .text_color(move || theme().foreground)
         .text_size(px(14.0))
         .popup_style(move |s| {
-            s.rounded(move || theme().radius)
+            s.p(px(4.0)).rounded(move || theme().radius)
                 .border(px(1.0))
                 .border_color(move || theme().border)
                 .bg(move || theme().popover)
@@ -207,10 +214,10 @@ pub fn checkbox(
         .into_element()
 }
 
-/// 单选组：一个键盘焦点站，方向键在选项间移动并选择。分组名由所在
-/// 分区的可见标题承担（NSH 0.5.1 的 RadioGroup 未提供标签 prop）。
-pub fn radio_group(children: impl IntoElement) -> AnyElement {
+/// A named radio group with one Tab stop and arrow-key selection.
+pub fn radio_group(label: impl Fn() -> String + 'static, children: impl IntoElement) -> AnyElement {
     base_radio_group()
+        .accessibility_label(move || Some(SharedString::from(label())))
         .flex_col()
         .gap_2()
         .child(children)

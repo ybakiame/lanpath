@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：核心页（核心库存与
+//! Headless 测试（`nsh_testing::Headless`）：核心页（核心库存与
 //! 下载/选择）。真实联网场景经本线程 127.0.0.1 HTTP 服务器（release metadata
 //! JSON 回指本服务器资产 + 真实 tar.gz 归档），不依赖互联网；Unix 用脚本
 //! 核心做真实 version probe，Windows 原生验收由主代理执行。每个场景独立

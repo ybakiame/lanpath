@@ -196,13 +196,13 @@ appearance.language.en: English
 appearance.motion.system: 跟随系统
 appearance.motion.reduce: 减少动效
 appearance.theme.default_mark: 默认
-appearance.scale_note: 界面缩放跟随系统文本缩放（当前 %{percent}%）；NSH 0.5.1 不提供应用级缩放覆盖，不在此提供不生效的选项
+appearance.scale_note: 界面文本缩放跟随系统（当前 %{percent}%）
 appearance.hover_preview: 指向主题可预览，点击应用并保存
 appearance.previewing: 正在预览：%{name}；点击应用并保存
 appearance.theme.a11y: 主题：%{name}
 appearance.save_failed: 外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。
 appearance.section.material: 窗口材质与不透明度
-appearance.material_note: NSH 0.5.1 的主窗口材质（backdrop）仅为启动配置，应用内没有运行时切换窗口材质或窗口不透明度的 API；此处不提供存而不生效的选项
+appearance.material_note: 当前使用不透明窗口，可在上方切换主题与明暗模式
 
 gallery.title: 组件画廊
 gallery.subtitle: 仅开发验收使用（--ui-gallery）· 普通用户导航没有此入口

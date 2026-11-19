@@ -1,4 +1,4 @@
-//! Headless 测试共用 harness（`nsh_testing::Headless`，NSH 0.5.1）：
+//! Headless 测试共用 harness（`nsh_testing::Headless`）：
 //! 内存 storage 后端（预置条目、可回放写入）、桌面视口启动、
 //! 每场景独立的临时数据根，以及本线程内的最小 HTTP 测试服务器
 //! （订阅刷新用例真实联网，不依赖互联网）。

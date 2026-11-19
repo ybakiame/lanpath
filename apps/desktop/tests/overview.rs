@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：概览默认首页、
+//! Headless 测试（`nsh_testing::Headless`）：概览默认首页、
 //! 未配置步骤只高亮当前可执行步、真实订阅/核心摘要与全局状态栏共享、
 //! 跨页启动/停止任务存活且状态一致、概览操作导航到现有页。
 //! 每个场景使用独立临时数据根（见 `common::data_root`）；运行时用例使用

@@ -196,13 +196,13 @@ appearance.language.en: English
 appearance.motion.system: System
 appearance.motion.reduce: Reduce motion
 appearance.theme.default_mark: Default
-appearance.scale_note: UI scale follows the system text scale (now %{percent}%); NSH 0.5.1 has no app-level scale override, so no non-functional option is offered here
+appearance.scale_note: UI text follows the system scale (currently %{percent}%)
 appearance.hover_preview: Point at a theme to preview; click to apply and save
 appearance.previewing: "Previewing: %{name}. Click to apply and save."
 appearance.theme.a11y: "Theme: %{name}"
 appearance.save_failed: Couldn't save the appearance setting; the previous value is still active. Free some app storage and try again.
 appearance.section.material: Window Material & Opacity
-appearance.material_note: In NSH 0.5.1 the main window's material (backdrop) is a launch-time configuration only; there is no runtime API to switch window material or window opacity, so no non-functional options are offered here
+appearance.material_note: The window uses an opaque surface. Choose its theme and appearance above
 
 gallery.title: Component Gallery
 gallery.subtitle: Development acceptance only (--ui-gallery) · no entry in normal user navigation

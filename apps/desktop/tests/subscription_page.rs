@@ -1,4 +1,4 @@
-//! Headless 测试（`nsh_testing::Headless`，NSH 0.5.1）：订阅页真实列表与持久化。
+//! Headless 测试（`nsh_testing::Headless`）：订阅页真实列表与持久化。
 //! 每个场景使用独立临时数据根（见 `common::data_root`）；刷新用例经
 //! `common::TestServer` 本地真实 HTTP 服务器联网，不依赖互联网。
 

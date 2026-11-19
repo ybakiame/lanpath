@@ -1,6 +1,5 @@
-//! 外观设置页（阶段 0 重构）：13 主题网格（4 列，点击应用并保存）、
-//! 外观模式、界面语言、动效偏好。界面缩放为诚实的不支持项——NSH
-//! 0.5.1 的 `font_scale` 仅平台可读，此处只展示当前系统文本缩放。
+//! Appearance settings: theme previews, mode, language and reduced motion.
+//! Text size follows the platform scale.
 
 use nsh_base::theme;
 use nsh_core::element::desktop::main_window;
@@ -178,22 +177,25 @@ fn mode_section() -> AnyElement {
         .flex_col()
         .gap_2()
         .child(layout::section_title(|| t!("appearance.section.mode")))
-        .child(select::radio_group(view().test_id("mode-group").children(
-            prefs::Mode::ALL.iter().map(|target| {
-                let target = *target;
-                let test_id = match target {
-                    prefs::Mode::Light => "appearance-light",
-                    prefs::Mode::Dark => "appearance-dark",
-                    prefs::Mode::System => "appearance-system",
-                };
-                select::radio_row(
-                    move || mode.get() == target,
-                    move || t!(target.label_key()),
-                    test_id,
-                    move || finish_apply(prefs.apply_mode(target), error),
-                )
-            }),
-        )))
+        .child(select::radio_group(
+            || t!("appearance.section.mode"),
+            view()
+                .test_id("mode-group")
+                .children(prefs::Mode::ALL.iter().map(|target| {
+                    let target = *target;
+                    let test_id = match target {
+                        prefs::Mode::Light => "appearance-light",
+                        prefs::Mode::Dark => "appearance-dark",
+                        prefs::Mode::System => "appearance-system",
+                    };
+                    select::radio_row(
+                        move || mode.get() == target,
+                        move || t!(target.label_key()),
+                        test_id,
+                        move || finish_apply(prefs.apply_mode(target), error),
+                    )
+                })),
+        ))
         .child(
             text(move || error.get().unwrap_or_default())
                 .text_size(px(12.0))
@@ -211,6 +213,7 @@ fn language_section() -> AnyElement {
         .gap_2()
         .child(layout::section_title(|| t!("appearance.section.language")))
         .child(select::radio_group(
+            || t!("appearance.section.language"),
             view()
                 .test_id("language-group")
                 .children(prefs::LanguagePref::ALL.iter().map(|target| {
@@ -245,6 +248,7 @@ fn motion_section() -> AnyElement {
         .gap_2()
         .child(layout::section_title(|| t!("appearance.section.motion")))
         .child(select::radio_group(
+            || t!("appearance.section.motion"),
             view()
                 .test_id("motion-group")
                 .children(prefs::MotionPref::ALL.iter().map(|target| {
@@ -269,9 +273,7 @@ fn motion_section() -> AnyElement {
         .into_element()
 }
 
-/// 窗口材质/不透明度：NSH 0.5.1 的诚实边界（调查结论）。主窗口 backdrop
-/// 仅是 nsh.json 启动配置，应用内没有运行时切换窗口材质或窗口不透明度的
-/// API；与界面缩放一样只说明、不提供存而不生效的控件。
+/// Describe the current opaque surface; no material preference is offered yet.
 fn material_note_section() -> impl IntoElement {
     view()
         .flex_col()
