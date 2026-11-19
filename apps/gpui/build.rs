@@ -3,7 +3,7 @@ use std::{env, fs, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=product.json");
-    println!("cargo:rerun-if-changed=../client/src-tauri/icons/icon.ico");
+    println!("cargo:rerun-if-changed=../../assets/icons/icon.ico");
     println!("cargo:rerun-if-changed=app.manifest");
     let metadata: serde_json::Value = serde_json::from_str(&fs::read_to_string("product.json")?)?;
     let fields = [
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     if env::var("CARGO_CFG_TARGET_OS")? == "windows" {
         let mut resource = winres::WindowsResource::new();
-        resource.set_icon("../client/src-tauri/icons/icon.ico");
+        resource.set_icon("../../assets/icons/icon.ico");
         resource.set("LanpathManagedCoreSource", &managed_digest);
         // gpui-pre embeds manifest resource #1. Product packaging replaces that
         // single resource before hashing/signing; embedding another one here

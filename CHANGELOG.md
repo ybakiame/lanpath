@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Android 原生能力与 Go/libbox 绑定迁到独立 `mobile/` 目录；移除旧 Tauri client、前端 packages 及其依赖和发布入口。移动端暂为原生库，不提供 APK，后续宿主接入另行实现。
+
 - 新 NSH 桌面目标改用仓库公共 `assets/` 图标资源，不再依赖 client 包内的图标。
 
 - NSH 桌面版升级到 0.6.0，统一运行时与测试依赖，改善 Windows 窗口、输入和组件行为；规则下拉选项增加统一行高、居中及焦点/选中反馈。

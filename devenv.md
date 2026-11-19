@@ -32,7 +32,7 @@ exit
 非交互命令同样从仓库根执行：
 
 ```bash
-devenv shell -- lanpath-verify-frontend
+devenv shell -- cargo check --manifest-path apps/desktop/Cargo.toml
 devenv shell -- bash -c 'adb devices; go version; bun --version'
 ```
 
@@ -48,8 +48,8 @@ devenv shell -- bash -c 'adb devices; go version; bun --version'
 | Android 工具链 | JDK 17、cargo-ndk；Gradle 仅使用项目 wrapper，不安装全局 Gradle | 内置 `languages.java` 固定 JDK，其他工具来自固定 nixpkgs |
 | Rust | Nix 提供 rustup；Rust 版本、components 与 target 以 `rust-toolchain.toml` 为准 | rustup |
 | Go | 固定 nixpkgs 提供的 Go（当前 1.26.8；lanpathcore 要求 ≥1.25.5） | 固定 nixpkgs |
-| 前端 | Bun 1.4.2 官方归档与 SHA256 固定；Node.js；根 Bun workspace/锁文件管理依赖 | `nix/bun.nix` 与固定 nixpkgs |
-| 桌面 GUI 系统库 | webkit2gtk-4.1、gtk3、glib-networking、openssl、alsa-lib、xorg 等，供 Tauri host 链接与运行 | 固定 nixpkgs |
+| 工具脚本 | Bun 1.4.2 官方归档与 SHA256 固定；Node.js；根清单与锁文件仅管理仍使用的打包/提交工具 | `nix/bun.nix` 与固定 nixpkgs |
+| 桌面 GUI 系统库 | webkit2gtk-4.1、gtk3、glib-networking、openssl、alsa-lib、xorg 等，供 NSH/GPUI 的 Linux 图形、音频和可选 WebView/媒体能力使用 | 固定 nixpkgs |
 | 构建基础 | Python 3、pkg-config、cmake、ninja、perl、gnumake 等 | 固定 nixpkgs |
 
 SDK 组装与基本路径由 [devenv 内置 Android 集成](https://devenv.sh/integrations/android/) 管理，
@@ -83,6 +83,6 @@ devenv update nixpkgs
 
 `devenv update` 不带输入名会更新全部输入，不用于下载排错或顺带升级。固定 revision 不会因执行 update 自动变成新分支。Android 输入、SDK/NDK 组件、Bun 版本/摘要、`rust-toolchain.toml` 与 CLI 安装 revision 各有独立变更边界；更新 CLI 时也须同步本地与 CI/CD 的固定安装命令，不以项目输入更新替代 CLI 升级。
 
-更新后按影响范围核对锁定图和实际工具版本，再完成对应前端、Rust、Android/桌面及 CI/CD 验证；环境可进入不代表应用已构建或发布路径已验证。历史验证记录保留当时命令，不能作为 standalone 入口的新证据。
+更新后按影响范围核对锁定图和实际工具版本，再完成对应 Rust、Android/桌面及 CI/CD 验证；环境可进入不代表应用已构建或发布路径已验证。历史验证记录保留当时命令，不能作为 standalone 入口的新证据。
 
 上游参考：[输入与锁定](https://devenv.sh/inputs/)、[GitHub Actions 集成](https://devenv.sh/integrations/github-actions/)。

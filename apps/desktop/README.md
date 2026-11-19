@@ -2,7 +2,7 @@
 
 `apps/desktop` 是当前 NSH Windows 桌面实验目标（Rust、NSH 0.6.0），
 程序名 `lanpath-desktop-nsh.exe`，应用身份 `com.ybakiame.lanpath.desktop.nsh`。
-与 Tauri、GPUI 和最小 NSH 验证应用独立，不读取或迁移它们的数据。
+与 GPUI 及历史客户端的数据独立，不读取或迁移它们的数据。
 
 ## 运行
 

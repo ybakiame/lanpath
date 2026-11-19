@@ -15,7 +15,7 @@ impl gpui_kit::AssetSource for ProductAssets {
     fn load(&self, path: &str) -> gpui_kit::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         if path == "brand/lanpath.svg" {
             return Ok(Some(std::borrow::Cow::Borrowed(include_bytes!(
-                "../../client/public/brand/lanpath.svg"
+                "../../../assets/brand/lanpath.svg"
             ))));
         }
         gpui_kit::AssetSource::load(&gpui_kit::assets::AllAssets, path)

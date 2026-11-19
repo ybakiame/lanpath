@@ -2,32 +2,26 @@
 
 跨平台代理客户端：订阅、代理策略、DNS/规则、流量与日志诊断。
 
-Windows 提供 x64/arm64 安装版与 Portable；Android 提供 arm64 release 签名 APK（Android 13+）。
+当前桌面开发目标是 `apps/desktop`（Rust / NSH 0.6.0）；`apps/gpui` 保留为独立对照目标。共享业务位于 `crates/lanpath-*`，公共图标与规则目录位于 `assets/`。
 
 ## 开发
 
-本地构建、运行和资源生成统一使用本仓 standalone devenv（底层为 Nix）。先按 [环境指南](devenv.md) 安装固定的 devenv 2.4.0；Windows CI 原生工具链例外由维护者明确授权，版本锁定。
+Linux 本地构建统一使用本仓 standalone devenv（底层为 Nix）。安装固定版本的方式见 [环境指南](devenv.md)。Windows 桌面使用原生 Rust/MSVC/CMake 工具链。
 
-~~~bash
-devenv shell
-bun install --frozen-lockfile
-bun run --filter lanpath-app verify
-bun run verify:rust
-cd apps/client
-bun run tauri dev
-~~~
+```bash
+devenv shell -- cargo run --manifest-path apps/desktop/Cargo.toml
+```
 
-Android：先在 Nix 环境运行 bash apps/client/scripts/build-lanpath-core.sh，
-然后进入 apps/client 运行 bun run tauri android dev --target aarch64。
-前端热更新用于调试，不需要反复生成 APK。构建约定见 [AGENTS.md](AGENTS.md)。
+根 Bun 工具依赖只用于 GPUI 打包工具和提交检查，使用 `devenv shell -- bun install --frozen-lockfile` 安装。
 
-非交互命令从仓库根执行 `devenv shell -- COMMAND ...`；项目输入由 `devenv.yaml` 声明并仅由 `devenv.lock` 锁定。
+## 移动端
 
-首次 Android 安装采用新包名 com.ybakiame.lanpath，与旧包不能覆盖升级；不要先卸载旧包。
-桌面新安装使用 ~/.lanpath，已有旧数据且新目录不存在时沿用 ~/.proxy-panel-client。
-Windows/Linux 的 WebView 偏好和缓存使用该目录的 `webview` 子目录，旧 identifier 目录保留，不自动迁移。
+可复用的 Android 原生库和 Go/libbox 绑定位于 [mobile/](mobile/README.md)，已脱离旧客户端。当前不提供可安装 APK，后续移动端宿主与 VPN 接线尚未完成。
 
-Windows 提供 x64/arm64 Portable ZIP：完整解压后运行 `Lanpath.exe`，保留旁边的 `lanpath.portable` 标记，所有应用数据使用程序目录下的 `data`。启动目录不影响数据位置；需要系统已安装 WebView2 Runtime。更新时退出应用、替换程序与 `seed`，保留 `data`。
+```bash
+devenv shell -- lanpath-build-aar
+devenv shell -- lanpath-build-android-debug
+```
 
 ## Windows GPUI 实验版
 

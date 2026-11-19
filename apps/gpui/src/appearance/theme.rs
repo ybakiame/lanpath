@@ -107,7 +107,7 @@ fn apply_surfaces(theme: &mut Theme, dark: bool) {
 }
 
 fn apply_accent(theme: &mut Theme, accent: AccentPreference, dark: bool) {
-    // Product palette from packages/ui/src/appearance.css; accents are a separate
+    // Product palette inherited from the original UI; accents are a separate
     // semantic axis, never replacements for danger/warning/success/info colors.
     let color = accent_color(accent, dark);
     let foreground: Hsla = rgb(if dark { 0x181823 } else { 0xffffff }).into();

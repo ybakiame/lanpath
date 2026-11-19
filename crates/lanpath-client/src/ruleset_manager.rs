@@ -22,7 +22,7 @@
 //!    移除（降级启动）**——CN 分流退化为 `route.final` 兜底（流量走代理，可用但不精
 //!    准），而不是整核拒绝启动；
 //! 3. 缺失 tag 经 [`MaterializeReport::missing_tags`] 上报到运行状态，命令层启动后后台
-//!    重试下载，补齐后自动重载核心恢复完整分流（见 `lanpath-tauri` 的启动重试任务）。
+//!    The application host can retry missing downloads and reload the core.
 //!
 //! 下载统一 `.no_proxy()` 直连（与此前核心侧 `rule-set-direct` http_client 的语义一致：
 //! 规则集是核心启动的前置条件，不能依赖代理路径）。

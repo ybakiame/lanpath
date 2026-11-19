@@ -1,0 +1,16 @@
+{
+  "wintun": {
+    "version": "0.14.1",
+    "url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+    "sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51",
+    "dll_path": {
+      "amd64": "wintun/bin/amd64/wintun.dll",
+      "arm64": "wintun/bin/arm64/wintun.dll"
+    }
+  },
+  "gpl3": {
+    "$comment": "GPL-3.0 \u5168\u6587\u3002\u6e90\u7528 SPDX \u5b98\u65b9\u6570\u636e\u4ed3\u5e93\u7684 tagged \u7248\u672c\u800c\u975e gnu.org\uff1agnu.org \u5728 GitHub Actions Windows runner \u4e0a\u5b9e\u6d4b ConnectionRefused\uff082026-10\uff09\uff0cGitHub raw \u5728 CI \u53ef\u8fbe\u6027\u6700\u597d\u3002\u5185\u5bb9\u4e0e gnu.org \u7248\u4ec5\u6392\u7248\u5dee\u5f02\u3002",
+    "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/GPL-3.0-or-later.txt",
+    "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+  }
+}

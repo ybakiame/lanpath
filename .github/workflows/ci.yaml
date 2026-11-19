@@ -1,4 +1,4 @@
-name: Client CI
+name: Rust and Mobile CI
 on:
   push:
     branches: [main, dev]
@@ -28,15 +28,7 @@ jobs:
           printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/profile/bin" "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
       - name: Install dependencies
         run: devenv shell -- lanpath-install
-      - name: Install project Rust targets
-        run: devenv shell -- lanpath-rust-targets
-      - name: Frontend verification
-        run: devenv shell -- lanpath-verify-frontend
       - name: Rust build and gates
         run: devenv shell -- lanpath-verify-rust
-      - name: Runtime cache, Portable and release tooling tests
-        run: devenv shell -- lanpath-test-tools
   android:
     uses: ./.github/workflows/android-build.yaml
-    with:
-      release: false

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unzipSync } from "fflate";
-import { fetchWindowsTunResources } from "../../client/scripts/fetch-seed-core";
+import { fetchWindowsTunResources } from "./windows_tun";
 import { desktop, semanticVersion, sha256, targetInfo, verifyPe } from "./protocol";
 
 interface ModulePin { path: string; version: string; commit: string; sum: string; zip_sha256: string }

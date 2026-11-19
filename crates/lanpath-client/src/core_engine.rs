@@ -1,14 +1,9 @@
-//! 核心引擎桥接抽象（Android VpnPlugin 接入）。
+//! Native core lifecycle bridge for mobile hosts.
 //!
-//! 桌面端核心由 `lanpath-engine` 的 [`lanpath_engine::CoreManager`] 直接 spawn 二进制进程驱动；
-//! Android 上无法 spawn 进程，核心将由 Kotlin 侧 VpnPlugin（sing-box libbox，
-//! 经 lanpathcore.aar 绑定）驱动。Rust 侧需要一个「插件桥」：
-//! src-tauri 在 Android 启动时安装桥实现，[`CoreRunner`] 在 Android 下委托给该桥
-//! （本模块建抽象与接线，真正 Kotlin 通道在 src-tauri 的 core_bridge 实现）。
-//!
-//! 桥的生命周期接口（start / stop / is_running）与 `lanpath-engine` 的
-//! [`lanpath_engine::CoreManager`] 异步签名兼容；全局注册表用 [`OnceLock`] 保证
-//! 只安装一次。
+//! Desktop hosts spawn core binaries through [`lanpath_engine::CoreManager`].
+//! Android uses the Kotlin VPN service and the Go/libbox binding instead.
+//! A future mobile host must install a bridge before starting [`CoreRunner`].
+//! The registry permits one bridge per process and does not create a JNI adapter.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -21,7 +16,7 @@ use serde_json::Value;
 /// 桥接方法返回的盒化 future（手写对象安全异步签名，避免引入额外 crate）。
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// 核心引擎桥：把核心生命周期委托给平台侧实现（Android 下为 Kotlin VpnPlugin）。
+/// Delegate core lifecycle operations to a native platform implementation.
 pub trait CoreEngineBridge: Send + Sync {
     /// 启动核心。
     ///
@@ -44,7 +39,7 @@ pub trait CoreEngineBridge: Send + Sync {
 static CORE_ENGINE_BRIDGE: std::sync::OnceLock<Arc<dyn CoreEngineBridge>> =
     std::sync::OnceLock::new();
 
-/// 安装全局核心引擎桥（Android 启动时由 src-tauri 调用；重复安装返回错误）。
+/// Install the global core bridge from the Android host; repeated installation fails.
 pub fn install_core_engine_bridge(bridge: Arc<dyn CoreEngineBridge>) -> LanpathResult<()> {
     CORE_ENGINE_BRIDGE
         .set(bridge)

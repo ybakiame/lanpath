@@ -1,17 +1,7 @@
 name: Android Build
 on:
   workflow_call:
-    inputs:
-      release:
-        type: boolean
-        default: false
-    secrets:
-      ANDROID_KEY_BASE64:
-        required: false
-      ANDROID_KEY_PASSWORD:
-        required: false
-      ANDROID_KEY_ALIAS:
-        required: false
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -31,39 +21,16 @@ jobs:
         run: |
           nix profile add github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222#devenv
           printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/profile/bin" "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
-      - name: Install dependencies and Rust target
-        run: |
-          devenv shell -- lanpath-install
-          devenv shell -- lanpath-rust-targets
       - name: Build branded Go AAR
         run: devenv shell -- lanpath-build-aar
-      - name: Configure release signing
-        if: inputs.release
-        env:
-          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          devenv shell -- python3 scripts/configure-android-signing.py
-      - name: Build Android
-        run: |
-          if [ '${{ inputs.release }}' = 'true' ]; then
-            devenv shell -- lanpath-build-android-release
-          else
-            devenv shell -- lanpath-build-android-debug
-          fi
-      - name: Verify and stage APK
-        env:
-          RELEASE_BUILD: ${{ inputs.release }}
-        run: devenv shell -- bash scripts/stage-android-apk.sh
-      - name: Upload APK
+      - name: Build native Android library
+        run: devenv shell -- lanpath-build-android-release
+      - name: Upload native libraries
         uses: actions/upload-artifact@v5
         with:
-          name: lanpath-android-${{ inputs.release && 'release' || 'debug' }}
-          path: dist/*.apk
+          name: lanpath-mobile-libraries
+          path: |
+            mobile/android/vpn/build/outputs/aar/*.aar
+            mobile/android/vpn/libs/lanpathcore.aar
           if-no-files-found: error
           retention-days: 7
-      - name: Remove temporary signing material
-        if: always() && inputs.release
-        run: |
-          rm -f "$RUNNER_TEMP/lanpath-release.p12" apps/client/src-tauri/gen/android/keystore.properties

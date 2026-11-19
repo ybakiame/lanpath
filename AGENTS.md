@@ -16,25 +16,17 @@ Windows CI 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 N
 
 ## 编译与验证
 
-Rust 执行 cargo build --workspace 和 bun run verify:rust，含根 fmt/clippy/test、
-桌面壳 host clippy 与有 SDK/target 时 Android target check；根 workspace 不覆盖壳。
-根门禁不覆盖 apps/gpui、apps/nsh 或 apps/desktop；其改动另执行独立项目 fmt/clippy/test/build 及
-Windows 原生场景，NSH 按目标增加 nsh test、Android 打包与获准的真机验证，不据此新增强制 CI 门禁。
-
-### tauri
-前端改动执行受影响包 verify：lanpath-app、@lanpath/client-core、@lanpath/ui。
-前端无单元测试运行器，verify 为 build+lint+format；交互验证注明 mock/设备边界。
-
-### android
-Go 调整还需构建 lanpathcore.aar，并编译 Android Kotlin/资源
-
+根 Rust workspace 按需执行 `cargo build --workspace` 或 `bash scripts/check-rust-gates.sh`。
+根门禁不覆盖独立的 `apps/gpui`、`apps/desktop`；按改动执行对应 fmt/clippy/test/build 和 Windows 原生验证。
+Android 原生库改动构建 `mobile/android`；Go 绑定改动先重新构建 `lanpathcore.aar`，再编译 Kotlin/资源。
+库构建通过不代表移动端宿主或 VPN 真机接入通过，不据此新增强制 CI 门禁。
 
 ## 结构与边界
 
-apps/client 为 Tauri 单壳双目标应用；页面共用 @lanpath/ui，平台为编译期事实。
-packages/client-core 封装 API/hooks/atoms；UI 禁止直接 invoke。
-根 Cargo workspace 为 crates/lanpath-*；apps/client/src-tauri 仍是独立 Cargo 项目。
-Android 使用 apps/client/lanpath-core 的 Go libbox 绑定，无 MITM；现行 Tauri 前端保持 sing-box。
+`apps/desktop` 为当前 NSH 桌面目标。共享 Rust 业务位于 `crates/lanpath-*`，公共资源位于 `assets/`。
+`mobile/lanpath-core` 封装 Go/libbox 绑定；`mobile/android` 为独立 Android 原生库工程，保留 Kotlin VpnService、网络接口、通知、日志和文件导出。移动端仅支持 sing-box，无 MITM。
+移动端暂未接入新的应用宿主/页面，不提供 APK；本次拆分不代表 NSH 已接入 VPN。
+旧 Tauri client、前端 packages 和 Tauri 命令适配层已移除，不恢复其构建入口或发布流程。
 
 apps/gpui 为 GPUI 实验性目标，支持 sing-box 与 Mihomo(仅运行) ，保持独立 Cargo 项目与独立应用身份；复用已有 Rust 核心基础。
 实验阶段仅支持便携安装模式，方便数据隔离与测试。
@@ -55,7 +47,7 @@ helper。
 Rust 使用 LanpathError/LanpathResult；除测试及初始化外禁止裸 unwrap/expect。
 一个提交对应一个逻辑变更；使用 Conventional Commits，不绕过 pre-commit。
 业务文件上限 500 行、测试 1000 行，超线按职责拆分。
-使用 rg 搜索，依赖在根目录 Bun workspace 统一安装，不引入多锁文件。
+使用 rg 搜索；仍使用的 Bun 工具依赖在根目录统一安装，不引入多锁文件。
 
 ## 工作流与完成定义
 

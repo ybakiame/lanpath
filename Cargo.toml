@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lanpath-tauri","crates/lanpath-client","crates/lanpath-common","crates/lanpath-engine","crates/lanpath-mitm","crates/lanpath-script"]
+members = ["crates/lanpath-client","crates/lanpath-common","crates/lanpath-engine","crates/lanpath-mitm","crates/lanpath-script"]
 exclude = ["vendor/hudsucker"]
 
 [workspace.package]

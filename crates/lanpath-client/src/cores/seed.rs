@@ -1,8 +1,7 @@
 //! Bundled seed core first-run release (ADR-0008 D5).
 //!
 //! Windows installers bundle a pinned sing-box core + `wintun.dll` under
-//! `<resource_dir>/seed/` (produced by `apps/client/scripts/fetch-seed-core.ts`,
-//! packed via `tauri.windows.conf.json` `bundle.resources`). On first run — when no
+//! `<resource_dir>/seed/`, supplied by a desktop distribution. On first run — when no
 //! downloaded core exists yet — the seed is copied into the standard versioned
 //! directory `data_dir/cores/sing-box/<version>/`, making the app usable offline
 //! without depending on GitHub reachability.
@@ -24,7 +23,7 @@ use serde::Deserialize;
 use super::{ClientCoreInventory, LocalCore, download, version};
 
 /// Runtime seed manifest (`<resource_dir>/seed/manifest.json`), written by
-/// `fetch-seed-core.ts` from the pinned `src-tauri/seed-manifest.json`.
+/// the distribution packaging tooling from its pinned core manifest.
 #[derive(Debug, Deserialize)]
 struct SeedManifest {
     sing_box_version: String,

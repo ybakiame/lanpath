@@ -11,9 +11,6 @@ node_modules/
 *.jks
 *.db*
 *.sqlite*
-apps/client/src-tauri/resources/seed/
-apps/client/src-tauri/gen/android/app/libs/*.aar
-apps/client/src-tauri/gen/android/app/libs/*.jar
 .devenv
 devenv.local.nix
 devenv.local.yaml
@@ -27,3 +24,6 @@ apps/desktop/local.properties
 **/.nsh/
 
 .work/
+
+**/.gradle/
+mobile/android/local.properties
