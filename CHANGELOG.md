@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- 产品版本统一为 `0.1.4-rc.3`：新增 `VERSION`、版本同步/检查脚本和 `VERSIONING.md`，同步 NSH 清单、共享 crates、应用内显示及 Windows 文件版本；当前候选阶段使用全新数据，不提供旧配置兼容。
+
 - Android 原生能力与 Go/libbox 绑定迁到独立 `mobile/` 目录；移除旧 Tauri client、前端 packages 及其依赖和发布入口。移动端暂为原生库，不提供 APK，后续宿主接入另行实现。
 
 - 新 NSH 桌面目标改用仓库公共 `assets/` 图标资源，不再依赖 client 包内的图标。

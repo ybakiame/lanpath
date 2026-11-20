@@ -1,7 +1,7 @@
 {
   "name": "Lanpath NSH Desktop",
   "id": "com.ybakiame.lanpath.desktop.nsh",
-  "version": "0.1.0",
+  "version": "0.1.4-rc.3",
   "build": 1,
   "rust": ".",
   "root": "App",

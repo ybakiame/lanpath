@@ -45,3 +45,5 @@ devenv shell -- lanpath-build-android-debug
 AGPL-3.0-or-later，保留 ProxyPanel 与 Lanpath 贡献者归属。源码由 ProxyPanel 客户端整理而来；
 服务端历史保留于原仓。
 sing-box、wintun 等第三方组件的许可资产继续随分发保留。
+
+版本管理见 [版本约定](VERSIONING.md)，使用 `VERSION` 和 `scripts/version.py` 同步 NSH 桌面及共享 Rust crates。
