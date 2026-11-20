@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use nsh_base::{dialog, theme, tooltip as base_tooltip};
+use nsh_base::{dialog, popover as base_popover, theme, tooltip as base_tooltip};
 use nsh_core::prelude::*;
 
 use super::motion;
@@ -24,6 +24,8 @@ pub struct ConfirmDialog {
     on_confirm: ConfirmHandler,
     on_cancel: ConfirmHandler,
     test_id: Option<&'static str>,
+    confirm_test_id: Option<&'static str>,
+    cancel_test_id: Option<&'static str>,
 }
 
 /// 一个确认对话框。
@@ -38,6 +40,8 @@ pub fn confirm_dialog(open: impl Fn() -> bool + 'static) -> ConfirmDialog {
         on_confirm: ConfirmHandler::default(),
         on_cancel: ConfirmHandler::default(),
         test_id: None,
+        confirm_test_id: None,
+        cancel_test_id: None,
     }
 }
 
@@ -84,6 +88,16 @@ impl ConfirmDialog {
         self.test_id = Some(id);
         self
     }
+
+    pub fn confirm_test_id(mut self, id: &'static str) -> Self {
+        self.confirm_test_id = Some(id);
+        self
+    }
+
+    pub fn cancel_test_id(mut self, id: &'static str) -> Self {
+        self.cancel_test_id = Some(id);
+        self
+    }
 }
 
 impl IntoElement for ConfirmDialog {
@@ -91,6 +105,8 @@ impl IntoElement for ConfirmDialog {
         let open = self.open;
         let destructive = self.destructive;
         let test_id = self.test_id;
+        let confirm_test_id = self.confirm_test_id;
+        let cancel_test_id = self.cancel_test_id;
         let on_confirm = self.on_confirm;
         let on_cancel_dialog = self.on_cancel.clone();
         let on_cancel_button = self.on_cancel;
@@ -108,7 +124,7 @@ impl IntoElement for ConfirmDialog {
                 let cancel_label = cancel_label.clone();
                 let title = title.clone();
                 let description = description.clone();
-                let confirm = super::button::button(if destructive {
+                let mut confirm = super::button::button(if destructive {
                     super::button::ButtonVariant::Destructive
                 } else {
                     super::button::ButtonVariant::Primary
@@ -120,20 +136,36 @@ impl IntoElement for ConfirmDialog {
                         on_confirm();
                     }
                 });
+                if let Some(id) = confirm_test_id {
+                    confirm = confirm.test_id(id);
+                }
+                let mut cancel_btn = super::button::button(super::button::ButtonVariant::Outline)
+                    .size(super::button::ButtonSize::Md)
+                    .label(move || cancel_label())
+                    .on_press(move || {
+                        if let Some(on_cancel) = on_cancel_button.borrow_mut().as_mut() {
+                            on_cancel();
+                        }
+                    });
+                if let Some(id) = cancel_test_id {
+                    cancel_btn = cancel_btn.test_id(id);
+                }
                 let mut card = view()
                     .flex_col()
                     .gap_3()
-                    .w(px(420.0))
-                    .p_4()
-                    .rounded(move || theme().radius)
-                    .bg(move || theme().card)
+                    .w(px(440.0))
+                    .p_5()
+                    .rounded(move || theme().number("radius-lg").map(px).unwrap_or(px(8.0)))
+                    .bg(move || theme().popover)
+                    .text_color(move || theme().popover_foreground)
                     .border(px(1.0))
                     .border_color(move || theme().border)
-                    .shadow_lg()
+                    .shadow_xl()
                     .child(
                         text(move || title())
+                            .role(AccessibilityRole::Header)
                             .text_size(px(17.0))
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_weight(FontWeight::SEMIBOLD)
                             .text_color(move || theme().foreground),
                     )
                     .child(
@@ -145,25 +177,44 @@ impl IntoElement for ConfirmDialog {
                         view()
                             .flex_row()
                             .gap_2()
+                            .pt_1()
                             .justify_end()
-                            .child(
-                                super::button::button(super::button::ButtonVariant::Outline)
-                                    .size(super::button::ButtonSize::Md)
-                                    .label(move || cancel_label())
-                                    .on_press(move || {
-                                        if let Some(on_cancel) =
-                                            on_cancel_button.borrow_mut().as_mut()
-                                        {
-                                            on_cancel();
-                                        }
-                                    }),
-                            )
+                            .child(cancel_btn)
                             .child(confirm),
                     );
                 if let Some(id) = test_id {
                     card = card.test_id(id);
                 }
+                if !super::prefs::prefs().reduced.get() {
+                    let enter = nsh_core::prelude::motion().entering(
+                        MotionSpec::new(
+                            KeyframeTiming::new(motion::BASE_MS).easing(Easing::EaseOut),
+                        )
+                        .track(
+                            MotionChannel::Opacity,
+                            [Keyframe::new(0.0), Keyframe::new(1.0)],
+                        )
+                        .track(
+                            MotionChannel::ScaleX,
+                            [Keyframe::new(0.97), Keyframe::new(1.0)],
+                        )
+                        .track(
+                            MotionChannel::ScaleY,
+                            [Keyframe::new(0.97), Keyframe::new(1.0)],
+                        )
+                        .track(
+                            MotionChannel::TranslateY,
+                            [
+                                Keyframe::new(motion::DISTANCE_DIALOG_PT),
+                                Keyframe::new(0.0),
+                            ],
+                        ),
+                    );
+                    card = card.bind_motion(&enter);
+                }
                 dialog()
+                    .flex_1()
+                    .animation(ModalAnimation::None)
                     .role(AccessibilityRole::AlertDialog)
                     .on_cancel(move || {
                         if let Some(on_cancel) = on_cancel_dialog.borrow_mut().as_mut() {
@@ -172,10 +223,12 @@ impl IntoElement for ConfirmDialog {
                     })
                     .child(
                         view()
+                            .size_full()
                             .flex_1()
+                            .p_4()
                             .items_center()
                             .justify_center()
-                            .bg(transparent_black().opacity(0.4))
+                            .bg(move || theme().color("modal-scrim").unwrap_or(theme().background))
                             .child(card),
                     )
             },
@@ -184,7 +237,20 @@ impl IntoElement for ConfirmDialog {
     }
 }
 
-/// Tooltip：内容 token 化；进入位移 4pt，减少动效时原地出现。
+/// 共享浮层样式的 Popover 封装：与 Menu/Select 保持一致的边框、阴影与进出场过渡。
+pub fn popover(trigger: impl IntoElement, content: impl IntoElement) -> AnyElement {
+    base_popover()
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .popup_style(|s| super::select::popup_surface(s).p_3())
+        .popup_starting_style(super::select::popup_starting)
+        .popup_ending_style(super::select::popup_ending)
+        .trigger(trigger)
+        .child(content)
+        .into_element()
+}
+
+/// Tooltip：内容 token 化；与弹层家族共享边框与阴影，进入位移 4pt，减少动效时原地出现。
 pub fn tooltip(trigger: impl Interactive, content: impl Fn() -> String + 'static) -> AnyElement {
     let reduced = super::prefs::prefs().reduced;
     view()
@@ -203,6 +269,8 @@ pub fn tooltip(trigger: impl Interactive, content: impl Fn() -> String + 'static
                         .px(px(8.0))
                         .py(px(4.0))
                         .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
+                        .border(px(1.0))
+                        .border_color(move || theme().border)
                         .bg(move || theme().popover)
                         .text_color(move || theme().popover_foreground)
                         .shadow_md()
@@ -237,14 +305,17 @@ pub fn editor_dialog(
         card = card.bind_motion(&enter);
     }
     dialog()
+        .flex_1()
+        .animation(ModalAnimation::None)
         .label(move || SharedString::from(title()))
         .on_cancel(on_cancel)
         .child(
             view()
+                .size_full()
                 .flex_1()
                 .items_center()
                 .justify_center()
-                .bg(transparent_black().opacity(0.4))
+                .bg(move || theme().color("modal-scrim").unwrap_or(theme().background))
                 .child(card),
         )
         .into_element()

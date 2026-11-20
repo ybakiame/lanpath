@@ -22,15 +22,15 @@ fn navigating_between_the_two_sidebar_pages() {
     assert!(app.screen().shows("选择核心"));
     assert!(!app.screen().matches("id:appearance-light").unwrap());
 
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     let seen = texts(&app);
     for expected in ["浅色", "深色", "跟随系统"] {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
-    // 13 个主题预览网格。
+    // 14 个主题预览网格（含高饱和清新主题 mint）。
     for theme in [
-        "amethyst", "indigo", "ocean", "forest", "sand", "rose", "graphite", "cyan", "orange",
-        "teal", "crimson", "gold", "slate",
+        "amethyst", "indigo", "ocean", "mint", "forest", "sand", "rose", "graphite", "cyan",
+        "orange", "teal", "crimson", "gold", "slate",
     ] {
         assert!(
             app.screen().matches(&format!("id:theme-{theme}")).unwrap(),
@@ -39,11 +39,11 @@ fn navigating_between_the_two_sidebar_pages() {
     }
     assert!(!app.screen().shows("开始之前"));
     assert!(app.screen().matches("id:appearance-light").unwrap());
-    // 选中主题同时显示名称与勾选（默认 amethyst 选中）。
-    assert!(app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
-    assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
+    // 新数据根默认 Ocean；已有已保存主题继续保留。
+    assert!(app.screen().matches("id:theme-ocean >> text:✓").unwrap());
+    assert!(!app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
 
-    app.press("role:button[订阅]").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
     assert!(!app.screen().matches("id:appearance-light").unwrap());
 }
@@ -55,31 +55,53 @@ fn switching_appearance_light_dark_and_system_for_real() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
-    let seen = texts(&app);
-    assert!(seen.contains(&"已选择：amethyst"), "{seen:?}");
-    assert!(seen.contains(&"当前生效：浅色"), "{seen:?}");
-
-    // 选深色：立即生效并持久化（存储键沿用既有 `appearance`）。
+    common::navigate(&mut app, "role:button[外观]");
+    let light = app
+        .screen()
+        .view_style("id:app-sidebar")
+        .unwrap()
+        .unwrap()
+        .background_color;
     app.press("id:appearance-dark >> text:深色").unwrap();
-    let seen = texts(&app);
-    assert!(seen.contains(&"当前生效：深色"), "{seen:?}");
-    assert_eq!(storage.get("appearance"), Some("dark".to_owned()));
+    let dark = app
+        .screen()
+        .view_style("id:app-sidebar")
+        .unwrap()
+        .unwrap()
+        .background_color;
+    assert_ne!(light, dark);
+    assert_eq!(storage.get("appearance"), Some("dark".into()));
     set_color_scheme(&mut app, "light");
-    assert!(texts(&app).contains(&"当前生效：深色"));
-
-    // 跟随系统：系统外观决定生效值。
+    assert_eq!(
+        app.screen()
+            .view_style("id:app-sidebar")
+            .unwrap()
+            .unwrap()
+            .background_color,
+        dark
+    );
     app.press("id:appearance-system >> text:跟随系统").unwrap();
-    assert_eq!(storage.get("appearance"), Some("system".to_owned()));
+    assert_eq!(storage.get("appearance"), Some("system".into()));
     set_color_scheme(&mut app, "dark");
-    assert!(texts(&app).contains(&"当前生效：深色"));
+    assert_eq!(
+        app.screen()
+            .view_style("id:app-sidebar")
+            .unwrap()
+            .unwrap()
+            .background_color,
+        dark
+    );
     set_color_scheme(&mut app, "light");
-    assert!(texts(&app).contains(&"当前生效：浅色"));
-
-    // 选浅色：立即生效并持久化。
+    assert_eq!(
+        app.screen()
+            .view_style("id:app-sidebar")
+            .unwrap()
+            .unwrap()
+            .background_color,
+        light
+    );
     app.press("id:appearance-light >> text:浅色").unwrap();
-    assert!(texts(&app).contains(&"当前生效：浅色"));
-    assert_eq!(storage.get("appearance"), Some("light".to_owned()));
+    assert_eq!(storage.get("appearance"), Some("light".into()));
 }
 
 /// 主题网格点击即应用并持久化；默认主题为 amethyst。
@@ -88,19 +110,17 @@ fn switching_theme_applies_and_persists() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     assert_eq!(storage.get("theme"), None, "未选择时无 theme 键");
 
     app.press("id:theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
-    assert!(texts(&app).contains(&"已选择：ocean"));
     // 勾选随选择响应式移动，不只靠边框。
     assert!(app.screen().matches("id:theme-ocean >> text:✓").unwrap());
     assert!(!app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
 
     app.press("id:theme-graphite >> text:graphite").unwrap();
     assert_eq!(storage.get("theme"), Some("graphite".to_owned()));
-    assert!(texts(&app).contains(&"已选择：graphite"));
     assert!(app.screen().matches("id:theme-graphite >> text:✓").unwrap());
     assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
 }
@@ -111,14 +131,14 @@ fn theme_cards_expose_selected_state_and_names() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     let amethyst = "role:button[主题：amethyst]";
     let ocean = "role:button[主题：ocean]";
-    assert!(app.screen().selected(amethyst).unwrap());
-    assert!(!app.screen().selected(ocean).unwrap());
-    app.press("id:theme-ocean >> text:ocean").unwrap();
     assert!(app.screen().selected(ocean).unwrap());
     assert!(!app.screen().selected(amethyst).unwrap());
+    app.press("id:theme-amethyst >> text:amethyst").unwrap();
+    assert!(app.screen().selected(amethyst).unwrap());
+    assert!(!app.screen().selected(ocean).unwrap());
 }
 
 /// 指针悬停只预览不写盘；A→B→离开后回已保存主题，点击才提交；
@@ -128,9 +148,9 @@ fn theme_hover_preview_is_transient_and_cleans_up_on_leave() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app_desktop(entries);
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
-    app.hover("id:theme-ocean").unwrap();
-    app.wait_for("正在预览：ocean；点击应用并保存").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
+    app.hover("id:theme-indigo").unwrap();
+    app.wait_for("正在预览：indigo；点击应用并保存").unwrap();
     assert_eq!(storage.get("theme"), None, "hover 不得写 storage");
     app.hover("id:theme-amethyst").unwrap();
     app.wait_for("正在预览：amethyst；点击应用并保存").unwrap();
@@ -139,20 +159,20 @@ fn theme_hover_preview_is_transient_and_cleans_up_on_leave() {
     app.wait_for("指向主题可预览，点击应用并保存").unwrap();
     assert_eq!(storage.get("theme"), None);
 
-    app.hover("id:theme-ocean").unwrap();
-    app.wait_for("正在预览：ocean；点击应用并保存").unwrap();
+    app.hover("id:theme-indigo").unwrap();
+    app.wait_for("正在预览：indigo；点击应用并保存").unwrap();
     app.press("id:theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
-    assert!(app.screen().shows("已选择：ocean"));
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
 
     // 悬停后离页：页面 owner 清理，不把临时预览写盘或留在选中态。
     app.hover("id:theme-forest").unwrap();
     app.wait_for("正在预览：forest；点击应用并保存").unwrap();
-    app.press("role:button[订阅]").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
-    app.press("role:button[外观]").unwrap();
-    app.wait_for("已选择：ocean").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
     assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
     assert!(!app.screen().selected("role:button[主题：forest]").unwrap());
 }
@@ -168,21 +188,17 @@ fn appearance_save_failure_keeps_previous_values_and_reports() {
     );
     let (mut app, storage) = start_app(entries);
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     let failure = "外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。";
 
-    app.press("id:theme-ocean >> text:ocean").unwrap();
+    app.press("id:theme-indigo >> text:indigo").unwrap();
     assert_eq!(storage.get("theme"), None);
-    assert!(
-        app.screen()
-            .selected("role:button[主题：amethyst]")
-            .unwrap()
-    );
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
     assert!(texts(&app).contains(&failure));
 
     app.press("id:appearance-dark >> text:深色").unwrap();
     assert_eq!(storage.get("appearance"), None);
-    assert!(texts(&app).contains(&"当前生效：浅色"));
+    assert!(app.screen().selected("id:appearance-system").unwrap());
 
     app.press("id:language-en >> text:English").unwrap();
     assert_eq!(storage.get("language"), Some("zh-CN".to_owned()));
@@ -206,10 +222,9 @@ fn restores_the_persisted_appearance_choices() {
     entries.insert("reduce_motion".to_owned(), "reduce".to_owned());
     let mut app = start_app(entries).0;
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
-    let seen = texts(&app);
-    assert!(seen.contains(&"已选择：ocean"), "{seen:?}");
-    assert!(seen.contains(&"当前生效：深色"), "{seen:?}");
+    common::navigate(&mut app, "role:button[外观]");
+    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
+    assert!(app.screen().selected("id:appearance-dark").unwrap());
     assert!(
         app.screen()
             .selected("id:motion-group >> role:radio[减少动效]")
@@ -225,7 +240,7 @@ fn switching_language_applies_without_rebuilding_state() {
     let (mut app, storage) = start_app(entries);
     app.wait_for("开始之前").unwrap();
     // 先证明业务页在中文下内容存在，并添加一条真实订阅验证切换后仍在。
-    app.press("role:button[订阅]").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
     app.type_text("id:subscription-name", "语言订阅").unwrap();
     app.type_text("id:subscription-url", "https://example.com/lang.yaml")
@@ -233,21 +248,21 @@ fn switching_language_applies_without_rebuilding_state() {
     app.press("新增订阅").unwrap();
     assert!(texts(&app).contains(&"语言订阅"));
 
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     app.press("id:language-en >> text:English").unwrap();
     assert_eq!(storage.get("language"), Some("en".to_owned()));
     // 导航立即变为英文。
     assert!(app.screen().shows("Appearance"));
-    assert!(app.screen().shows("Subscriptions"));
+    assert!(app.screen().shows("Overview"));
 
     // 业务页状态未重建：切回订阅页，真实列表内容仍在。
-    app.press("role:button[Subscriptions]").unwrap();
+    common::open_subscriptions(&mut app);
     let seen = texts(&app);
 
     assert!(seen.contains(&"语言订阅"), "{seen:?}");
 
     // 切回中文（此时导航仍为英文）。
-    app.press("role:button[Appearance]").unwrap();
+    common::navigate(&mut app, "role:button[Appearance]");
     app.press("id:language-zh-cn >> text:Simplified Chinese")
         .unwrap();
     assert_eq!(storage.get("language"), Some("zh-CN".to_owned()));
@@ -260,7 +275,7 @@ fn switching_motion_preference_persists() {
     let (_dir, entries) = data_root();
     let (mut app, storage) = start_app(entries);
     app.wait_for("开始之前").unwrap();
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
     assert!(
         app.screen()
             .selected("id:motion-group >> role:radio[跟随系统]")
@@ -271,6 +286,53 @@ fn switching_motion_preference_persists() {
     assert_eq!(storage.get("reduce_motion"), Some("reduce".to_owned()));
     app.press("id:motion-system >> text:跟随系统").unwrap();
     assert_eq!(storage.get("reduce_motion"), Some("system".to_owned()));
+}
+
+/// 窗口背景材质（亚克力 / 云母 / 不透明）切换持久化，并真实改变表面透明度。
+#[test]
+fn switching_window_backdrop_persists_and_updates_surface() {
+    let (_dir, entries) = data_root();
+    let (mut app, storage) = start_app(entries);
+    app.wait_for("开始之前").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
+    assert!(app.screen().matches("id:backdrop-group").unwrap());
+    assert!(app.screen().matches("id:backdrop-opacity-slider").unwrap());
+
+    let acrylic_bg = app
+        .screen()
+        .view_style("id:app-sidebar")
+        .unwrap()
+        .unwrap()
+        .background_color
+        .unwrap();
+
+    app.press("id:backdrop-solid >> text:纯色不透明").unwrap();
+    assert_eq!(storage.get("window_material"), Some("solid".to_owned()));
+    let solid_bg = app
+        .screen()
+        .view_style("id:app-sidebar")
+        .unwrap()
+        .unwrap()
+        .background_color
+        .unwrap();
+    assert_ne!(
+        acrylic_bg, solid_bg,
+        "solid and acrylic surfaces should have distinct alpha/color"
+    );
+
+    app.press("id:backdrop-mica >> text:云母 Mica").unwrap();
+    assert_eq!(storage.get("window_material"), Some("mica".to_owned()));
+
+    app.press("id:backdrop-acrylic >> text:亚克力磨砂").unwrap();
+    assert_eq!(storage.get("window_material"), Some("acrylic".to_owned()));
+    assert_eq!(
+        app.screen()
+            .view_style("id:app-sidebar")
+            .unwrap()
+            .unwrap()
+            .background_color,
+        Some(acrylic_bg)
+    );
 }
 
 /// 如平台报告系统外观变化（TS 侧 `app.setColorScheme` 的等价步骤）。

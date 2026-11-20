@@ -10,16 +10,17 @@ use crate::ui::input;
 use super::SubscriptionPageState;
 
 pub(super) fn add_subscription_form(state: SubscriptionPageState) -> impl IntoElement {
-    let name = signal(String::new());
-    let url = signal(String::new());
-    let user_agent = signal(String::new());
+    let name = state.draft_name;
+    let url = state.draft_url;
+    let user_agent = state.draft_user_agent;
     let error_state = state.clone();
+    let has_error = state.form_error;
 
     let submit_state = state.clone();
     let submit_name = name;
     let submit_url = url;
     let submit_ua = user_agent;
-    let submit = move || {
+    let submit = std::rc::Rc::new(move || {
         if run_add(
             &submit_state,
             submit_name.get(),
@@ -30,42 +31,66 @@ pub(super) fn add_subscription_form(state: SubscriptionPageState) -> impl IntoEl
             submit_url.set(String::new());
             submit_ua.set(String::new());
         }
-    };
+    });
 
-    view()
+    crate::ui::surface(crate::ui::SurfaceLevel::Card)
+        .p_4()
         .flex_col()
         .gap_2()
-        .child(field_input("subscription-name", name, || {
-            t!("subscription.name_placeholder")
-        }))
-        .child(field_input("subscription-url", url, || {
-            t!("subscription.url_placeholder")
-        }))
-        .child(field_input("subscription-user-agent", user_agent, || {
-            t!("subscription.ua_placeholder")
-        }))
+        .child(
+            view()
+                .flex_col()
+                .gap_3()
+                .child(view().flex_1().min_w(px(0.0)).child(field_input(
+                    "subscription-name",
+                    name,
+                    submit.clone(),
+                    || t!("subscription.name_placeholder"),
+                )))
+                .child(view().flex_1().min_w(px(0.0)).child(field_input(
+                    "subscription-url",
+                    url,
+                    submit.clone(),
+                    || t!("subscription.url_placeholder"),
+                ))),
+        )
+        .child(field_input(
+            "subscription-user-agent",
+            user_agent,
+            submit.clone(),
+            || t!("subscription.ua_placeholder"),
+        ))
         .child(
             button(ButtonVariant::Primary)
                 .size(ButtonSize::Md)
                 .label(|| t!("subscription.add"))
-                .on_press(submit),
+                .on_press(move || submit()),
         )
-        .child(
-            text(move || error_state.form_error.get().unwrap_or_default())
-                .text_color(move || theme().destructive),
-        )
+        .child(when(
+            move || has_error.get().is_some(),
+            move || {
+                text(move || error_state.form_error.get().unwrap_or_default())
+                    .text_color(move || theme().destructive)
+            },
+        ))
 }
 
 fn field_input(
     test_id: &'static str,
     value: Signal<String>,
+    submit: std::rc::Rc<dyn Fn()>,
     placeholder: impl Fn() -> String + 'static,
 ) -> impl IntoElement {
     let on_change = move |text: String| value.set(text);
-    input::input(value)
-        .test_id(test_id)
-        .placeholder(placeholder)
-        .on_change(on_change)
+    let label = std::rc::Rc::new(placeholder);
+    let accessible = label.clone();
+    input::field().label(move || label()).control(
+        input::input(value)
+            .test_id(test_id)
+            .accessible_name(move || accessible())
+            .on_change(on_change)
+            .on_submit(move || submit()),
+    )
 }
 
 /// 同步校验并新增（业务层互斥，刷新在途也可安全新增）；成功后由调用方

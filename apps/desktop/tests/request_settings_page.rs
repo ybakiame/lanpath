@@ -15,7 +15,7 @@ use common::{TestRoute, TestServer, data_root, start_app, texts};
 const YAML: &str = "proxies:\n  - name: 节点甲\n    type: ss\n    server: 192.0.2.1\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n  - name: 节点乙\n    type: ss\n    server: 192.0.2.2\n    port: 8388\n    cipher: aes-256-gcm\n    password: test-only\n";
 
 fn open_request_settings(app: &mut nsh_testing::Headless) {
-    app.press("请求设置").unwrap();
+    common::navigate(app, "请求设置");
     app.wait_for("请求代理模式").unwrap();
 }
 
@@ -32,8 +32,8 @@ fn navigating_to_the_request_settings_page_shows_modes_and_scope_notes() {
         "跟随系统代理",
         "核心代理（指向已保存的 mixed_port）",
         "自定义 HTTP(S) / SOCKS5 代理",
-        "本页不启动核心/系统代理/TUN",
-        "本页不做连接测试",
+        "下一次请求使用新设置",
+        "核心未运行时，请求会失败",
     ] {
         assert!(
             seen.iter().any(|text| text.contains(expected)),
@@ -54,11 +54,8 @@ fn fresh_root_defaults_to_direct_and_never_writes_config_on_read() {
     let before = std::fs::read(&app_toml).unwrap();
     open_request_settings(&mut app);
     let seen = texts(&app);
-    assert!(
-        seen.contains(&"已保存：直连（不使用代理） · GitHub 镜像未配置"),
-        "{seen:?}"
-    );
-    assert!(seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
+    assert!(!seen.iter().any(|line| line.starts_with("已保存：")));
+    assert!(!seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
     assert_eq!(
         std::fs::read(&app_toml).unwrap(),
         before,
@@ -85,11 +82,8 @@ fn saving_custom_mode_with_url_and_prefix_persists_and_reopens() {
     app.wait_for("请求设置已保存；下一次订阅刷新与远程资源请求将使用新策略")
         .unwrap();
     let seen = texts(&app);
-    assert!(
-        seen.contains(&"已保存：自定义 HTTP(S) / SOCKS5 代理 · GitHub 镜像已配置"),
-        "{seen:?}"
-    );
-    assert!(seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
+    assert!(!seen.iter().any(|line| line.starts_with("已保存：")));
+    assert!(!seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
     drop(app);
 
     let saved = lanpath_client::ClientConfig::load_for_requests(dir.path()).unwrap();
@@ -102,7 +96,7 @@ fn saving_custom_mode_with_url_and_prefix_persists_and_reopens() {
 
     let mut reopened = start_app(entries).0;
     // 等第二次启动渲染完成（侧栏标题常驻）再导航。
-    reopened.wait_for("Lanpath NSH Desktop").unwrap();
+    reopened.wait_for("id:nav-overview").unwrap();
     open_request_settings(&mut reopened);
     assert_eq!(
         reopened
@@ -119,10 +113,7 @@ fn saving_custom_mode_with_url_and_prefix_persists_and_reopens() {
         Some("https://mirror.example/")
     );
     let seen = texts(&reopened);
-    assert!(
-        seen.contains(&"已保存：自定义 HTTP(S) / SOCKS5 代理 · GitHub 镜像已配置"),
-        "{seen:?}"
-    );
+    assert!(!seen.iter().any(|line| line.starts_with("已保存：")));
 }
 
 /// 切出自定义模式不清空地址：草稿保留并可随其他模式保存，切回继续可用。
@@ -191,7 +182,7 @@ fn invalid_custom_proxy_shows_a_redacted_error_and_keeps_the_draft() {
     );
     assert_eq!(std::fs::read(&app_toml).unwrap(), before);
     assert!(!dir.path().join("client.json").exists());
-    assert!(texts(&app).contains(&"已保存：直连（不使用代理） · GitHub 镜像未配置"));
+    assert!(!texts(&app).iter().any(|line| line.starts_with("已保存：")));
 }
 
 /// 重置：有未保存修改先确认；放弃修改后草稿恢复为已保存值。
@@ -228,11 +219,8 @@ fn resetting_a_dirty_draft_asks_and_restores_the_saved_values() {
         Some("")
     );
     let seen = texts(&app);
-    assert!(
-        seen.contains(&"已保存：跟随系统代理 · GitHub 镜像未配置"),
-        "{seen:?}"
-    );
-    assert!(seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
+    assert!(!seen.iter().any(|line| line.starts_with("已保存：")));
+    assert!(!seen.contains(&"设置与已保存的请求策略一致"), "{seen:?}");
 }
 
 /// 页面保存 Custom 代理后经订阅刷新验证：请求以绝对形式到达代理服务器

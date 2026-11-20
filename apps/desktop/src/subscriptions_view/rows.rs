@@ -10,7 +10,6 @@ use nsh_core::prelude::*;
 use uuid::Uuid;
 
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
-use crate::ui::layout::SurfaceLevel;
 use crate::ui::overlay::confirm_dialog;
 
 use super::{SubscriptionPageState, spawn_refresh};
@@ -20,54 +19,90 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
     let empty_state = state.clone();
     let message_state = state.clone();
     let notice_state = message_state.clone();
+    let list_error = message_state.list_error;
+    let notice = notice_state.notice;
     let busy_show = state.clone();
     let row_state = state.clone();
     let remove_dialog_state = state.clone();
     let edit_dialog_state = state.clone();
+    let state_search = state.search;
+    let list = state.list;
+    let filtered = computed(move || {
+        let query = state_search.get().to_lowercase();
+        list.get()
+            .into_iter()
+            .filter(|s| s.name.to_lowercase().contains(&query))
+            .collect::<Vec<_>>()
+    });
     let source_dialog_state = state;
-    scroll().flex_1().child(
-        view()
-            .flex_col()
-            .gap_2()
-            .child(
-                text(move || t!("subscription.count", count = count_state.list.get().len()))
-                    .text_color(move || theme().muted_foreground),
-            )
-            .child(when(
-                move || empty_state.list.get().is_empty() && empty_state.list_error.get().is_none(),
-                || text(|| t!("subscription.empty")).text_color(move || theme().muted_foreground),
-            ))
-            .child(
-                text(move || message_state.list_error.get().unwrap_or_default())
-                    .text_color(move || theme().destructive),
-            )
-            .child(
-                text(move || notice_state.notice.get().unwrap_or_default())
-                    .text_color(move || theme().muted_foreground),
-            )
-            .child(when(
-                move || busy_show.any_refreshing(),
-                move || {
-                    text(super::busy_refreshing())
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground)
-                },
-            ))
-            .child(each(
-                row_state.list,
-                |subscription: &Subscription| subscription.id,
-                move |item, _index| subscription_row(row_state.clone(), item),
-            ))
-            .child(delete_confirm(remove_dialog_state))
-            .child(when(
-                move || edit_dialog_state.edit.id.get().is_some(),
-                move || super::editor::edit_dialog(edit_dialog_state.clone()),
-            ))
-            .child(when(
-                move || source_dialog_state.source_view.get().is_some(),
-                move || super::source_view::source_dialog(source_dialog_state.clone()),
-            )),
-    )
+    view()
+        .flex_1()
+        .min_h(px(0.0))
+        .flex_col()
+        .gap_3()
+        .child(
+            view()
+                .flex_col()
+                .gap_2()
+                .child(
+                    text(move || t!("subscription.count", count = count_state.list.get().len()))
+                        .text_color(move || theme().muted_foreground),
+                )
+                .child(when(
+                    move || {
+                        empty_state.list.get().is_empty() && empty_state.list_error.get().is_none()
+                    },
+                    || {
+                        text(|| t!("subscription.empty"))
+                            .text_color(move || theme().muted_foreground)
+                    },
+                ))
+                .child(when(
+                    move || list_error.get().is_some(),
+                    move || {
+                        text(move || message_state.list_error.get().unwrap_or_default())
+                            .text_color(move || theme().destructive)
+                    },
+                ))
+                .child(when(
+                    move || notice.get().is_some(),
+                    move || {
+                        text(move || notice_state.notice.get().unwrap_or_default())
+                            .text_color(move || theme().muted_foreground)
+                    },
+                ))
+                .child(when(
+                    move || busy_show.any_refreshing(),
+                    move || {
+                        text(super::busy_refreshing())
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground)
+                    },
+                ))
+                .child(
+                    crate::ui::input(state_search)
+                        .test_id("subscription-search")
+                        .accessible_name(|| t!("subscription.search"))
+                        .placeholder(|| t!("subscription.search"))
+                        .on_change(move |v| state_search.set(v)),
+                )
+                .child(delete_confirm(remove_dialog_state))
+                .child(when(
+                    move || edit_dialog_state.edit.id.get().is_some(),
+                    move || super::editor::edit_dialog(edit_dialog_state.clone()),
+                ))
+                .child(when(
+                    move || source_dialog_state.source_view.get().is_some(),
+                    move || super::source_view::source_dialog(source_dialog_state.clone()),
+                )),
+        )
+        .child(crate::ui::cards::card_grid(
+            filtered,
+            228.0,
+            None,
+            |subscription: &Subscription| subscription.id.to_string(),
+            move |item| subscription_row(row_state.clone(), item).into_element(),
+        ))
 }
 
 fn subscription_row(
@@ -84,121 +119,133 @@ fn subscription_row(
     let refresh_status_state = state.clone();
     let active_state = state.clone();
     let more_state = state;
-    crate::ui::surface(SurfaceLevel::Card)
-        .test_id(&row_test_id)
-        .flex_col()
-        .gap_1()
-        .p_3()
-        .child(
+    let enabled = item;
+    let selected = active_state.active;
+    crate::ui::cards::selection_card(
+        move || enabled.get().enabled,
+        move || selected.get() == Some(id),
+    )
+    .test_id(&row_test_id)
+    .optional_label(move || Some(item.get().name.into()))
+    .flex_col()
+    .gap_1()
+    .p_3()
+    .child(
+        view()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap_3()
+            .child(enabled_switch(switch_state, item))
+            .child(
+                text(move || item.get().name.clone())
+                    .text_size(px(15.0))
+                    .flex_1()
+                    .truncate()
+                    .min_w(px(0.0)),
+            )
+            .child(when(
+                move || refresh_status_state.refreshing.get().contains(&id),
+                || {
+                    text(move || t!("subscription.refreshing"))
+                        .text_size(px(12.0))
+                        .text_color(move || theme().muted_foreground)
+                },
+            )),
+    )
+    .child(when(
+        move || active_state.active.get() == Some(id),
+        || {
             view()
                 .flex_row()
                 .items_center()
-                .gap_3()
-                .child(enabled_switch(switch_state, item))
-                .child(
-                    text(move || item.get().name.clone())
-                        .text_size(px(15.0))
-                        .truncate()
-                        .min_w(px(0.0)),
-                )
-                .child(when(
-                    move || active_state.active.get() == Some(id),
-                    || {
-                        text(|| t!("subscription.active_mark"))
-                            .text_size(px(12.0))
-                            .text_color(move || theme().primary)
-                    },
+                .gap_1()
+                .child(crate::ui::icon::icon(
+                    crate::ui::icon::Icon::Check,
+                    crate::ui::icon::Tone::Primary,
                 ))
                 .child(
-                    text(move || {
-                        if item.get().enabled {
-                            t!("subscription.enabled_on")
-                        } else {
-                            t!("subscription.enabled_off")
-                        }
-                    })
-                    .text_size(px(12.0))
-                    .text_color(move || theme().muted_foreground),
+                    text(|| t!("subscription.active_mark"))
+                        .text_size(px(12.0))
+                        .text_color(move || theme().primary),
                 )
-                .child(view().flex_1())
-                .child(when(
-                    move || refresh_status_state.refreshing.get().contains(&id),
-                    || {
-                        text(move || t!("subscription.refreshing"))
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground)
-                    },
-                ))
-                .child(row_button(
-                    refresh_button,
-                    item,
-                    || t!("subscription.action.refresh"),
-                    |state, subscription| {
-                        run_refresh(state, subscription.id);
-                    },
-                ))
-                .child(row_button(
-                    edit_button,
-                    item,
-                    || t!("subscription.action.edit"),
-                    |state, subscription| {
-                        state.edit.open(subscription);
-                    },
-                ))
-                .child(row_button(
-                    source_button,
-                    item,
-                    || t!("subscription.action.source"),
-                    |state, subscription| {
-                        super::source_view::open_source(state, subscription);
-                    },
-                ))
-                .child(when(
-                    move || activate_state.active.get() != Some(id),
-                    move || {
-                        row_button(
-                            activate_state.clone(),
-                            item,
-                            || t!("subscription.action.activate"),
-                            |state, subscription| {
-                                run_activate(state, subscription.id);
-                            },
-                        )
-                    },
-                ))
-                .child(more_menu(more_state.clone(), item)),
-        )
-        .child(
-            text(move || {
-                let subscription = item.get();
-                let mut summary = if subscription.node_count > 0 {
-                    t!("subscription.nodes", count = subscription.node_count)
-                } else {
-                    t!("subscription.nodes_unknown")
-                };
-                if let Some(format) = subscription.format {
-                    summary.push_str(&format!(
-                        " · {}",
-                        t!("subscription.format", format = format!("{format:?}"))
-                    ));
-                }
-                summary
-            })
+        },
+    ))
+    .child(
+        view()
+            .flex_row()
+            .flex_wrap()
+            .gap_1()
+            .child(row_button(
+                refresh_button,
+                item,
+                || t!("subscription.action.refresh"),
+                |state, subscription| {
+                    run_refresh(state, subscription.id);
+                },
+            ))
+            .child(row_button(
+                edit_button,
+                item,
+                || t!("subscription.action.edit"),
+                |state, subscription| {
+                    state.edit.open(subscription);
+                },
+            ))
+            .child(row_button(
+                source_button,
+                item,
+                || t!("subscription.action.source"),
+                |state, subscription| {
+                    super::source_view::open_source(state, subscription);
+                },
+            ))
+            .child(when(
+                move || activate_state.active.get() != Some(id),
+                move || {
+                    row_button(
+                        activate_state.clone(),
+                        item,
+                        || t!("subscription.action.activate"),
+                        |state, subscription| {
+                            run_activate(state, subscription.id);
+                        },
+                    )
+                },
+            ))
+            .child(more_menu(more_state.clone(), item)),
+    )
+    .child(
+        text(move || {
+            let subscription = item.get();
+            let mut summary = if subscription.node_count > 0 {
+                t!("subscription.nodes", count = subscription.node_count)
+            } else {
+                t!("subscription.nodes_unknown")
+            };
+            if let Some(format) = subscription.format {
+                summary.push_str(&format!(
+                    " · {}",
+                    t!("subscription.format", format = format!("{format:?}"))
+                ));
+            }
+            summary
+        })
+        .text_size(px(12.0))
+        .text_color(move || theme().muted_foreground),
+    )
+    .child(binding_summary(more_state.clone(), item))
+    .child(when(
+        move || item.get().error.is_some(),
+        move || {
+            text(t!(
+                "subscription.error_prefix",
+                error = item.get().error.clone().unwrap_or_default()
+            ))
             .text_size(px(12.0))
-            .text_color(move || theme().muted_foreground),
-        )
-        .child(binding_summary(more_state.clone(), item))
-        .child(when(
-            move || item.get().error.is_some(),
-            move || {
-                text(t!(
-                    "subscription.error_prefix",
-                    error = item.get().error.clone().unwrap_or_default()
-                ))
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive)
-            },
-        ))
+            .text_color(move || theme().destructive)
+        },
+    ))
 }
 
 /// 行内覆写模板绑定：已绑定显示模板名；模板被外部删除或清单损坏导致
@@ -273,11 +320,33 @@ fn more_menu(state: SubscriptionPageState, item: ReadSignal<Subscription>) -> An
         .size(ButtonSize::Sm)
         .label(|| t!("subscription.more"));
     menu()
+        .offset(px(4.0))
+        .popup_style(|s| crate::ui::select::popup_surface(s).min_w(px(160.0)))
+        .popup_starting_style(crate::ui::select::popup_starting)
+        .popup_ending_style(crate::ui::select::popup_ending)
         .trigger(trigger)
         .child(
             // test_id 挂在菜单项内部锚点上（同 Button：外层 wrapper 不在
             // 按压/选择的祖先链上，自动化按 id 找不到目标）。
             menu_item()
+                .px_3()
+                .py_2()
+                .cursor(Cursor::Default)
+                .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
+                .hover(|s| {
+                    s.bg(move || {
+                        theme()
+                            .color("danger-surface")
+                            .unwrap_or_else(|| theme().accent)
+                    })
+                })
+                .focus(|s| {
+                    s.bg(move || {
+                        theme()
+                            .color("danger-surface")
+                            .unwrap_or_else(|| theme().accent)
+                    })
+                })
                 .text_color(move || theme().destructive)
                 .child(
                     view()

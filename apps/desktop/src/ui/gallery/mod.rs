@@ -1,18 +1,40 @@
 //! Development-only component gallery, opened with --ui-gallery.
-//! Covers shared variants, states, themes, languages and reduced motion.
-//! System text scaling is reflected without an application-level override.
-//! Sections live in sections.rs; Windows UIA and screenshots verify the result.
+//! Inspired by NSH official Gallery and Doona: desktop sidebar navigation,
+//! live appearance/theme/motion controls bar, full component matrix and token swatches.
 
-mod sections;
+mod controls;
+mod data_theme_motion;
+mod feedback_overlays;
+mod selection;
+mod surfaces;
 
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use super::{ThemeId, button, feedback, layout, prefs, theme_preview};
-use sections::{
-    buttons_section, data_section, feedback_section, inputs_section, overlays_section,
-    selection_section,
-};
+use super::icon::{Icon, Tone, icon_sized};
+use super::{ThemeId, button, feedback, layout, prefs, select};
+
+/// 画廊左侧导航分类；默认 `All` 展示全部验收分区，点选单项可聚焦精查。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GallerySection {
+    All,
+    Theme,
+    Icons,
+    Buttons,
+    Inputs,
+    Selection,
+    Surfaces,
+    Feedback,
+    Overlays,
+    Data,
+    Motion,
+}
+
+impl GallerySection {
+    fn show(self, target: GallerySection) -> bool {
+        self == GallerySection::All || self == target
+    }
+}
 
 /// 画廊根组件（`--ui-gallery` 入口）。
 #[component]
@@ -24,198 +46,387 @@ pub fn Gallery() -> impl IntoElement {
 
 /// 画廊内容。
 pub fn gallery_view() -> impl IntoElement {
+    let active = signal(GallerySection::All);
     view()
         .flex_1()
         .flex_col()
-        .bg(move || theme().background)
+        .bg(prefs::window_bg)
         .text_color(move || theme().foreground)
         .child(super::title_bar::title_bar())
         .child(
-            scroll().flex_1().child(
-                view()
-                    .flex_col()
-                    .gap_6()
-                    .p_6()
-                    .child(layout::page_header(
-                        || t!("gallery.title"),
-                        || t!("gallery.subtitle"),
-                    ))
-                    .child(buttons_section())
-                    .child(inputs_section())
-                    .child(selection_section())
-                    .child(feedback_section())
-                    .child(overlays_section())
-                    .child(data_section())
-                    .child(theme_section())
-                    .child(motion_section()),
-            ),
+            view()
+                .flex_1()
+                .min_h(px(0.0))
+                .flex_row()
+                .child(when(
+                    move || window().width.0 >= 860.0,
+                    move || gallery_sidebar(active),
+                ))
+                .child(
+                    scroll().flex_1().min_w(px(0.0)).child(
+                        view()
+                            .flex_col()
+                            .gap_6()
+                            .p_6()
+                            .max_w(px(1160.0))
+                            .child(gallery_header())
+                            .child(when(
+                                move || active.get().show(GallerySection::Buttons),
+                                controls::buttons_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Icons),
+                                surfaces::icons_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Inputs),
+                                controls::inputs_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Selection),
+                                selection::selection_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Surfaces),
+                                surfaces::surfaces_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Feedback),
+                                feedback_overlays::feedback_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Overlays),
+                                feedback_overlays::overlays_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Data),
+                                data_theme_motion::data_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Theme),
+                                data_theme_motion::theme_section,
+                            ))
+                            .child(when(
+                                move || active.get().show(GallerySection::Motion),
+                                data_theme_motion::motion_section,
+                            )),
+                    ),
+                ),
         )
         .child(feedback::toast_host())
+}
+
+fn gallery_header() -> AnyElement {
+    let prefs = prefs::prefs();
+    let mode = prefs.mode;
+    let current_theme = prefs.theme;
+    let motion = prefs.motion;
+    let material = prefs.material;
+    view()
+        .flex_col()
+        .gap_4()
+        .child(layout::page_header(
+            || t!("gallery.title"),
+            || t!("gallery.subtitle"),
+        ))
+        .child(
+            layout::surface(layout::SurfaceLevel::Card)
+                .p_3()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_3()
+                        .child(select::segmented_group(
+                            "gallery-mode-group",
+                            prefs::Mode::ALL
+                                .iter()
+                                .map(|target| {
+                                    let target = *target;
+                                    let test_id = match target {
+                                        prefs::Mode::System => "gallery-mode-system",
+                                        prefs::Mode::Light => "gallery-mode-light",
+                                        prefs::Mode::Dark => "gallery-mode-dark",
+                                    };
+                                    select::segmented_radio(
+                                        move || mode.get() == target,
+                                        move || t!(target.label_key()),
+                                        test_id,
+                                        move || {
+                                            if prefs.apply_mode(target).is_err() {
+                                                feedback::show_toast(t!("appearance.save_failed"));
+                                            }
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        ))
+                        .child(select::segmented_group(
+                            "gallery-backdrop-group",
+                            prefs::WindowMaterial::ALL
+                                .iter()
+                                .map(|target| {
+                                    let target = *target;
+                                    let test_id = match target {
+                                        prefs::WindowMaterial::Acrylic => {
+                                            "gallery-backdrop-acrylic"
+                                        }
+                                        prefs::WindowMaterial::Mica => "gallery-backdrop-mica",
+                                        prefs::WindowMaterial::Solid => "gallery-backdrop-solid",
+                                    };
+                                    select::segmented_radio(
+                                        move || material.get() == target,
+                                        move || t!(target.label_key()),
+                                        test_id,
+                                        move || {
+                                            if prefs.apply_material(target).is_err() {
+                                                feedback::show_toast(t!("appearance.save_failed"));
+                                            }
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        ))
+                        .child(select::segmented_group(
+                            "gallery-motion-group",
+                            prefs::MotionPref::ALL
+                                .iter()
+                                .map(|target| {
+                                    let target = *target;
+                                    let test_id = match target {
+                                        prefs::MotionPref::System => "gallery-motion-system",
+                                        prefs::MotionPref::Reduce => "gallery-motion-reduce",
+                                    };
+                                    select::segmented_radio(
+                                        move || motion.get() == target,
+                                        move || t!(target.label_key()),
+                                        test_id,
+                                        move || {
+                                            if prefs.apply_motion(target).is_err() {
+                                                feedback::show_toast(t!("appearance.save_failed"));
+                                            }
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        )),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(feedback::badge(
+                            feedback::BadgeVariant::Outline,
+                            move || {
+                                t!(
+                                    "gallery.state.active_theme",
+                                    name = current_theme.get().id_name()
+                                )
+                            },
+                        ))
+                        .child(
+                            button::button(button::ButtonVariant::Primary)
+                                .size(button::ButtonSize::Sm)
+                                .test_id("gallery-quick-mint")
+                                .prefix(|| icon_sized(Icon::Sparkles, Tone::OnPrimary, 14.0))
+                                .label(move || {
+                                    if current_theme.get() == ThemeId::Mint {
+                                        t!("gallery.controls.theme_ocean")
+                                    } else {
+                                        t!("gallery.controls.theme_mint")
+                                    }
+                                })
+                                .on_press(move || {
+                                    let next = if current_theme.get_untracked() == ThemeId::Mint {
+                                        ThemeId::Ocean
+                                    } else {
+                                        ThemeId::Mint
+                                    };
+                                    if prefs.apply_theme(next).is_err() {
+                                        feedback::show_toast(t!("appearance.save_failed"));
+                                    }
+                                }),
+                        ),
+                ),
+        )
+        .into_element()
+}
+
+fn gallery_sidebar(active: Signal<GallerySection>) -> AnyElement {
+    let nav_group = |key: &'static str| {
+        text(move || t!(key))
+            .text_size(px(12.0))
+            .text_color(move || theme().muted_foreground)
+            .px_3()
+            .pt_3()
+            .pb_1()
+    };
+    let nav_row = move |target: GallerySection,
+                        icon_kind: Icon,
+                        label_key: &'static str,
+                        test_id: &'static str| {
+        let selected = move || active.get() == target;
+        let reduced = prefs::prefs().reduced;
+        view().test_id(test_id).child(
+            nsh_base::button()
+                .selected(selected)
+                .w_full()
+                .min_h(px(34.0))
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .rounded(move || theme().radius)
+                .cursor(Cursor::Default)
+                .transition_colors()
+                .duration(move || {
+                    super::motion::motion_duration(super::motion::INSTANT_MS, reduced.get())
+                })
+                .bg(move || {
+                    if selected() {
+                        theme().sidebar_accent
+                    } else {
+                        transparent_black().into()
+                    }
+                })
+                .text_color(move || {
+                    if selected() {
+                        theme().sidebar_accent_foreground
+                    } else {
+                        theme().sidebar_foreground
+                    }
+                })
+                .hover(move |s| {
+                    s.bg(move || {
+                        if selected() {
+                            theme().sidebar_accent
+                        } else {
+                            theme().muted
+                        }
+                    })
+                })
+                .active(|s| s.bg(move || theme().accent))
+                .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+                .on_press(move || active.set(target))
+                .child(
+                    when(selected, move || icon_sized(icon_kind, Tone::Primary, 15.0))
+                        .otherwise(move || icon_sized(icon_kind, Tone::Muted, 15.0)),
+                )
+                .child(
+                    text(move || t!(label_key))
+                        .text_size(px(13.0))
+                        .style_when(selected, |s| s.font_weight(FontWeight::MEDIUM))
+                        .truncate()
+                        .flex_1()
+                        .min_w(px(0.0)),
+                ),
+        )
+    };
+
+    view()
+        .test_id("gallery-sidebar")
+        .w(px(220.0))
+        .flex_none()
+        .min_h(px(0.0))
+        .bg(prefs::sidebar_bg)
+        .border_r(px(1.0))
+        .border_color(move || theme().sidebar_border)
+        .child(
+            scroll().flex_1().min_h(px(0.0)).child(
+                view()
+                    .flex_col()
+                    .p_3()
+                    .gap_1()
+                    .child(nav_row(
+                        GallerySection::All,
+                        Icon::Overview,
+                        "gallery.nav.all",
+                        "gallery-nav-all",
+                    ))
+                    .child(nav_group("gallery.nav.group.foundations"))
+                    .child(nav_row(
+                        GallerySection::Theme,
+                        Icon::Appearance,
+                        "gallery.section.theme",
+                        "gallery-nav-theme",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Icons,
+                        Icon::Sparkles,
+                        "gallery.section.icons",
+                        "gallery-nav-icons",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Motion,
+                        Icon::Activity,
+                        "gallery.section.motion",
+                        "gallery-nav-motion",
+                    ))
+                    .child(nav_group("gallery.nav.group.controls"))
+                    .child(nav_row(
+                        GallerySection::Buttons,
+                        Icon::Play,
+                        "gallery.section.buttons",
+                        "gallery-nav-buttons",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Inputs,
+                        Icon::Code,
+                        "gallery.section.inputs",
+                        "gallery-nav-inputs",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Selection,
+                        Icon::Sliders,
+                        "gallery.section.selection",
+                        "gallery-nav-selection",
+                    ))
+                    .child(nav_group("gallery.nav.group.display"))
+                    .child(nav_row(
+                        GallerySection::Surfaces,
+                        Icon::Layers,
+                        "gallery.section.surfaces",
+                        "gallery-nav-surfaces",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Feedback,
+                        Icon::Shield,
+                        "gallery.section.feedback",
+                        "gallery-nav-feedback",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Overlays,
+                        Icon::File,
+                        "gallery.section.overlays",
+                        "gallery-nav-overlays",
+                    ))
+                    .child(nav_row(
+                        GallerySection::Data,
+                        Icon::Logs,
+                        "gallery.section.data",
+                        "gallery-nav-data",
+                    )),
+            ),
+        )
+        .into_element()
 }
 
 /// 分区卡片：标题 + 内容槽。
 pub(crate) fn section(title_key: &'static str, content: impl IntoElement) -> AnyElement {
     layout::surface(layout::SurfaceLevel::Card)
-        .p_4()
+        .p_5()
         .flex_col()
-        .gap_3()
+        .gap_4()
         .w_full()
         .child(layout::section_title(|| t!(title_key)))
         .child(content)
-        .into_element()
-}
-
-fn theme_section() -> AnyElement {
-    section(
-        "gallery.section.theme",
-        view()
-            .grid()
-            .w_full()
-            .app_class("justify-items-stretch")
-            .grid_cols(move || if window().width.0 < 1080.0 { 2_u16 } else { 4 })
-            .gap_3()
-            .children(ThemeId::ALL.iter().map(|id| {
-                let prefs = prefs::prefs();
-                let prefs_for_press = prefs;
-                let theme_id = *id;
-                let test_id: &'static str = match theme_id {
-                    ThemeId::Amethyst => "gallery-theme-amethyst",
-                    ThemeId::Indigo => "gallery-theme-indigo",
-                    ThemeId::Ocean => "gallery-theme-ocean",
-                    ThemeId::Forest => "gallery-theme-forest",
-                    ThemeId::Sand => "gallery-theme-sand",
-                    ThemeId::Rose => "gallery-theme-rose",
-                    ThemeId::Graphite => "gallery-theme-graphite",
-                    ThemeId::Cyan => "gallery-theme-cyan",
-                    ThemeId::Orange => "gallery-theme-orange",
-                    ThemeId::Teal => "gallery-theme-teal",
-                    ThemeId::Crimson => "gallery-theme-crimson",
-                    ThemeId::Gold => "gallery-theme-gold",
-                    ThemeId::Slate => "gallery-theme-slate",
-                };
-                button::button(button::ButtonVariant::Ghost)
-                    .size(button::ButtonSize::Content)
-                    .full_width()
-                    .selected(move || prefs.theme.get() == theme_id)
-                    .accessible_name(move || {
-                        SharedString::from(t!("appearance.theme.a11y", name = theme_id.id_name()))
-                    })
-                    .test_id(test_id)
-                    .on_press(move || {
-                        if prefs_for_press.apply_theme(theme_id).is_err() {
-                            feedback::show_toast(t!("appearance.save_failed"));
-                        }
-                    })
-                    .prefix(move || {
-                        theme_preview::theme_preview(theme_id, move || {
-                            prefs.theme.get() == theme_id
-                        })
-                    })
-            })),
-    )
-}
-
-fn motion_section() -> AnyElement {
-    let reduced = prefs::prefs().reduced;
-    section(
-        "gallery.section.motion",
-        view()
-            .flex_col()
-            .gap_3()
-            .child(
-                view()
-                    .flex_row()
-                    .gap_4()
-                    .flex_wrap()
-                    .text_size(px(13.0))
-                    .children(
-                        [
-                            "gallery.motion.instant",
-                            "gallery.motion.fast",
-                            "gallery.motion.base",
-                            "gallery.motion.slow",
-                            "gallery.motion.slower",
-                            "gallery.motion.distance",
-                            "gallery.motion.press",
-                        ]
-                        .map(|key| text(move || t!(key)).into_element()),
-                    ),
-            )
-            .child(when(
-                move || reduced.get(),
-                || text(|| t!("gallery.motion.reduced_on")).text_size(px(12.0)),
-            ))
-            .child(motion_demo()),
-    )
-}
-
-/// 动效演示：进入（slower 错峰淡入）、按下（fast pulse）、循环（spin）。
-/// 全部由动效 token 驱动；reduced 时 `Motion::play` 立即落位。
-fn motion_demo() -> AnyElement {
-    let boxed = motion();
-    let spin = motion();
-    let spinning = signal(false);
-    let play_press = boxed;
-    let play_spin = spin;
-    view()
-        .flex_row()
-        .gap_3()
-        .items_center()
-        .child(
-            view()
-                .bind_motion(&boxed)
-                .size(px(56.0))
-                .rounded(move || theme().radius)
-                .bg(move || theme().primary)
-                .items_center()
-                .justify_center()
-                .child(
-                    text("Aa")
-                        .text_size(px(18.0))
-                        .text_color(move || theme().primary_foreground),
-                ),
-        )
-        .child(
-            view()
-                .bind_motion(&spin)
-                .size(px(28.0))
-                .rounded_full()
-                .border(px(2.0))
-                .border_color(move || theme().primary),
-        )
-        .child(
-            button::button(button::ButtonVariant::Outline)
-                .label(|| t!("gallery.motion.base"))
-                .on_press(move || {
-                    let _ = play_press.play(MotionPreset::Pulse);
-                }),
-        )
-        .child(
-            button::button(button::ButtonVariant::Outline)
-                .label(|| t!("gallery.motion.demo"))
-                .on_press(move || {
-                    if prefs::prefs().reduced.get() {
-                        // 应用内“减少动效”与系统设置同等生效：循环演示
-                        // 不启动，也不留下一帧持续动画。
-                        play_spin.stop();
-                        spinning.set(false);
-                        return;
-                    }
-                    if spinning.get() {
-                        play_spin.stop();
-                        spinning.set(false);
-                    } else {
-                        let mut spec = MotionPreset::Spin.spec();
-                        spec.timing.duration_ms = 1400.0;
-                        // 引擎级 reduced 时 `play` 落到末帧且不持续旋转。
-                        let _ = play_spin.play(spec);
-                        spinning.set(true);
-                    }
-                }),
-        )
-        .child(when(
-            move || spinning.get(),
-            || text(|| t!("gallery.motion.spinning")).text_size(px(12.0)),
-        ))
         .into_element()
 }

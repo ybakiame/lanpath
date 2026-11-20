@@ -21,8 +21,8 @@ use lanpath_common::CoreType;
 const API_BASE_KEY: &str = "lanpath_desktop_nsh.core_api_base";
 
 fn open_core_page(app: &mut nsh_testing::Headless) {
-    app.press("核心").unwrap();
-    app.wait_for("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管")
+    common::navigate(app, "核心");
+    app.wait_for("准备核心版本，校验后启动本地代理。运行会话与系统代理分别确认。")
         .unwrap();
 }
 
@@ -90,12 +90,12 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("核心").unwrap();
+    common::navigate(&mut app, "核心");
     app.wait_for("尚未选择核心").unwrap();
     let seen = texts(&app);
     for expected in [
-        "管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管",
-        "校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · TUN/VPN 不接管；系统代理经独立守护接管/恢复（见下方分区）",
+        "准备核心版本，校验后启动本地代理。运行会话与系统代理分别确认。",
+        "启动前先校验二进制与配置。核心仅监听本地地址，系统代理由独立守护接管和恢复。",
         "未运行",
         "此通道尚无本地版本，可切换通道或检查更新后下载。",
         "本地：未安装",
@@ -128,7 +128,7 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
         );
         assert!(
             seen.iter()
-                .any(|text| text.contains("核心运行时代理系统代理")),
+                .any(|text| text.contains("随核心启停设置系统代理")),
             "偏好开关仍应可见: {seen:?}"
         );
     }
@@ -138,7 +138,7 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
         let seen = texts(&app);
         assert!(
             seen.iter()
-                .any(|text| text.contains("核心运行时代理系统代理")),
+                .any(|text| text.contains("随核心启停设置系统代理")),
             "missing takeover switch: {seen:?}"
         );
         assert!(
@@ -269,7 +269,7 @@ fn download_is_single_flight_and_recovers_after_leaving_the_page() {
     app.press("id:core-download").unwrap();
 
     // 下载在途时离开页面再回来：新页面看到同根真实活动，不能重复发请求。
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     common::wait_ready(&mut app);
     open_core_page(&mut app);
     app.wait_for_within("text:/正在下载/", Duration::from_secs(5))
@@ -312,7 +312,7 @@ fn download_completed_before_returning_clears_initial_busy() {
     app.wait_for("远程：v1.2.3").unwrap();
     app.press("id:core-download").unwrap();
 
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     common::wait_ready(&mut app);
     let binary = core_binary(dir.path(), CoreType::SingBox, "1.2.3");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -454,7 +454,7 @@ fn start_button_validates_launches_and_stops_core() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18301, 18302);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     app.wait_for_within("未运行", Duration::from_secs(30))
         .unwrap();
@@ -489,7 +489,8 @@ fn start_button_validates_launches_and_stops_core() {
 fn start_failure_shows_real_binary_check_error() {
     let (dir, entries) = data_root();
     init_root_then(&entries, dir.path(), |root| {
-        let binary = seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18311, 18312);
+        let (mixed, api) = common::available_loopback_ports();
+        let binary = seed_runtime_target(root, CoreType::SingBox, "1.2.3", mixed, api);
         std::fs::write(
             binary.with_extension("behavior"),
             br#"{"fixture_fail":"ui-check-boom"}"#,
@@ -497,7 +498,7 @@ fn start_failure_shows_real_binary_check_error() {
         .unwrap();
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     app.press("id:core-start").unwrap();
     app.wait_for_within("text:/启动核心失败/", Duration::from_secs(45))
@@ -519,15 +520,15 @@ fn running_state_is_shared_across_page_switches() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18321, 18322);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     app.press("id:core-start").unwrap();
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
         .unwrap();
 
-    app.press("订阅").unwrap();
-    app.wait_for("Lanpath NSH Desktop").unwrap();
-    app.press("核心").unwrap();
+    common::open_subscriptions(&mut app);
+    app.wait_for("id:nav-overview").unwrap();
+    common::navigate(&mut app, "核心");
     app.wait_for_within(
         "text:/运行中：sing-box v1.2.3 · mixed 18321/",
         Duration::from_secs(30),
@@ -551,7 +552,7 @@ fn inventory_select_is_rejected_while_core_is_running() {
         common::seed_fixture_core(root, CoreType::SingBox, "1.2.2");
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     app.wait_for("v1.2.2").unwrap();
     app.press("id:core-start").unwrap();
@@ -594,7 +595,7 @@ fn unexpected_exit_is_detected_by_the_status_poll() {
         .unwrap();
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     app.press("id:core-start").unwrap();
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
@@ -666,7 +667,7 @@ fn proxy_preference_change_is_rejected_while_a_core_command_is_busy() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18397, 18398);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_core_page(&mut app);
     let config = dir.path().join("app.toml");
     let before = std::fs::read(&config).expect("read app.toml before start");

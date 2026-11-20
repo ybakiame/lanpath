@@ -2,9 +2,12 @@
 //! 对话框 + 真实 `.zip.age` 写出。加密在 blocking 线程执行（age scrypt
 //! CPU 密集，不占引擎线程）；成功后清空密码输入。
 
-use nsh_base::{button, input, theme};
+use nsh_base::theme;
 use nsh_core::file_dialog::{FileFilter, SaveDialog};
 use nsh_core::prelude::*;
+
+use crate::ui::icon::{Icon, Tone, icon_sized};
+use crate::ui::layout::{AlertTone, alert_banner};
 
 use super::{BackupPageState, section};
 
@@ -13,6 +16,9 @@ pub(super) fn export_card(state: BackupPageState) -> impl IntoElement {
     let generate_state = state.clone();
     let button_state = state.clone();
     let status_state = state.clone();
+    let copy_state = state.clone();
+    let copy_password = state.export_password;
+    let export_status = state.export_status;
     section(
         "导出加密备份",
         "把当前订阅、覆写与请求设置打包为 age 加密备份（.zip.age）。密码只用于加密，丢失无法找回；请使用密码管理器保存。",
@@ -21,66 +27,82 @@ pub(super) fn export_card(state: BackupPageState) -> impl IntoElement {
     .child(
         view()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .gap_2()
-            .child(generate_button(generate_state))
             .child(export_button(button_state))
+            .child(generate_button(generate_state))
             .child(
-                text(move || {
-                    if status_state.exporting.get() {
-                        "导出中…".to_owned()
-                    } else {
-                        String::new()
-                    }
-                })
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-            ),
+                crate::ui::button(crate::ui::ButtonVariant::Outline)
+                    .size(crate::ui::ButtonSize::Sm)
+                    .prefix(|| icon_sized(Icon::Copy, Tone::Muted, 13.0))
+                    .label(|| t!("backup.copy_password"))
+                    .test_id("backup-copy-password")
+                    .disabled(move || copy_password.get().is_empty())
+                    .on_press(move || {
+                        set_clipboard(copy_state.export_password.get());
+                        copy_state
+                            .export_status
+                            .set(Some(t!("backup.password_copied")));
+                    }),
+            )
+            .child(when(
+                move || status_state.exporting.get(),
+                || {
+                    text(|| "导出中…".to_owned())
+                        .text_size(px(12.5))
+                        .text_color(move || theme().muted_foreground)
+                },
+            )),
     )
-    .child(
-        text(move || status_state.export_status.get().unwrap_or_default())
-            .test_id("backup-export-status")
-            .text_size(px(12.0))
-            .text_color(move || {
-                if status_state.export_status.get().is_some() {
-                    theme().foreground
-                } else {
-                    theme().muted_foreground
-                }
-            }),
-    )
+    .child(when(
+        move || export_status.get().is_some(),
+        move || {
+            alert_banner(
+                AlertTone::Info,
+                text(move || export_status.get().unwrap_or_default())
+                    .test_id("backup-export-status")
+                    .text_size(px(12.5))
+                    .text_color(move || theme().foreground),
+            )
+        },
+    ))
 }
 
 fn password_input(state: BackupPageState) -> impl IntoElement {
     let change_state = state.clone();
-    input()
-        .test_id("backup-export-password")
-        .value(state.export_password)
-        .placeholder("备份密码（至少 12 个字符）")
-        .auto_correct(false)
-        // 口令输入恒掩码：任何状态下都不明文显示。
-        .masked(true)
-        .on_change(move |text: &str| {
-            change_state.export_password.set(text.to_owned());
-            change_state.export_status.set(None);
-        })
-        .p_2()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().input)
-        .bg(move || theme().background)
+    crate::ui::field()
+        .label(|| t!("backup.password"))
+        .hint(|| t!("backup.password_hint"))
+        .control(
+            crate::ui::input(state.export_password)
+                .test_id("backup-export-password")
+                .accessible_name(|| t!("backup.password"))
+                .masked()
+                .disabled(move || {
+                    state.exporting.get()
+                        || state.importing.get()
+                        || state.preparing.get()
+                        || state.pending.get()
+                })
+                .on_change(move |value| {
+                    change_state.export_password.set(value);
+                    change_state.export_status.set(None);
+                }),
+        )
 }
 
 fn generate_button(state: BackupPageState) -> impl IntoElement {
-    button()
-        .px_3()
-        .py_1()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
+    let blocked = state.clone();
+    crate::ui::button(crate::ui::ButtonVariant::Outline)
+        .disabled(move || {
+            blocked.exporting.get()
+                || blocked.importing.get()
+                || blocked.preparing.get()
+                || blocked.pending.get()
+        })
+        .size(crate::ui::ButtonSize::Sm)
         .on_press(move || {
-            // 共享强密码（24 位字母数字，满足 ≥12 约束）；只写回输入框，
-            // 不落 storage/日志。
             state
                 .export_password
                 .set(lanpath_client::backup::generate_password());
@@ -88,28 +110,25 @@ fn generate_button(state: BackupPageState) -> impl IntoElement {
                 "已生成随机强密码：请立即保存到密码管理器，导出成功后此处会清空".to_owned(),
             ));
         })
-        .child(text("生成强密码").test_id("backup-generate-password"))
+        .test_id("backup-generate-password")
+        .label(|| t!("product.action.generate_password"))
 }
 
 fn export_button(state: BackupPageState) -> impl IntoElement {
     let label = state.clone();
-    button()
-        .px_4()
-        .py_2()
-        .rounded(move || theme().radius)
-        .bg(move || theme().primary)
+    crate::ui::button(crate::ui::ButtonVariant::Primary)
+        .size(crate::ui::ButtonSize::Md)
+        .prefix(|| icon_sized(Icon::Download, Tone::OnPrimary, 14.0))
+        .loading(move || label.exporting.get())
         .on_press(move || request_export(state.clone()))
-        .child(
-            text(move || {
-                if label.exporting.get() {
-                    "导出中…"
-                } else {
-                    "导出备份…"
-                }
-            })
-            .test_id("backup-export")
-            .text_color(move || theme().primary_foreground),
-        )
+        .test_id("backup-export")
+        .label(move || {
+            if label.exporting.get() {
+                "导出中…".to_owned()
+            } else {
+                "导出备份…".to_owned()
+            }
+        })
 }
 
 /// 导出任务：校验口令 → blocking 线程真实加密 → 原生保存对话框 → 写出。
@@ -134,8 +153,6 @@ fn request_export(state: BackupPageState) {
     }
     state.exporting.set(true);
     state.export_status.set(None);
-    // 页面 owner 下发任务：卡片显隐（pending 翻转/切页）不杀死在途写出，
-    // 避免写出半途而废留下半成品文件。
     state.owner.run(move || {
         state.export_task.with(|slot| {
             slot.replace(spawn(async move {
@@ -157,10 +174,8 @@ fn request_export(state: BackupPageState) {
                 };
                 state.exporting.set(false);
                 match result {
-                    // 用户在保存对话框取消：不是失败，静默结束（口令保留待重试）。
                     Ok(None) => {}
                     Ok(Some(path)) => {
-                        // 成功后清空口令输入：口令不留在页面状态里。
                         state.export_password.set(String::new());
                         state
                             .export_status

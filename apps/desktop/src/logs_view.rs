@@ -3,12 +3,14 @@
 
 use std::sync::Arc;
 
-use nsh_base::{button, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::disk_logs_view::disk_logs;
 use crate::log_service::LogService;
 use crate::memory_logs_view::memory_logs;
+use crate::ui::layout::{AlertTone, alert_banner};
+use crate::ui::select::{segmented_group, segmented_radio};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum LogSection {
@@ -40,9 +42,17 @@ impl LogsState {
 pub(super) fn logs_page() -> impl IntoElement {
     let state = LogsState::new();
     let section = signal(LogSection::Memory);
-    let error_text = move || state.open_error.get().unwrap_or_default();
+    let io_busy = signal(false);
+    crate::navigation::protect(move || {
+        if io_busy.get() {
+            crate::navigation::LeaveState::Busy
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
+    let open_error = state.open_error;
     let body = match state.service.clone() {
-        Some(service) => logs_body(service, section).into_element(),
+        Some(service) => logs_body(service, section, io_busy).into_element(),
         None => view().into_element(),
     };
     view()
@@ -50,23 +60,58 @@ pub(super) fn logs_page() -> impl IntoElement {
         .flex_col()
         .gap_4()
         .min_h(px(0.0))
-        .child(text("日志").text_size(px(24.0)))
-        .child(
-            text("本应用运行事件 · 内存缓冲与磁盘原文，仅限 NSH 桌面数据根")
-                .text_color(move || theme().muted_foreground),
-        )
         .child(
             view()
                 .flex_row()
-                .gap_2()
-                .child(section_tab(section, LogSection::Memory, "内存日志"))
-                .child(section_tab(section, LogSection::Disk, "磁盘日志")),
+                .flex_wrap()
+                .items_end()
+                .justify_between()
+                .gap_3()
+                .child(crate::ui::page_header(
+                    || t!("nav.logs"),
+                    || t!("logs.subtitle"),
+                ))
+                .child(segmented_group(
+                    "logs-section-group",
+                    vec![
+                        section_tab(
+                            section,
+                            LogSection::Memory,
+                            io_busy,
+                            "logs-tab-memory",
+                            "内存日志",
+                        )
+                        .into_element(),
+                        section_tab(
+                            section,
+                            LogSection::Disk,
+                            io_busy,
+                            "logs-tab-disk",
+                            "磁盘日志",
+                        )
+                        .into_element(),
+                    ],
+                )),
         )
-        .child(text(error_text).text_color(move || theme().destructive))
+        .child(when(
+            move || open_error.get().is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || open_error.get().unwrap_or_default())
+                        .text_size(px(12.5))
+                        .text_color(move || theme().destructive),
+                )
+            },
+        ))
         .child(body)
 }
 
-fn logs_body(service: Arc<LogService>, section: Signal<LogSection>) -> impl IntoElement {
+fn logs_body(
+    service: Arc<LogService>,
+    section: Signal<LogSection>,
+    io_busy: Signal<bool>,
+) -> impl IntoElement {
     let memory_service = service.clone();
     let disk_service = service;
     view()
@@ -80,34 +125,25 @@ fn logs_body(service: Arc<LogService>, section: Signal<LogSection>) -> impl Into
         ))
         .child(when(
             move || section.get() == LogSection::Disk,
-            move || disk_logs(disk_service.clone()),
+            move || disk_logs(disk_service.clone(), io_busy),
         ))
 }
 
 fn section_tab(
     section: Signal<LogSection>,
     target: LogSection,
+    io_busy: Signal<bool>,
+    test_id: &'static str,
     label: &'static str,
 ) -> impl IntoElement {
-    let selected = move || section.get() == target;
-    button()
-        .px_3()
-        .py_2()
-        .rounded(move || theme().radius)
-        .items_center()
-        .bg(move || {
-            if selected() {
-                theme().primary
-            } else {
-                theme().card
+    segmented_radio(
+        move || section.get() == target,
+        move || label.to_owned(),
+        test_id,
+        move || {
+            if !io_busy.get() {
+                section.set(target);
             }
-        })
-        .on_press(move || section.set(target))
-        .child(text(label).text_color(move || {
-            if selected() {
-                theme().primary_foreground
-            } else {
-                theme().foreground
-            }
-        }))
+        },
+    )
 }

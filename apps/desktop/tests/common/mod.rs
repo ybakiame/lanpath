@@ -330,14 +330,46 @@ pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
 
 /// 应用就绪：侧栏标题常驻（阶段 1 起默认首页是概览）。
 pub fn wait_ready(app: &mut Headless) {
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
 }
 
 /// 打开订阅页并等待列表区就绪（默认首页是概览，需先等首帧再导航）。
+pub fn close_workspace(app: &mut Headless) {
+    if app.screen().matches("id:workspace-sheet-close").unwrap() {
+        app.press("id:workspace-sheet-close").unwrap();
+        app.wait_for_gone("id:workspace-sheet-close", Duration::from_secs(3))
+            .unwrap();
+    }
+}
+
+pub fn navigate(app: &mut Headless, destination: &str) {
+    close_workspace(app);
+    if matches!(destination, "配置预览" | "role:button[配置预览]") {
+        app.press("id:nav-overview >> role:button").unwrap();
+        app.press("id:nav-config").unwrap();
+    } else {
+        app.press(destination).unwrap();
+    }
+}
+
 pub fn open_subscriptions(app: &mut Headless) {
     wait_ready(app);
-    app.press("id:nav-subscriptions >> role:button").unwrap();
+    if app.screen().matches("id:subscription-name").unwrap() {
+        return;
+    }
+    navigate(app, "id:nav-overview >> role:button");
+    app.press("id:nav-subscriptions").unwrap();
     app.wait_for("id:subscription-name").unwrap();
+}
+
+pub fn open_profiles(app: &mut Headless) {
+    wait_ready(app);
+    if app.screen().matches("id:profiles-create").unwrap() {
+        return;
+    }
+    navigate(app, "id:nav-overview >> role:button");
+    app.press("id:nav-profiles").unwrap();
+    app.wait_for("id:profiles-create").unwrap();
 }
 
 /// 固定 Clash YAML 测试订阅（两个 SS 节点，共享解析器可识别为 ClashYaml）。
@@ -505,4 +537,32 @@ pub fn seed_fixture_core(
         .expect("create inventory directory");
     std::fs::copy(compiled_core_fixture(), &path).expect("copy fixture into inventory");
     path
+}
+
+/// 用宿主分配的端口隔离运行场景，避免占用用户正在使用的固定端口。
+pub fn available_loopback_ports() -> (u16, u16) {
+    let mixed = TcpListener::bind("127.0.0.1:0").expect("reserve mixed test port");
+    let api = TcpListener::bind("127.0.0.1:0").expect("reserve API test port");
+    (
+        mixed.local_addr().unwrap().port(),
+        api.local_addr().unwrap().port(),
+    )
+}
+
+/// Editor owns its selection; replace through select-all and a real paste event.
+pub fn replace_script(app: &mut Headless, source: &str) {
+    app.type_text("id:profile-js", "").unwrap();
+    app.press_key("ctrl+a").unwrap();
+    let mut paste = nsh_core::PasteEvent::default();
+    paste.text = source.to_owned();
+    app.paste("id:profile-js", &paste).unwrap();
+}
+
+/// Read the actual switch state rather than duplicate status copy.
+pub fn subscription_checked(app: &Headless, name: &str) -> bool {
+    app.screen()
+        .accessibility_state(&format!("role:switch[启用订阅 {name}]"))
+        .unwrap()
+        .checked
+        == Some(nsh_core::Checked::True)
 }

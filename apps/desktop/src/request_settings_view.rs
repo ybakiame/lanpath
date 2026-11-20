@@ -7,10 +7,11 @@
 //! 开关，不显示任何“连接成功”假反馈。
 
 use lanpath_client::RequestProxyMode;
-use nsh_base::{button, dialog, input, radio, radio_group, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::request_settings::{RequestSettings, RequestSettingsDocument};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, section_title, surface};
 
 /// 页面的四个代理模式（顺序即单选列表顺序）。
 const MODES: [RequestProxyMode; 4] = [
@@ -19,15 +20,6 @@ const MODES: [RequestProxyMode; 4] = [
     RequestProxyMode::Core,
     RequestProxyMode::Custom,
 ];
-
-fn mode_label(mode: RequestProxyMode) -> &'static str {
-    match mode {
-        RequestProxyMode::None => "直连（不使用代理）",
-        RequestProxyMode::System => "跟随系统代理",
-        RequestProxyMode::Core => "核心代理（指向已保存的 mixed_port）",
-        RequestProxyMode::Custom => "自定义 HTTP(S) / SOCKS5 代理",
-    }
-}
 
 fn mode_test_id(mode: RequestProxyMode) -> &'static str {
     match mode {
@@ -111,6 +103,15 @@ impl RequestSettingsState {
         )
     }
 
+    fn update_dirty(&self) {
+        let dirty = self.saved.get().is_none_or(|saved| {
+            saved.mode() != self.mode.get()
+                || saved.custom_url() != self.custom_url.get()
+                || saved.github_prefix() != self.github_prefix.get()
+        });
+        self.dirty.set(dirty);
+    }
+
     fn save(&self) {
         let Some(service) = self.service.clone() else {
             self.error.set(Some("打开数据根失败".to_owned()));
@@ -154,267 +155,165 @@ impl RequestSettingsState {
 
 pub(crate) fn request_settings_page() -> impl IntoElement {
     let state = RequestSettingsState::new();
-    let save_state = state.clone();
-    let reset_state = state.clone();
-    let summary_state = state.clone();
+    let dirty = state.dirty;
+    crate::navigation::protect(move || {
+        if dirty.get() {
+            crate::navigation::LeaveState::Dirty
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
+    let save = state.clone();
+    let reset = state.clone();
+    let mode = state.mode;
+    let url = state.custom_url;
+    let prefix = state.github_prefix;
+    let url_dirty = state.clone();
+    let prefix_dirty = state.clone();
     let radio_state = state.clone();
-    let url_state = state.clone();
-    let prefix_state = state.clone();
-    let error_state = state.clone();
-    let notice_state = state.clone();
-    let dirty_state = state.clone();
-    let dialog_state = state;
-    view()
-        .flex_1()
-        .flex_col()
-        .gap_4()
-        .child(text("请求设置").text_size(px(24.0)))
-        .child(
-            text("设置下一次订阅刷新与远程资源请求的网络路径 · 保存后立即生效 · 本页不启动核心/系统代理/TUN")
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("请求代理模式").text_size(px(15.0)))
-                .child(
-                    radio_group().flex_col().gap_2().children(
-                        MODES
-                            .iter()
-                            .map(|mode| mode_radio(radio_state.clone(), *mode)),
+    let error = state.error;
+    let notice = state.notice;
+    let confirm = state.confirm_discard;
+    let discard = state.clone();
+    scroll().flex_1().min_h(px(0.0)).child(
+        view()
+            .flex_col()
+            .gap_5()
+            .max_w(px(760.0))
+            .child(crate::ui::page_header(
+                || t!("nav.request_settings"),
+                || t!("request.subtitle"),
+            ))
+            .child(
+                surface(SurfaceLevel::Card)
+                    .p_5()
+                    .flex_col()
+                    .gap_3()
+                    .child(section_title(|| t!("request.mode")))
+                    .child(crate::ui::select::radio_group(
+                        || t!("request.mode"),
+                        view().flex_col().gap_1().children(
+                            MODES
+                                .iter()
+                                .map(|mode| mode_radio(radio_state.clone(), *mode)),
+                        ),
+                    ))
+                    .child(
+                        text(|| t!("request.core_hint"))
+                            .text_size(px(12.5))
+                            .text_color(move || theme().muted_foreground),
                     ),
-                )
-                .child(
-                    text("核心代理只指向已保存的 mixed_port；本切片不启动核心，核心未运行时请求会真实失败。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("自定义代理 URL").text_size(px(15.0)))
-                .child(proxy_url_input(url_state))
-                .child(
-                    text("允许 http / https / socks5 / socks5h 地址（可含认证）；错误提示不含凭据。非自定义模式下地址仍保存，切回后继续生效。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded(move || theme().radius)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("GitHub 镜像前缀").text_size(px(15.0)))
-                .child(prefix_input(prefix_state))
-                .child(
-                    text("留空直连 GitHub；仅按共享规则把前缀拼到 GitHub 资源地址前（保存原样保留，使用时修剪空白），本页不做连接测试。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
-        .child(text(move || {
-            summary_state
-                .saved
-                .get()
-                .map(|saved| {
-                    format!(
-                        "已保存：{} · GitHub 镜像{}",
-                        mode_label(saved.mode()),
-                        if saved.github_prefix().trim().is_empty() {
-                            "未配置"
-                        } else {
-                            "已配置"
-                        },
+            )
+            .child(
+                surface(SurfaceLevel::Card)
+                    .p_5()
+                    .flex_col()
+                    .gap_5()
+                    .child(
+                        crate::ui::field()
+                            .label(|| t!("request.url"))
+                            .hint(|| t!("request.url_hint"))
+                            .control(
+                                crate::ui::input(url)
+                                    .test_id("request-custom-url")
+                                    .accessible_name(|| t!("request.url"))
+                                    .readonly(move || mode.get() != RequestProxyMode::Custom)
+                                    .on_change(move |v| {
+                                        url.set(v);
+                                        url_dirty.update_dirty();
+                                    }),
+                            ),
                     )
-                })
-                .unwrap_or_else(|| "尚未载入保存的请求设置".to_owned())
-        }))
-        .child(
-            view()
-                .flex_row()
-                .gap_2()
-                .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().primary)
-                        .on_press(move || save_state.save())
-                        .child(text("保存").text_color(move || theme().primary_foreground)),
-                )
-                .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || reset_state.request_reset())
-                        .child(text("重置")),
-                ),
-        )
-        .child(
-            text(move || error_state.error.get().unwrap_or_default())
-                .text_color(move || theme().destructive),
-        )
-        .child(
-            text(move || notice_state.notice.get().unwrap_or_default())
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            text(move || {
-                if dirty_state.dirty.get() {
-                    "有未保存的修改"
-                } else {
-                    "设置与已保存的请求策略一致"
-                }
-            })
-            .text_size(px(12.0))
-            .text_color(move || theme().muted_foreground),
-        )
-        .child(when(
-            move || dialog_state.confirm_discard.get(),
-            move || discard_dialog(dialog_state.clone()),
-        ))
+                    .child(
+                        crate::ui::field()
+                            .label(|| t!("request.mirror"))
+                            .hint(|| t!("request.mirror_hint"))
+                            .control(
+                                crate::ui::input(prefix)
+                                    .test_id("request-github-prefix")
+                                    .accessible_name(|| t!("request.mirror"))
+                                    .on_change(move |v| {
+                                        prefix.set(v);
+                                        prefix_dirty.update_dirty();
+                                    }),
+                            ),
+                    ),
+            )
+            .child(
+                view()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        crate::ui::button(crate::ui::ButtonVariant::Primary)
+                            .label(|| t!("common.save"))
+                            .on_press(move || save.save()),
+                    )
+                    .child(
+                        crate::ui::button(crate::ui::ButtonVariant::Outline)
+                            .label(|| t!("request.reset"))
+                            .on_press(move || reset.request_reset()),
+                    )
+                    .child(when(
+                        move || dirty.get(),
+                        || {
+                            crate::ui::badge(crate::ui::BadgeVariant::Warning, || {
+                                t!("navigation.dirty_title")
+                            })
+                        },
+                    )),
+            )
+            .child(when(
+                move || error.get().is_some(),
+                move || {
+                    alert_banner(
+                        AlertTone::Danger,
+                        text(move || error.get().unwrap_or_default())
+                            .text_size(px(12.5))
+                            .text_color(move || theme().destructive)
+                            .selectable(true),
+                    )
+                },
+            ))
+            .child(when(
+                move || notice.get().is_some(),
+                move || {
+                    alert_banner(
+                        AlertTone::Success,
+                        text(move || notice.get().unwrap_or_default())
+                            .text_size(px(12.5))
+                            .text_color(move || theme().foreground),
+                    )
+                },
+            ))
+            .child(
+                crate::ui::confirm_dialog(move || confirm.get())
+                    .title(|| t!("request.discard_title"))
+                    .description(|| t!("navigation.dirty_description"))
+                    .confirm_label(|| t!("subscription.discard_confirm"))
+                    .cancel_label(|| t!("navigation.keep"))
+                    .on_cancel(move || confirm.set(false))
+                    .on_confirm(move || discard.reload()),
+            ),
+    )
 }
 
 fn mode_radio(state: RequestSettingsState, target: RequestProxyMode) -> impl IntoElement {
     let checked = move || state.mode.get() == target;
-    radio()
-        .checked(checked)
-        .on_change(move |_: &bool| {
+    let key = match target {
+        RequestProxyMode::None => "request.direct",
+        RequestProxyMode::System => "request.system",
+        RequestProxyMode::Core => "request.core",
+        RequestProxyMode::Custom => "request.custom",
+    };
+    crate::ui::select::radio_row(
+        checked,
+        move || t!(key),
+        mode_test_id(target),
+        move || {
             state.mode.set(target);
-            state.dirty.set(true);
-        })
-        .child(
-            view()
-                .test_id(mode_test_id(target))
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .child(
-                    view()
-                        .size(px(16.0))
-                        .rounded_full()
-                        .border(px(1.0))
-                        .border_color(move || theme().muted_foreground)
-                        .bg(move || {
-                            if checked() {
-                                theme().primary
-                            } else {
-                                theme().card
-                            }
-                        }),
-                )
-                .child(text(mode_label(target))),
-        )
-}
-
-/// 自定义代理 URL 输入：非 Custom 模式只读展示（地址不清空，切回可继续
-/// 编辑）；草稿改动标记未保存。
-fn proxy_url_input(state: RequestSettingsState) -> impl IntoElement {
-    let mode = state.mode;
-    let change_state = state.clone();
-    input()
-        .test_id("request-custom-url")
-        .value(state.custom_url)
-        .placeholder("http://127.0.0.1:8080 或 socks5://user:pass@host:1080")
-        .auto_correct(false)
-        .readonly(move || mode.get() != RequestProxyMode::Custom)
-        .on_change(move |text: &str| {
-            change_state.custom_url.set(text.to_owned());
-            change_state.dirty.set(true);
-        })
-        .p_2()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().input)
-        .bg(move || theme().background)
-}
-
-fn prefix_input(state: RequestSettingsState) -> impl IntoElement {
-    let change_state = state.clone();
-    input()
-        .test_id("request-github-prefix")
-        .value(state.github_prefix)
-        .placeholder("https://gh-proxy.com（可选，仅 GitHub 资源生效）")
-        .auto_correct(false)
-        .on_change(move |text: &str| {
-            change_state.github_prefix.set(text.to_owned());
-            change_state.dirty.set(true);
-        })
-        .p_2()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().input)
-        .bg(move || theme().background)
-}
-
-/// 放弃未保存修改的确认弹窗：继续编辑保留草稿；放弃修改恢复已保存值。
-fn discard_dialog(state: RequestSettingsState) -> AnyElement {
-    let cancel_state = state.clone();
-    let keep_state = state.clone();
-    let discard_state = state;
-    dialog()
-        .on_cancel(move || cancel_state.confirm_discard.set(false))
-        .child(
-            view()
-                .flex_col()
-                .gap_3()
-                .w(px(420.0))
-                .p_4()
-                .rounded(move || theme().radius)
-                .bg(move || theme().card)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("放弃未保存的请求设置修改？"))
-                .child(
-                    text("草稿尚未保存，放弃后将恢复为磁盘上已保存的请求设置。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .border(px(1.0))
-                                .border_color(move || theme().border)
-                                .on_press(move || keep_state.confirm_discard.set(false))
-                                .child(text("继续编辑")),
-                        )
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .bg(move || theme().destructive)
-                                .on_press(move || discard_state.reload())
-                                .child(
-                                    text("放弃修改").text_color(move || theme().primary_foreground),
-                                ),
-                        ),
-                ),
-        )
-        .into_element()
+            state.update_dirty();
+        },
+    )
 }

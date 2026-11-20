@@ -1,5 +1,7 @@
 use super::*;
 use crate::ui::button::ButtonSize;
+use crate::ui::icon::Icon;
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 pub(super) fn rows(state: State, filtered: Memo<Vec<LocalRule>>) -> impl IntoElement {
@@ -13,21 +15,47 @@ pub(super) fn rows(state: State, filtered: Memo<Vec<LocalRule>>) -> impl IntoEle
             let up = state.clone();
             let down = state.clone();
             let remove = state.clone();
-            view()
-                .flex_col()
-                .gap_1()
+            crate::ui::surface(crate::ui::SurfaceLevel::Card)
+                .px_4()
                 .py_2()
-                .child(text(move || {
-                    row.get()
-                        .map(|r| {
-                            format!("{}  {}", if r.enabled { "●" } else { "○" }, rule_line(&r))
-                        })
-                        .unwrap_or_default()
-                }))
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(
+                    view()
+                        .flex_1()
+                        .min_w(px(200.0))
+                        .flex_row()
+                        .items_center()
+                        .gap_3()
+                        .child(view().size(px(8.0)).flex_none().rounded_full().bg(move || {
+                            if row.get().is_some_and(|r| r.enabled) {
+                                theme().color("success").unwrap_or(theme().primary)
+                            } else {
+                                theme().muted_foreground.opacity(0.4)
+                            }
+                        }))
+                        .child(
+                            text(move || row.get().map(|r| rule_line(&r)).unwrap_or_default())
+                                .text_size(px(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(move || {
+                                    if row.get().is_some_and(|r| r.enabled) {
+                                        theme().foreground
+                                    } else {
+                                        theme().muted_foreground
+                                    }
+                                })
+                                .selectable(true),
+                        ),
+                )
                 .child(
                     view()
                         .flex_row()
                         .flex_wrap()
+                        .items_center()
                         .gap_1()
                         .child(
                             button(ButtonVariant::Ghost)
@@ -86,10 +114,11 @@ pub(super) fn rows(state: State, filtered: Memo<Vec<LocalRule>>) -> impl IntoEle
                         .child(
                             button(ButtonVariant::Ghost)
                                 .size(ButtonSize::Sm)
+                                .test_id("rule-remove")
                                 .label(|| t!("rules.delete"))
                                 .on_press(move || {
                                     if let Some(rule) = row.get() {
-                                        remove.apply(|s| s.remove(&rule.id));
+                                        remove.pending_remove.set(Some(rule));
                                     }
                                 }),
                         ),
@@ -97,8 +126,12 @@ pub(super) fn rows(state: State, filtered: Memo<Vec<LocalRule>>) -> impl IntoEle
         },
     )
     .keys(move || keys.with(|rows| rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>()))
-    .estimated_item_size(px(80.0))
-    .empty(text(|| t!("rules.empty")))
+    .estimated_item_size(px(58.0))
+    .empty(crate::ui::empty_with_icon(
+        Some(Icon::Rules),
+        || t!("rules.list"),
+        || t!("rules.empty"),
+    ))
     .flex_1()
     .min_h(px(120.0))
 }

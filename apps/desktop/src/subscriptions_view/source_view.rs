@@ -3,7 +3,7 @@
 //! 不伪造内容。
 
 use lanpath_client::Subscription;
-use nsh_base::{dialog, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
@@ -44,43 +44,36 @@ pub(super) fn source_dialog(state: SubscriptionPageState) -> AnyElement {
     };
     let close_state = state.clone();
     let content = open.source.content.clone();
-    dialog()
-        .on_cancel(move || close_state.source_view.set(None))
-        .child(
-            view()
-                .flex_col()
-                .gap_2()
-                .w(px(560.0))
-                .p_4()
-                .rounded(move || theme().radius)
-                .bg(move || theme().card)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text(t!("subscription.source_title", name = open.name)).text_size(px(15.0)))
-                .child(
-                    text(t!(
-                        "subscription.source_format",
-                        format = format!("{:?}", open.source.format)
-                    ))
+    let format = format!("{:?}", open.source.format);
+    crate::ui::dialog::form_dialog(
+        move || t!("subscription.source_title", name = open.name.clone()),
+        crate::ui::dialog::DialogSize::Form,
+        element_ref(),
+        move || close_state.source_view.set(None),
+        view()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex_col()
+            .gap_3()
+            .child(
+                text(move || t!("subscription.source_format", format = format.clone()))
                     .text_size(px(12.0))
                     .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    scroll().max_h(px(320.0)).child(
-                        text(content)
-                            .selectable(true)
-                            .text_size(px(12.0))
-                            .text_color(move || theme().foreground),
-                    ),
-                )
-                .child(
-                    view().flex_row().justify_end().child(
-                        button(ButtonVariant::Outline)
-                            .size(ButtonSize::Sm)
-                            .label(|| t!("common.close"))
-                            .on_press(move || state.source_view.set(None)),
-                    ),
+            )
+            .child(
+                scroll().flex_1().min_h(px(0.0)).child(
+                    text(content)
+                        .selectable(true)
+                        .text_size(px(12.0))
+                        .text_color(move || theme().foreground),
                 ),
-        )
-        .into_element()
+            ),
+        view().flex_row().justify_end().child(
+            button(ButtonVariant::Outline)
+                .size(ButtonSize::Md)
+                .test_id("source-dialog-close")
+                .label(|| t!("common.close"))
+                .on_press(move || state.source_view.set(None)),
+        ),
+    )
 }

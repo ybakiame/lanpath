@@ -16,6 +16,15 @@ fn main() -> std::process::ExitCode {
     if let Some(code) = lanpath_desktop_nsh::proxy_guardian::dispatch_from_env() {
         return std::process::ExitCode::from(code as u8);
     }
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        // GUI subsystem binaries need the caller's console for CLI output.
+        #[cfg(target_os = "windows")]
+        unsafe {
+            windows_sys::Win32::System::Console::AttachConsole(u32::MAX);
+        }
+        println!("Lanpath {}", env!("CARGO_PKG_VERSION"));
+        return std::process::ExitCode::SUCCESS;
+    }
     env_logger::init();
     let data_dir = match lanpath_desktop_nsh::prepare_native_data_dir() {
         Ok(path) => path,
@@ -31,6 +40,13 @@ fn main() -> std::process::ExitCode {
     } else {
         lanpath_desktop_nsh::root()
     };
+    let storage = match lanpath_desktop_nsh::AppStorage::open(&data_dir) {
+        Ok(storage) => storage,
+        Err(error) => {
+            eprintln!("Lanpath 界面配置初始化失败：{error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
     platform::run_app(
         platform::AppSource::Rust(root),
         platform::AppOptions {
@@ -42,9 +58,14 @@ fn main() -> std::process::ExitCode {
                 data_dir.join("cache/nsh"),
             )),
             data_dir: Some(data_dir),
+            storage: Some(storage.clone()),
             ..Default::default()
         },
     );
+    if let Err(error) = storage.flush() {
+        eprintln!("{error}");
+        return std::process::ExitCode::FAILURE;
+    }
     std::process::ExitCode::SUCCESS
 }
 

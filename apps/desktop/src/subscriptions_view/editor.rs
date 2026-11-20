@@ -1,18 +1,12 @@
-//! 订阅编辑弹窗（阶段 1 语义组件迁移）：名称/地址/可选 User-Agent/覆写
-//! 模板绑定草稿与已保存数据分离，刷新/启停/删除/设置生效不会清空未保存
-//! 修改；取消时有未保存修改需确认。覆写绑定用单选列表（无覆写 + 每个
-//! 现存模板），保存时业务层在同一业务锁内校验模板真实存在，失效引用
-//! 显示真实错误、不静默改绑。
-
-use nsh_base::{dialog, radio, radio_group, theme};
+//! 订阅编辑使用固定头尾的原生 Dialog；放弃确认不卸载正在编辑的表单。
+use super::SubscriptionPageState;
+use crate::ui::{
+    button::{ButtonSize, ButtonVariant, button},
+    input,
+};
+use nsh_base::{radio, radio_group, theme};
 use nsh_core::prelude::*;
 use uuid::Uuid;
-
-use crate::ui::button::{ButtonSize, ButtonVariant, button};
-use crate::ui::input;
-use crate::ui::overlay::confirm_dialog;
-
-use super::SubscriptionPageState;
 
 pub(super) fn edit_dialog(state: SubscriptionPageState) -> AnyElement {
     let Some(id) = state.edit.id.get() else {
@@ -22,120 +16,115 @@ pub(super) fn edit_dialog(state: SubscriptionPageState) -> AnyElement {
         .list
         .get()
         .iter()
-        .find(|subscription| subscription.id == id)
-        .map(|subscription| subscription.name.clone())
+        .find(|item| item.id == id)
+        .map(|item| item.name.clone())
         .unwrap_or_else(|| t!("subscription.unknown"));
-    let cancel_state = state.clone();
-    let form_show = state.clone();
-    let form_build = state.clone();
-    let confirm_show = state.clone();
-    let confirm_build = state;
-    dialog()
-        .on_cancel(move || cancel_state.edit.request_cancel())
-        .child(
-            view()
-                .child(when(
-                    move || !form_show.edit.confirm_discard.get(),
-                    move || edit_form(form_build.clone(), title.clone()),
-                ))
-                .child(when(
-                    move || confirm_show.edit.confirm_discard.get(),
-                    move || discard_confirm(confirm_build.clone()),
-                )),
-        )
-        .into_element()
-}
-
-fn edit_form(state: SubscriptionPageState, title: String) -> impl IntoElement {
+    let focus = element_ref();
     let name_state = state.clone();
     let url_state = state.clone();
     let ua_state = state.clone();
-    let save_press = state.clone();
+    let cancel = state.clone();
+    let footer_cancel = state.clone();
+    let save = state.clone();
+    let error = state.edit.error;
+    let confirm = state.edit.confirm_discard;
+    let discard = state.clone();
+    let body = scroll().flex_1().min_h(px(0.0)).child(
+        view()
+            .flex_col()
+            .gap_4()
+            .child(
+                text(|| t!("subscription.edit_url_hint"))
+                    .text_size(px(12.0))
+                    .text_color(move || theme().muted_foreground),
+            )
+            .child(
+                input::field()
+                    .label(|| t!("subscription.name_placeholder"))
+                    .control(
+                        input::input(state.edit.name)
+                            .element_ref(focus)
+                            .test_id("edit-name")
+                            .accessible_name(|| t!("subscription.name_placeholder"))
+                            .on_change(move |value| {
+                                name_state.edit.name.set(value);
+                                name_state.edit.dirty.set(true);
+                            }),
+                    ),
+            )
+            .child(
+                input::field()
+                    .label(|| t!("subscription.url_placeholder"))
+                    .control(
+                        input::input(state.edit.url)
+                            .test_id("edit-url")
+                            .accessible_name(|| t!("subscription.url_placeholder"))
+                            .on_change(move |value| {
+                                url_state.edit.url.set(value);
+                                url_state.edit.dirty.set(true);
+                            }),
+                    ),
+            )
+            .child(
+                input::field()
+                    .label(|| t!("subscription.ua_placeholder"))
+                    .control(
+                        input::input(state.edit.user_agent)
+                            .test_id("edit-user-agent")
+                            .accessible_name(|| t!("subscription.ua_placeholder"))
+                            .on_change(move |value| {
+                                ua_state.edit.user_agent.set(value);
+                                ua_state.edit.dirty.set(true);
+                            }),
+                    ),
+            )
+            .child(text(|| t!("subscription.binding_label")).text_size(px(14.0)))
+            .child(binding_choices(state.clone()))
+            .child(when(
+                move || error.get().is_some(),
+                move || {
+                    text(move || error.get().unwrap_or_default())
+                        .text_color(move || theme().destructive)
+                },
+            )),
+    );
+    let footer = view()
+        .flex_row()
+        .justify_end()
+        .gap_3()
+        .child(
+            button(ButtonVariant::Outline)
+                .size(ButtonSize::Md)
+                .label(|| t!("subscription.cancel"))
+                .on_press(move || footer_cancel.edit.request_cancel()),
+        )
+        .child(
+            button(ButtonVariant::Primary)
+                .size(ButtonSize::Md)
+                .label(|| t!("subscription.save"))
+                .on_press(move || save_edit(&save)),
+        );
     view()
-        .flex_col()
-        .gap_2()
-        .w(px(420.0))
-        .p_4()
-        .rounded(move || theme().radius)
-        .bg(move || theme().card)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text(t!("subscription.edit_title", name = title)).text_size(px(15.0)))
+        .child(crate::ui::dialog::form_dialog(
+            move || t!("subscription.edit_title", name = title.clone()),
+            crate::ui::dialog::DialogSize::Form,
+            focus,
+            move || cancel.edit.request_cancel(),
+            body,
+            footer,
+        ))
         .child(
-            text(|| t!("subscription.edit_url_hint"))
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
+            crate::ui::confirm_dialog(move || confirm.get())
+                .test_id("subscription-discard-dialog")
+                .title(|| t!("subscription.discard_title"))
+                .description(|| t!("subscription.discard_description"))
+                .destructive()
+                .confirm_label(|| t!("subscription.discard_confirm"))
+                .cancel_label(|| t!("subscription.discard_cancel"))
+                .on_cancel(move || confirm.set(false))
+                .on_confirm(move || discard.edit.close()),
         )
-        .child(
-            input::input(state.edit.name)
-                .test_id("edit-name")
-                .placeholder(|| t!("subscription.name_placeholder"))
-                .on_change(move |text: String| {
-                    name_state.edit.name.set(text);
-                    name_state.edit.dirty.set(true);
-                }),
-        )
-        .child(
-            input::input(state.edit.url)
-                .test_id("edit-url")
-                .placeholder(|| t!("subscription.url_placeholder"))
-                .on_change(move |text: String| {
-                    url_state.edit.url.set(text);
-                    url_state.edit.dirty.set(true);
-                }),
-        )
-        .child(
-            input::input(state.edit.user_agent)
-                .test_id("edit-user-agent")
-                .placeholder(|| t!("subscription.ua_placeholder"))
-                .on_change(move |text: String| {
-                    ua_state.edit.user_agent.set(text);
-                    ua_state.edit.dirty.set(true);
-                }),
-        )
-        .child(
-            text(|| t!("subscription.binding_label"))
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(binding_choices(state.clone()))
-        .child(
-            text(move || state.edit.error.get().unwrap_or_default())
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap_2()
-                .justify_end()
-                .child(
-                    button(ButtonVariant::Outline)
-                        .size(ButtonSize::Sm)
-                        .label(|| t!("subscription.cancel"))
-                        .on_press(move || state.edit.request_cancel()),
-                )
-                .child(
-                    button(ButtonVariant::Primary)
-                        .size(ButtonSize::Sm)
-                        .label(|| t!("subscription.save"))
-                        .on_press(move || save_edit(&save_press)),
-                ),
-        )
-}
-
-/// 放弃未保存草稿的确认（语义 ConfirmDialog，危险变体）。
-fn discard_confirm(state: SubscriptionPageState) -> impl IntoElement {
-    let keep_state = state.clone();
-    confirm_dialog(move || state.edit.confirm_discard.get())
-        .test_id("subscription-discard-dialog")
-        .destructive()
-        .title(|| t!("subscription.discard_title"))
-        .description(|| t!("subscription.discard_description"))
-        .confirm_label(|| t!("subscription.discard_confirm"))
-        .cancel_label(|| t!("subscription.discard_cancel"))
-        .on_cancel(move || state.edit.confirm_discard.set(false))
-        .on_confirm(move || keep_state.edit.close())
+        .into_element()
 }
 
 /// 覆写模板绑定选择：无覆写 + 每个现存模板的单选列表（模板多时也清晰

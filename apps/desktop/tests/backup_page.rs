@@ -29,7 +29,7 @@ fn wait_text_gone(app: &mut nsh_testing::Headless, needle: &str) {
 }
 
 fn open_backup(app: &mut nsh_testing::Headless) {
-    app.press("备份").unwrap();
+    common::navigate(app, "备份");
     app.wait_for("导出加密备份").unwrap();
 }
 
@@ -85,6 +85,12 @@ fn export_writes_real_age_bytes_to_the_picked_path() {
     app.type_text("id:backup-export-password", PASSWORD)
         .unwrap();
     app.press("id:backup-export").unwrap();
+    app.wait_for("导出中…").unwrap();
+    common::navigate(&mut app, "概览");
+    app.wait_for("请等待当前操作完成").unwrap();
+    app.wait_for("id:navigation-leave-dialog").unwrap();
+    assert!(app.screen().matches("id:backup-export-password").unwrap());
+    app.press("继续编辑").unwrap();
     app.wait_for_within("text:/已导出加密备份：/", Duration::from_secs(120))
         .unwrap();
     assert!(target.is_file(), "exported backup missing");
@@ -100,6 +106,9 @@ fn export_writes_real_age_bytes_to_the_picked_path() {
             .unwrap(),
         Some("")
     );
+    common::navigate(&mut app, "概览");
+    app.wait_for("开始之前").unwrap();
+    assert!(!app.screen().matches("id:navigation-leave-dialog").unwrap());
     let _ = std::fs::remove_file(&target);
 }
 
@@ -239,7 +248,7 @@ fn confirmed_restore_marks_pending_blocks_writes_and_requires_restart() {
         .unwrap();
 
     // 删除订阅（确认对话框）。
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("备份订阅").unwrap();
     app.press("id:subscription-row-备份订阅 >> text:更多")
         .unwrap();
@@ -300,8 +309,13 @@ fn confirmed_restore_marks_pending_blocks_writes_and_requires_restart() {
     app.wait_for_within("text:/已准备恢复备份/", Duration::from_secs(10))
         .unwrap();
 
-    // 回到备份页：待重启仍在（不按下重启按钮——headless 无法验收跨进程重启）。
-    app.press("备份").unwrap();
+    // 先关闭有草稿的 Sheet 并明确放弃，再回备份页检查待重启状态。
+    app.press("id:workspace-sheet-close").unwrap();
+    app.wait_for("id:navigation-leave-dialog").unwrap();
+    app.press("放弃并离开").unwrap();
+    app.wait_for_gone("id:workspace-sheet-close", Duration::from_secs(3))
+        .unwrap();
+    common::navigate(&mut app, "备份");
     app.wait_for("text:/恢复已准备完成：请重启应用/").unwrap();
     app.wait_for("id:backup-restart").unwrap();
     let _ = std::fs::remove_file(&backup_file);
@@ -319,7 +333,7 @@ fn startup_restored_notice_shows_summary_and_acknowledge_clears_it() {
     stage_applied_restore(dir.path());
 
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_backup(&mut app);
     app.wait_for("text:/上次启动已从备份恢复/").unwrap();
     let seen = texts(&app);
@@ -347,7 +361,7 @@ fn startup_failed_restore_shows_the_real_error_banner() {
     .unwrap();
 
     let mut app = start_app(entries).0;
-    app.wait_for("Lanpath NSH Desktop").unwrap();
+    app.wait_for("id:nav-overview").unwrap();
     open_backup(&mut app);
     app.wait_for("backup-startup-error").unwrap();
     let seen = texts(&app);

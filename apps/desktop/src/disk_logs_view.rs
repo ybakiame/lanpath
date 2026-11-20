@@ -5,11 +5,13 @@
 use std::sync::Arc;
 
 use lanpath_common::LanpathError;
-use nsh_base::{button, theme};
+use nsh_base::theme;
 use nsh_core::file_dialog::{FileFilter, SaveDialog};
 use nsh_core::prelude::*;
 
 use crate::log_service::LogService;
+use crate::ui::icon::{Icon, Tone, icon_sized};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, surface};
 
 #[derive(Clone)]
 struct DiskState {
@@ -70,7 +72,7 @@ impl DiskState {
     }
 }
 
-pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
+pub(super) fn disk_logs(service: Arc<LogService>, io_busy: Signal<bool>) -> impl IntoElement {
     let state = DiskState {
         service,
         files: signal(Vec::new()),
@@ -78,15 +80,14 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
         tail: signal(String::new()),
         error: signal(None),
         exported: signal(None),
-        exporting: signal(false),
+        exporting: io_busy,
     };
     state.refresh();
-    // 导出任务句柄随 owner 存活；重复点击只替换未完成任务。
     let export_task: Stored<Option<Spawned<()>>> = stored(None);
 
     let refresh = state.clone();
     let export = state.clone();
-    let error = state.clone();
+    let error = state.error;
     let status = state.clone();
     let empty = state.clone();
     let file_list = state.clone();
@@ -94,13 +95,15 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
     view()
         .flex_1()
         .flex_col()
-        .gap_2()
+        .gap_3()
         .min_h(px(0.0))
         .child(
-            view()
+            surface(SurfaceLevel::Card)
+                .p_3()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
-                .gap_2()
+                .gap_3()
                 .child(
                     text(move || {
                         format!(
@@ -110,43 +113,55 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
                         )
                     })
                     .test_id("logs-disk-status")
-                    .text_size(px(12.0))
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(12.5))
                     .text_color(move || theme().muted_foreground),
                 )
-                .child(view().flex_1())
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
+                    crate::ui::button(crate::ui::ButtonVariant::Outline)
+                        .size(crate::ui::ButtonSize::Sm)
+                        .prefix(|| icon_sized(Icon::Refresh, Tone::Muted, 13.0))
                         .on_press(move || refresh.refresh())
-                        .child(text("刷新")),
+                        .label(|| t!("product.action.refresh")),
                 )
                 .child(export_button(export, export_task)),
         )
-        .child(
-            text(move || error.error.get().unwrap_or_default())
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || error.get().unwrap_or_default())
+                        .text_size(px(12.5))
+                        .text_color(move || theme().destructive),
+                )
+            },
+        ))
         .child(when(
             move || empty.files.get().is_empty(),
-            || text("暂无磁盘日志文件。").text_color(move || theme().muted_foreground),
+            || {
+                crate::ui::empty_with_icon(
+                    Some(Icon::File),
+                    || t!("logs.tab_disk"),
+                    || t!("product.logs.disk_empty"),
+                )
+            },
         ))
         .child(
             view()
                 .flex_1()
                 .flex_row()
-                .gap_2()
+                .gap_3()
                 .min_h(px(0.0))
                 .test_id("disk-log-split")
                 .child(
-                    view()
-                        .w(px(200.0))
+                    surface(SurfaceLevel::Card)
+                        .w(px(216.0))
                         .flex_none()
                         .min_h(px(0.0))
+                        .p_2()
                         .child(
                             scroll()
                                 .flex_1()
@@ -162,10 +177,13 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
         .child(when(
             move || tail.exported.get().is_some(),
             move || {
-                let exported = tail.clone();
-                text(move || format!("已导出：{}", exported.exported.get().unwrap_or_default()))
-                    .text_size(px(12.0))
-                    .text_color(move || theme().muted_foreground)
+                let exported = tail.exported;
+                alert_banner(
+                    AlertTone::Success,
+                    text(move || format!("已导出：{}", exported.get().unwrap_or_default()))
+                        .text_size(px(12.5))
+                        .text_color(move || theme().foreground),
+                )
             },
         ))
 }
@@ -173,46 +191,33 @@ pub(super) fn disk_logs(service: Arc<LogService>) -> impl IntoElement {
 fn disk_file_row(state: DiskState, item: ReadSignal<String>) -> impl IntoElement {
     let select = state;
     let test_id = format!("disk-log-file-{}", item.get());
-    button()
-        .px_2()
-        .py_1()
-        .rounded(move || theme().radius)
-        .items_center()
-        .bg(move || {
-            if select.selected.get().as_deref() == Some(item.get().as_str()) {
-                theme().secondary
-            } else {
-                theme().background
-            }
-        })
+    crate::ui::button(crate::ui::ButtonVariant::Ghost)
+        .full_width()
+        .selected(move || select.selected.get().as_deref() == Some(item.get().as_str()))
+        .size(crate::ui::ButtonSize::Sm)
         .on_press(move || {
             select.selected.set(Some(item.get().clone()));
             select.read_tail();
         })
-        .child(
-            text(move || item.get().clone())
-                .test_id(&test_id)
-                .text_size(px(12.0))
-                .truncate()
-                .min_w(px(0.0)),
-        )
+        .test_id(&test_id)
+        .label(move || item.get().clone())
 }
 
 fn export_button(state: DiskState, task: Stored<Option<Spawned<()>>>) -> impl IntoElement {
     let label = state.clone();
-    button()
-        .px_3()
-        .py_1()
-        .rounded(move || theme().radius)
-        .bg(move || theme().primary)
+    let loading = state.clone();
+    crate::ui::button(crate::ui::ButtonVariant::Primary)
+        .size(crate::ui::ButtonSize::Sm)
+        .prefix(|| icon_sized(Icon::Download, Tone::OnPrimary, 13.0))
+        .loading(move || loading.exporting.get())
         .on_press(move || request_export(state.clone(), task))
-        .child(text(move || {
+        .label(move || {
             if label.exporting.get() {
-                "导出中…"
+                "导出中…".to_owned()
             } else {
-                "导出日志…"
+                "导出日志…".to_owned()
             }
-        }))
+        })
 }
 
 /// NSH 原生保存对话框选定目标后，把磁盘日志原文拼接到该路径；

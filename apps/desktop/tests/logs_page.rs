@@ -34,7 +34,7 @@ fn open_logs_page() -> (tempfile::TempDir, Headless) {
     let (dir, entries) = data_root();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("日志").unwrap();
+    common::navigate(&mut app, "日志");
     app.wait_for("id:logs-memory-status").unwrap();
     (dir, app)
 }
@@ -76,6 +76,68 @@ fn logs_page_opens_with_a_real_memory_section() {
         .expect("memory status line");
     assert!(status.contains("缓冲"), "{status:?}");
     assert!(status.contains("显示"), "{status:?}");
+}
+
+#[test]
+fn log_rows_keep_a_left_scan_edge_and_long_file_names_fit_the_list() {
+    let (dir, mut app) = open_logs_page();
+    tracing::info!(target: "lanpath_test", "short");
+    app.press("刷新").unwrap();
+    let nodes = app.screen().layout_nodes();
+    let line = nodes
+        .iter()
+        .find(|n| {
+            n.text
+                .as_ref()
+                .is_some_and(|t| t.text.text.ends_with("short"))
+        })
+        .unwrap();
+    let row = nodes
+        .iter()
+        .find(|n| {
+            n.test_id
+                .as_ref()
+                .is_some_and(|id| id.starts_with("log-row-"))
+                && n.bounds.origin.y == line.bounds.origin.y
+        })
+        .or_else(|| {
+            nodes
+                .iter()
+                .filter(|n| {
+                    n.test_id
+                        .as_ref()
+                        .is_some_and(|id| id.starts_with("log-row-"))
+                })
+                .find(|n| (n.bounds.center().y.0 - line.bounds.center().y.0).abs() < 1.0)
+        })
+        .unwrap();
+    assert!(
+        (line.bounds.origin.x.0 - row.bounds.origin.x.0).abs() < 1.0,
+        "short row must begin at the list edge"
+    );
+    assert!(row.bounds.size.width.0 > 400.0);
+
+    let name = format!("app.log.{}", "long-file-name-".repeat(8));
+    std::fs::write(dir.path().join("logs").join(&name), "long file contents\n").unwrap();
+    app.press("磁盘日志").unwrap();
+    app.wait_for(&format!("id:disk-log-file-{name}")).unwrap();
+    let nodes = app.screen().layout_nodes();
+    let anchor = nodes
+        .iter()
+        .find(|n| n.test_id.as_deref() == Some(format!("disk-log-file-{name}").as_str()))
+        .unwrap();
+    let label = nodes
+        .iter()
+        .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == name))
+        .unwrap();
+    assert!((anchor.bounds.origin.x.0 - label.bounds.origin.x.0).abs() < 1.0);
+    assert!(label.bounds.size.width.0 < 200.0);
+    assert!(
+        label.bounds.origin.x.0 + label.bounds.size.width.0
+            <= anchor.bounds.origin.x.0 + anchor.bounds.size.width.0 + 1.0
+    );
+    app.press(&format!("id:disk-log-file-{name}")).unwrap();
+    app.wait_for("long file contents").unwrap();
 }
 
 /// 本应用 tracing 事件经真实采集层进入内存缓冲，手动刷新后可见。
@@ -347,7 +409,7 @@ fn subscription_actions_are_captured_before_the_first_logs_page_visit() {
     app.type_text("id:subscription-url", "https://example.com/private.yaml")
         .unwrap();
     app.press("新增订阅").unwrap();
-    app.press("日志").unwrap();
+    common::navigate(&mut app, "日志");
     app.wait_for("text:/新增订阅：启动采集验证/").unwrap();
     assert!(!texts(&app).iter().any(|text| text.contains("private.yaml")));
 }

@@ -1,10 +1,10 @@
 //! Headless 测试（`nsh_testing::Headless`）：覆写模板页真实列表、
 //! 多行覆写编辑、持久化、删除确认与订阅绑定/解绑/删除拒绝。
-//! 每个场景使用独立临时数据根；本切片不为远程覆写地址联网。
+//! 每个场景使用独立临时数据根，脚本由本地 Editor 编辑。
 
 mod common;
 
-use common::{data_root, open_subscriptions, start_app, texts};
+use common::{data_root, open_subscriptions, start_app_desktop as start_app, texts};
 
 /// 启动一次应用并等订阅页渲染完成：数据根由此初始化（写入归属标记），
 /// 之后才能在盘上预置种子业务文件（直写文件绕过准入会拒绝）。
@@ -31,14 +31,14 @@ fn navigating_to_the_profiles_page_shows_an_empty_list() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("覆写").unwrap();
-    app.wait_for("尚无覆写模板。").unwrap();
+    common::open_profiles(&mut app);
+    app.wait_for("尚无覆写脚本。").unwrap();
     let seen = texts(&app);
-    assert!(seen.contains(&"共 0 个覆写模板"), "{seen:?}");
-    assert!(seen.contains(&"新建覆写模板"), "{seen:?}");
+    assert!(seen.contains(&"共 0 个覆写脚本"), "{seen:?}");
+    assert!(seen.contains(&"新建脚本…"), "{seen:?}");
     assert!(
         seen.iter()
-            .any(|text| text.contains("远程覆写地址仅在配置合成时解析")),
+            .any(|text| text.contains("保存后在下次启动或重启核心时应用")),
         "{seen:?}"
     );
 }
@@ -50,36 +50,33 @@ fn creating_a_profile_with_multiline_overrides_persists_and_reopens() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
     common::wait_ready(&mut app);
-    app.press("覆写").unwrap();
-    app.wait_for("尚无覆写模板。").unwrap();
+    common::open_profiles(&mut app);
+    app.wait_for("尚无覆写脚本。").unwrap();
 
-    app.press("新建覆写模板").unwrap();
-    app.wait_for("新建覆写模板").unwrap();
+    app.press("id:profiles-create").unwrap();
+    app.wait_for("id:profile-name").unwrap();
     app.type_text("id:profile-name", " 东京模板 ").unwrap();
     const JS: &str = "function main(config: Record<string, unknown>) {\n  return config;\n}";
-    app.type_text("id:profile-js", JS).unwrap();
+    common::replace_script(&mut app, JS);
     app.press("保存").unwrap();
     app.wait_for("覆写模板已校验并保存").unwrap();
     let seen = texts(&app);
-    assert!(seen.contains(&"共 1 个覆写模板"), "{seen:?}");
+    assert!(seen.contains(&"共 1 个覆写脚本"), "{seen:?}");
     assert!(seen.contains(&"东京模板"), "{seen:?}");
     // 行内摘要是一整个文本元素：逐项子串断言。
     let summary = |needle: &str| seen.iter().any(|text| text.contains(needle));
-    for expected in ["本地 TS 覆写：已填写", "远程 TS：未配置"] {
-        assert!(summary(expected), "missing {expected}: {seen:?}");
-    }
-    // 空白远程地址未伪造“已配置”。
+    assert!(summary("本地 TS 覆写：已填写"), "{seen:?}");
     drop(app);
 
     // 同一数据根重开：模板从磁盘恢复；编辑回读多行内容原样（换行保留）。
     let mut reopened = start_app(entries).0;
     common::wait_ready(&mut reopened);
-    reopened.press("覆写").unwrap();
+    common::open_profiles(&mut reopened);
     reopened.wait_for("东京模板").unwrap();
     reopened
         .press("id:profile-row-东京模板 >> text:编辑")
         .unwrap();
-    reopened.wait_for("TypeScript 覆写").unwrap();
+    reopened.wait_for("覆写脚本").unwrap();
     assert_eq!(
         reopened.screen().input_text("id:profile-name").unwrap(),
         Some("东京模板")
@@ -108,11 +105,11 @@ fn cancelling_a_profile_edit_with_changes_asks_first() {
         .unwrap();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("覆写").unwrap();
+    common::open_profiles(&mut app);
     app.wait_for("草稿模板").unwrap();
 
     app.press("id:profile-row-草稿模板 >> text:编辑").unwrap();
-    app.wait_for("TypeScript 覆写").unwrap();
+    app.wait_for("覆写脚本").unwrap();
     app.clear("id:profile-name").unwrap();
     app.type_text("id:profile-name", "不应保存").unwrap();
     app.press("取消").unwrap();
@@ -127,13 +124,13 @@ fn cancelling_a_profile_edit_with_changes_asks_first() {
     app.press("取消").unwrap();
     app.wait_for("有未保存修改，要丢弃吗？").unwrap();
     app.press("丢弃修改").unwrap();
-    app.wait_for("共 1 个覆写模板").unwrap();
+    app.wait_for("共 1 个覆写脚本").unwrap();
     let seen = texts(&app);
     assert!(seen.contains(&"草稿模板"), "{seen:?}");
     assert!(!seen.contains(&"不应保存"), "{seen:?}");
 }
 
-/// 非法输入拒绝并显示真实错误：重名、非法 YAML、非法远程 URL；
+/// 非法输入拒绝并显示真实错误：重名、非法 TypeScript 或缺少 main；
 /// 已有模板与磁盘内容不被覆盖。
 #[test]
 fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
@@ -151,12 +148,12 @@ fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
         .unwrap();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("覆写").unwrap();
+    common::open_profiles(&mut app);
     app.wait_for("保留模板").unwrap();
 
     // 重名：拒绝，草稿保留。
-    app.press("新建覆写模板").unwrap();
-    app.wait_for("新建覆写模板").unwrap();
+    app.press("id:profiles-create").unwrap();
+    app.wait_for("id:profile-name").unwrap();
     app.type_text("id:profile-name", "保留模板").unwrap();
     app.press("保存").unwrap();
     app.wait_for("text:/覆写模板名称「保留模板」已存在/")
@@ -168,28 +165,25 @@ fn invalid_profile_input_is_rejected_without_overwriting_existing_data() {
 
     app.clear("id:profile-name").unwrap();
     app.type_text("id:profile-name", "坏模板").unwrap();
-    app.type_text("id:profile-js", "function main(c: ) {}")
-        .unwrap();
+    common::replace_script(&mut app, "function main(c: ) {}");
     app.press("保存").unwrap();
-    app.wait_for("text:/TypeScript 覆写/").unwrap();
+    app.wait_for("text:/覆写脚本/").unwrap();
 
     // 非法 JS（缺 main）：拒绝。
-    app.clear("id:profile-js").unwrap();
-    app.type_text("id:profile-js", "console.log(1)").unwrap();
+    common::replace_script(&mut app, "console.log(1)");
     app.press("保存").unwrap();
     app.wait_for("text:/请定义同步 function main/").unwrap();
 
-    // 非法远程 URL（非 http/https）：拒绝。
-    app.clear("id:profile-js").unwrap();
-    app.type_text("id:profile-js-url", "ftp://example.com/y.yaml")
-        .unwrap();
-    app.press("保存").unwrap();
-    app.wait_for("text:/Remote override URL must start with http/")
-        .unwrap();
+    assert!(
+        !app.screen().matches("id:profile-js-url").unwrap(),
+        "不再提供远程 URL 编辑入口"
+    );
     app.press("取消").unwrap();
+    app.wait_for("有未保存修改，要丢弃吗？").unwrap();
+    app.press("丢弃修改").unwrap();
 
     let seen = texts(&app);
-    assert!(seen.contains(&"共 1 个覆写模板"), "{seen:?}");
+    assert!(seen.contains(&"共 1 个覆写脚本"), "{seen:?}");
     assert!(seen.contains(&"保留模板"), "{seen:?}");
     assert!(!seen.contains(&"坏模板"), "{seen:?}");
     let text = std::fs::read_to_string(dir.path().join("profiles.json")).unwrap();
@@ -215,11 +209,11 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
     assert!(!seen.iter().any(|text| text.contains("覆写：")), "{seen:?}");
 
     // 覆写页新建两个模板：单选列表须真实区分多个模板。
-    app.press("覆写").unwrap();
-    app.wait_for("尚无覆写模板。").unwrap();
+    common::open_profiles(&mut app);
+    app.wait_for("尚无覆写脚本。").unwrap();
     for name in ["甲模板", "乙模板"] {
-        app.press("新建覆写模板").unwrap();
-        app.wait_for("新建覆写模板").unwrap();
+        app.press("id:profiles-create").unwrap();
+        app.wait_for("id:profile-name").unwrap();
         app.type_text("id:profile-name", name).unwrap();
         app.press("保存").unwrap();
         app.wait_for("覆写模板已校验并保存").unwrap();
@@ -228,7 +222,7 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
     let template_b = profile_id_of(&dir, "乙模板");
 
     // 订阅编辑弹窗：选择第二个模板并保存。
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("共 1 个订阅").unwrap();
     app.press("id:subscription-row-绑定订阅 >> text:编辑")
         .unwrap();
@@ -250,7 +244,7 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
     reopened.wait_for("覆写：乙模板").unwrap();
 
     // 模板页删除被引用模板：拒绝并显示真实错误。
-    reopened.press("覆写").unwrap();
+    common::open_profiles(&mut reopened);
     reopened.wait_for("乙模板").unwrap();
     reopened
         .press("id:profile-row-乙模板 >> text:删除")
@@ -261,10 +255,10 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
         .wait_for("text:/删除覆写模板失败:client error: 仍有订阅关联此覆写模板，请先取消关联/")
         .unwrap();
     let seen = texts(&reopened);
-    assert!(seen.contains(&"共 2 个覆写模板"), "{seen:?}");
+    assert!(seen.contains(&"共 2 个覆写脚本"), "{seen:?}");
 
     // 订阅页解绑（选“无覆写”），行内绑定消失。
-    reopened.press("订阅").unwrap();
+    common::open_subscriptions(&mut reopened);
     reopened.wait_for("共 1 个订阅").unwrap();
     reopened
         .press("id:subscription-row-绑定订阅 >> text:编辑")
@@ -281,14 +275,14 @@ fn binding_delete_refusal_unbind_and_profile_delete() {
     let mut third = start_app(entries).0;
     open_subscriptions(&mut third);
     third.wait_for("共 1 个订阅").unwrap();
-    third.press("覆写").unwrap();
-    third.wait_for("共 2 个覆写模板").unwrap();
+    common::open_profiles(&mut third);
+    third.wait_for("共 2 个覆写脚本").unwrap();
     third.press("id:profile-row-乙模板 >> text:删除").unwrap();
     third.wait_for("删除覆写模板“乙模板”？").unwrap();
     third.press("确认删除").unwrap();
     third.wait_for("覆写模板已删除").unwrap();
     let seen = texts(&third);
-    assert!(seen.contains(&"共 1 个覆写模板"), "{seen:?}");
+    assert!(seen.contains(&"共 1 个覆写脚本"), "{seen:?}");
     let profiles = lanpath_client::ProfileStoreV2::new(dir.path().to_path_buf())
         .load()
         .unwrap();

@@ -6,7 +6,7 @@
 mod inventory;
 
 use inventory::inventory_card;
-use nsh_base::{button, dialog, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use super::activity::spawn_inventory_activity_monitor;
@@ -14,6 +14,8 @@ use super::proxy_card::{proxy_card, proxy_confirm_dialog};
 use super::runtime_card::runtime_card;
 use super::{CorePageState, core_tag, spawn_delete};
 use crate::app_state;
+use crate::ui::icon::{Icon, Tone, icon};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, section_title, surface};
 
 pub(crate) fn core_page() -> impl IntoElement {
     let state = CorePageState::new();
@@ -25,31 +27,54 @@ pub(crate) fn core_page() -> impl IntoElement {
     view()
         .flex_1()
         .flex_col()
-        // 页面高于视口时内容区滚动；
-        // 全局状态栏占高后卡片 + 库存列表仍完整可达。
+        .min_h(px(0.0))
         .child(
             scroll().flex_1().child(
                 view()
                     .flex_col()
-                    .gap_4()
+                    .gap_5()
                     .w_full()
-                    .child(text("核心").text_size(px(24.0)))
+                    .child(crate::ui::page_header(
+                        || t!("nav.core"),
+                        || t!("core.subtitle"),
+                    ))
+                    .child(when(
+                        move || notice_state.notice.get().is_some(),
+                        move || {
+                            let notice = notice_state.notice;
+                            alert_banner(
+                                AlertTone::Info,
+                                text(move || notice.get().unwrap_or_default())
+                                    .text_size(px(13.0))
+                                    .text_color(move || theme().foreground),
+                            )
+                        },
+                    ))
+                    .child(when(
+                        move || error_state.error.get().is_some(),
+                        move || {
+                            let error = error_state.error;
+                            alert_banner(
+                                AlertTone::Danger,
+                                text(move || error.get().unwrap_or_default())
+                                    .text_size(px(13.0))
+                                    .text_color(move || theme().destructive),
+                            )
+                        },
+                    ))
                     .child(
-                        text("管理本数据根 cores/ 下的核心文件 · 校验并启动为真实二进制校验后的用户态 loopback 运行；系统代理经独立守护精确接管/恢复（见下方分区），TUN/VPN 不接管")
-                            .text_color(move || theme().muted_foreground),
+                        view()
+                            .gap_5()
+                            .style_with(move |s| {
+                                if window().width.0 < 1040.0 || font_scale() > 1.3 {
+                                    s.flex_col()
+                                } else {
+                                    s.flex_row()
+                                }
+                            })
+                            .child(selection_card())
+                            .child(runtime_card()),
                     )
-                    // 操作反馈固定在页首（副标题下）：页面高于视口时结果
-                    // 也不被挤出可视区，与全局状态栏共存时同样立即可见。
-                    .child(
-                        text(move || notice_state.notice.get().unwrap_or_default())
-                            .text_color(move || theme().muted_foreground),
-                    )
-                    .child(
-                        text(move || error_state.error.get().unwrap_or_default())
-                            .text_color(move || theme().destructive),
-                    )
-                    .child(selection_card())
-                    .child(runtime_card())
                     .child(proxy_card(proxy_state))
                     .child(inventory_card(inventory)),
             ),
@@ -63,14 +88,8 @@ fn core_page_dialogs(state: CorePageState) -> impl IntoElement {
     let proxy_dialog_state = state.clone();
     let dialog_state = state;
     view()
-        .child(when(
-            move || proxy_dialog_state.proxy_confirm.get(),
-            move || proxy_confirm_dialog(proxy_dialog_state.clone()),
-        ))
-        .child(when(
-            move || dialog_state.pending_delete.get().is_some(),
-            move || delete_dialog(dialog_state.clone()),
-        ))
+        .child(proxy_confirm_dialog(proxy_dialog_state))
+        .child(delete_dialog(dialog_state))
 }
 
 /// 实际选中卡片：独立于浏览类型；为空显示“尚未选择核心”。与概览/全局
@@ -80,94 +99,73 @@ fn selection_card() -> impl IntoElement {
     let state = crate::app_state::current();
     let selection = state.active_core;
     let error = state.core_error;
-    view()
+    surface(SurfaceLevel::Card)
+        .flex_1()
+        .min_w(px(0.0))
+        .p_5()
         .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text("当前使用").text_size(px(15.0)))
-        .child(text(move || {
-            selection
-                .get()
-                .map(|selection| app_state::core_selection_line(&selection))
-                .unwrap_or_else(|| "尚未选择核心".to_owned())
-        }))
+        .gap_3()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(icon(Icon::Core, Tone::Primary))
+                .child(section_title(|| t!("product.core.selected"))),
+        )
         .child(
             text(move || {
-                error
+                selection
                     .get()
-                    .map(|error| app_state::core_error_line(&error))
-                    .unwrap_or_default()
+                    .map(|selection| app_state::core_selection_line(&selection))
+                    .unwrap_or_else(|| "尚未选择核心".to_owned())
             })
-            .test_id("core-selection-error")
-            .text_size(px(12.0))
-            .text_color(move || theme().destructive),
+            .text_size(px(16.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .selectable(true),
         )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || {
+                        error
+                            .get()
+                            .map(|error| app_state::core_error_line(&error))
+                            .unwrap_or_default()
+                    })
+                    .test_id("core-selection-error")
+                    .text_size(px(12.5))
+                    .text_color(move || theme().destructive),
+                )
+            },
+        ))
 }
 
 /// 删除确认弹窗：取消只关弹窗；确认后后台删除并刷新列表。
 fn delete_dialog(state: CorePageState) -> AnyElement {
-    let Some((version, path)) = state.pending_delete.get() else {
-        return view().into_element();
-    };
-    let on_cancel_state = state.clone();
-    let cancel_button_state = state.clone();
+    let open = state.pending_delete;
+    let title_state = state.pending_delete;
+    let cancel_state = state.clone();
     let confirm_state = state;
-    dialog()
-        .on_cancel(move || on_cancel_state.pending_delete.set(None))
-        .child(
-            view()
-                .flex_col()
-                .gap_3()
-                .w(px(420.0))
-                .p_4()
-                .rounded(move || theme().radius)
-                .bg(move || theme().card)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text(format!("删除核心 {}？", core_tag(&version))))
-                .child(
-                    text("将删除该版本目录及其中的核心文件，无法撤销。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .border(px(1.0))
-                                .border_color(move || theme().border)
-                                .on_press(move || cancel_button_state.pending_delete.set(None))
-                                .child(text("取消")),
-                        )
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .bg(move || theme().destructive)
-                                .on_press(move || {
-                                    confirm_state.pending_delete.set(None);
-                                    spawn_delete(
-                                        confirm_state.clone(),
-                                        version.clone(),
-                                        path.clone(),
-                                    );
-                                })
-                                .child(
-                                    text("确认删除").text_color(move || theme().primary_foreground),
-                                ),
-                        ),
-                )
-                .into_element(),
-        )
+    crate::ui::confirm_dialog(move || open.get().is_some())
+        .destructive()
+        .title(move || {
+            title_state
+                .get()
+                .map(|(version, _)| format!("删除核心 {}？", core_tag(&version)))
+                .unwrap_or_default()
+        })
+        .description(|| t!("product.core.delete_hint"))
+        .confirm_label(|| t!("product.action.confirm_delete"))
+        .cancel_label(|| t!("product.action.cancel"))
+        .on_cancel(move || cancel_state.pending_delete.set(None))
+        .on_confirm(move || {
+            if let Some((version, path)) = confirm_state.pending_delete.get() {
+                confirm_state.pending_delete.set(None);
+                spawn_delete(confirm_state.clone(), version, path);
+            }
+        })
         .into_element()
 }

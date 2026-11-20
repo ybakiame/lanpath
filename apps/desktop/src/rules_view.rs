@@ -1,14 +1,17 @@
 //! 快速规则工作台：表单、批量输入、排序与本地匹配预览。
 mod editor;
 mod rows;
+
 use crate::rules::{Rules, rule_line};
 use crate::ui::{
+    BadgeVariant, badge,
     button::{ButtonVariant, button},
     input::input,
-    layout::{page_header, section_title},
+    layout::{AlertTone, alert_banner, page_header, section_title},
 };
 use lanpath_client::LocalRule;
 use lanpath_common::LanpathResult;
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 #[derive(Clone)]
@@ -25,7 +28,9 @@ pub(super) struct State {
     search: Signal<String>,
     error: Signal<Option<String>>,
     saved: Signal<bool>,
+    pending_remove: Signal<Option<LocalRule>>,
 }
+
 impl State {
     fn new(seed: String) -> Self {
         let service = Rules::open();
@@ -49,8 +54,10 @@ impl State {
             search: signal(String::new()),
             error: signal(error),
             saved: signal(false),
+            pending_remove: signal(None),
         }
     }
+
     fn apply(&self, operation: impl FnOnce(&Rules) -> LanpathResult<Vec<LocalRule>>) {
         let Some(service) = &self.service else {
             self.error.set(Some(t!("subscription.root_unavailable")));
@@ -65,6 +72,7 @@ impl State {
             Err(error) => self.error.set(Some(error.to_string())),
         }
     }
+
     fn save(&self) {
         let source = self.source();
         self.error.set(None);
@@ -78,6 +86,7 @@ impl State {
             self.batch.set(String::new());
         }
     }
+
     fn source(&self) -> String {
         if self.mode.get() == 1 {
             self.batch.get()
@@ -90,6 +99,7 @@ impl State {
             )
         }
     }
+
     fn edit(&self, rule: &LocalRule) {
         if !crate::rules::syntax::editable(rule) {
             return;
@@ -100,10 +110,21 @@ impl State {
         self.saved.set(false);
     }
 }
+
 pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
     let state = State::new(seed.get());
     seed.set(String::new());
+    let draft = state.clone();
+    crate::navigation::protect(move || {
+        if !draft.target.get().is_empty() || !draft.batch.get().is_empty() {
+            crate::navigation::LeaveState::Dirty
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
     let form_state = state.clone();
+    let remove_state = state.clone();
+    let pending = state.pending_remove;
     let error = state.error;
     let search = state.search;
     let filtered_state = state.clone();
@@ -120,34 +141,71 @@ pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
         .flex_1()
         .min_h(px(0.0))
         .flex_col()
-        .gap_3()
+        .gap_4()
         .child(page_header(|| t!("rules.title"), || t!("rules.subtitle")))
         .child(editor::editor(form_state))
         .child(when(
             move || error.get().is_some(),
             move || {
-                text(move || error.get().unwrap_or_default())
-                    .text_color(move || nsh_base::theme().destructive)
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || error.get().unwrap_or_default())
+                        .text_size(px(12.5))
+                        .text_color(move || theme().destructive),
+                )
             },
         ))
         .child(when(
             move || state.saved.get(),
-            || text(|| t!("rules.saved")),
+            || {
+                alert_banner(
+                    AlertTone::Success,
+                    text(|| t!("rules.saved"))
+                        .text_size(px(12.5))
+                        .text_color(move || theme().color("success").unwrap_or(theme().primary)),
+                )
+            },
         ))
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_3()
                 .child(section_title(|| t!("rules.list")))
+                .child(badge(BadgeVariant::Outline, move || {
+                    filtered.with(Vec::len).to_string()
+                }))
                 .child(view().flex_1())
                 .child(
-                    input(search)
-                        .placeholder(|| t!("rules.search"))
-                        .test_id("rules-search")
-                        .accessible_name(|| t!("rules.search"))
-                        .on_change(move |v| search.set(v)),
+                    view().w(px(240.0)).child(
+                        input(search)
+                            .placeholder(|| t!("rules.search"))
+                            .test_id("rules-search")
+                            .accessible_name(|| t!("rules.search"))
+                            .on_change(move |v| search.set(v)),
+                    ),
                 ),
         )
         .child(rows::rows(state, filtered))
+        .child(
+            crate::ui::confirm_dialog(move || pending.get().is_some())
+                .destructive()
+                .test_id("rule-delete-dialog")
+                .title(|| t!("rules.delete_title"))
+                .description(move || {
+                    pending
+                        .get()
+                        .map(|r| format!("{}\n{}", rule_line(&r), t!("rules.delete_hint")))
+                        .unwrap_or_default()
+                })
+                .confirm_label(|| t!("rules.delete_confirm"))
+                .on_cancel(move || pending.set(None))
+                .on_confirm(move || {
+                    if let Some(rule) = pending.get() {
+                        remove_state.apply(|s| s.remove(&rule.id));
+                    }
+                    pending.set(None);
+                }),
+        )
 }

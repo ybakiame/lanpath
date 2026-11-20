@@ -1,20 +1,24 @@
-//! Appearance settings: theme previews, mode, language and reduced motion.
-//! Text size follows the platform scale.
+//! Appearance settings: theme previews, mode, window backdrop material
+//! (Acrylic frost / Mica / Solid) with custom opacity slider, language, and reduced motion.
 
 use nsh_base::theme;
 use nsh_core::element::desktop::main_window;
 use nsh_core::prelude::*;
 use nsh_core::storage::StorageFull;
 
-use super::{button, feedback, layout, prefs, select, theme::ThemeId, theme_preview};
+use super::{
+    button, feedback, layout,
+    prefs::{self, MAX_OPACITY, MIN_OPACITY, WindowMaterial},
+    select, slider,
+    theme::ThemeId,
+    theme_preview,
+};
 
 /// 外观页。
 pub fn appearance_page() -> impl IntoElement {
     let prefs = prefs::prefs();
     let preview = signal(None::<ThemeId>);
     let theme_error = signal(None::<String>);
-    // 指针悬停预览只能短暂改变全窗 token；页面销毁或窗口失焦必须回到
-    // 最后确认并已持久化的主题，避免预览泄漏。
     cleanup(move || super::theme::apply(prefs.theme.get_untracked()));
     let preview_for_focus = preview;
     main_window().on_focus_change(move |focused| {
@@ -26,22 +30,31 @@ pub fn appearance_page() -> impl IntoElement {
     scroll().flex_1().child(
         view()
             .flex_col()
-            .gap_4()
+            .gap_5()
+            .max_w(px(960.0))
             .child(layout::page_header(
                 || t!("appearance.title"),
                 || t!("appearance.subtitle"),
             ))
             .child(
-                view()
+                layout::surface(layout::SurfaceLevel::Card)
+                    .p_5()
                     .flex_col()
-                    .gap_2()
+                    .gap_3()
                     .child(layout::section_title(|| t!("appearance.section.theme")))
                     .child(
                         view()
                             .grid()
                             .w_full()
                             .app_class("justify-items-stretch")
-                            .grid_cols(move || if window().width.0 < 1080.0 { 2_u16 } else { 4 })
+                            .grid_cols(move || {
+                                let width =
+                                    (window().width.0 - crate::shell::sidebar_width() - 88.0)
+                                        .min(920.0);
+                                (width / (if font_scale() > 1.3 { 200.0 } else { 152.0 }))
+                                    .floor()
+                                    .clamp(2.0, 5.0) as u16
+                            })
                             .gap_3()
                             .children(ThemeId::ALL.iter().map(|id| {
                                 let theme_id = *id;
@@ -49,7 +62,7 @@ pub fn appearance_page() -> impl IntoElement {
                                 let preview_leave = preview;
                                 let preview_press = preview;
                                 let error = theme_error;
-                                let card = button::button(button::ButtonVariant::Ghost)
+                                let card = button::button(button::ButtonVariant::Preview)
                                     .size(button::ButtonSize::Content)
                                     .full_width()
                                     .selected(move || prefs.theme.get() == theme_id)
@@ -73,8 +86,6 @@ pub fn appearance_page() -> impl IntoElement {
                                             prefs.theme.get() == theme_id
                                         })
                                     });
-                                // 指向即时预览（只换 token、不落盘），离开回到
-                                // 已保存主题；后进入的卡片优先，旧卡片离场不覆盖。
                                 view()
                                     .w_full()
                                     .on_mouse_enter(move |_: &MouseEvent| {
@@ -100,42 +111,130 @@ pub fn appearance_page() -> impl IntoElement {
                         .text_size(px(12.0))
                         .text_color(move || theme().muted_foreground),
                     )
-                    .child(
-                        text(move || theme_error.get().unwrap_or_default())
-                            .text_size(px(12.0))
-                            .text_color(move || theme().destructive),
-                    ),
+                    .child(when(
+                        move || theme_error.get().is_some(),
+                        move || {
+                            text(move || theme_error.get().unwrap_or_default())
+                                .text_size(px(12.0))
+                                .text_color(move || theme().destructive)
+                        },
+                    )),
             )
-            .child(mode_section())
-            .child(language_section())
-            .child(motion_section())
-            .child(material_note_section())
+            .child(backdrop_card())
             .child(
-                text(move || {
-                    t!(
-                        "appearance.scale_note",
-                        percent = format!("{:.0}", font_scale() * 100.0)
-                    )
-                })
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-            )
-            .child(feedback::status_bar(
-                text(move || t!("common.selected", name = current_label(prefs.theme.get()))),
-                text(move || {
-                    let name = if dark() {
-                        t!("appearance.mode.dark")
-                    } else {
-                        t!("appearance.mode.light")
-                    };
-                    t!("common.current", name = name)
-                }),
-            )),
+                layout::surface(layout::SurfaceLevel::Card)
+                    .p_5()
+                    .flex_col()
+                    .gap_5()
+                    .child(mode_section())
+                    .child(layout::separator())
+                    .child(language_section())
+                    .child(layout::separator())
+                    .child(motion_section()),
+            ),
     )
 }
 
-fn current_label(id: ThemeId) -> String {
-    id.id_name().to_owned()
+fn backdrop_card() -> AnyElement {
+    let prefs = prefs::prefs();
+    let material = prefs.material;
+    let opacity = prefs.opacity;
+    let error = signal(None::<String>);
+    layout::surface(layout::SurfaceLevel::Card)
+        .p_5()
+        .flex_col()
+        .gap_4()
+        .child(
+            view()
+                .flex_col()
+                .gap_1()
+                .child(layout::section_title(|| t!("appearance.section.backdrop")))
+                .child(
+                    text(|| t!("appearance.backdrop.hint"))
+                        .text_size(px(12.0))
+                        .text_color(move || theme().muted_foreground),
+                ),
+        )
+        .child(select::radio_group(
+            || t!("appearance.section.backdrop"),
+            select::segmented_group(
+                "backdrop-group",
+                WindowMaterial::ALL
+                    .iter()
+                    .map(|target| {
+                        let target = *target;
+                        let test_id = match target {
+                            WindowMaterial::Acrylic => "backdrop-acrylic",
+                            WindowMaterial::Mica => "backdrop-mica",
+                            WindowMaterial::Solid => "backdrop-solid",
+                        };
+                        select::segmented_radio(
+                            move || material.get() == target,
+                            move || t!(target.label_key()),
+                            test_id,
+                            move || finish_apply(prefs.apply_material(target), error),
+                        )
+                    })
+                    .collect(),
+            ),
+        ))
+        .child(
+            view()
+                .flex_col()
+                .gap_2()
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            text(|| t!("appearance.section.opacity"))
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(move || theme().foreground),
+                        )
+                        .child(
+                            text(move || {
+                                let percent = if material.get() == WindowMaterial::Solid {
+                                    100
+                                } else {
+                                    opacity.get()
+                                };
+                                t!("appearance.opacity.value", percent = percent)
+                            })
+                            .test_id("backdrop-opacity-value")
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(move || theme().primary),
+                        ),
+                )
+                .child(view().max_w(px(420.0)).child(slider::slider(
+                    move || {
+                        if material.get() == WindowMaterial::Solid {
+                            MAX_OPACITY as f64
+                        } else {
+                            opacity.get() as f64
+                        }
+                    },
+                    MIN_OPACITY as f64,
+                    MAX_OPACITY as f64,
+                    1.0,
+                    move || material.get() == WindowMaterial::Solid,
+                    || t!("appearance.section.opacity"),
+                    "backdrop-opacity-slider",
+                    move |v| prefs.preview_opacity(v.round() as u8),
+                    move |v| finish_apply(prefs.apply_opacity(v.round() as u8), error),
+                ))),
+        )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                text(move || error.get().unwrap_or_default())
+                    .text_size(px(12.0))
+                    .text_color(move || theme().destructive)
+            },
+        ))
+        .into_element()
 }
 
 fn theme_test_id(id: ThemeId) -> &'static str {
@@ -143,6 +242,7 @@ fn theme_test_id(id: ThemeId) -> &'static str {
         ThemeId::Amethyst => "theme-amethyst",
         ThemeId::Indigo => "theme-indigo",
         ThemeId::Ocean => "theme-ocean",
+        ThemeId::Mint => "theme-mint",
         ThemeId::Forest => "theme-forest",
         ThemeId::Sand => "theme-sand",
         ThemeId::Rose => "theme-rose",
@@ -156,8 +256,6 @@ fn theme_test_id(id: ThemeId) -> &'static str {
     }
 }
 
-/// 同步保存结果的就近反馈：成功清除本组错误，失败保持上一有效值并
-/// 显示可恢复的说明；toast 与内联文字使用同一消息。
 fn finish_apply(result: Result<(), StorageFull>, error: Signal<Option<String>>) {
     match result {
         Ok(()) => error.set(None),
@@ -179,28 +277,35 @@ fn mode_section() -> AnyElement {
         .child(layout::section_title(|| t!("appearance.section.mode")))
         .child(select::radio_group(
             || t!("appearance.section.mode"),
-            view()
-                .test_id("mode-group")
-                .children(prefs::Mode::ALL.iter().map(|target| {
-                    let target = *target;
-                    let test_id = match target {
-                        prefs::Mode::Light => "appearance-light",
-                        prefs::Mode::Dark => "appearance-dark",
-                        prefs::Mode::System => "appearance-system",
-                    };
-                    select::radio_row(
-                        move || mode.get() == target,
-                        move || t!(target.label_key()),
-                        test_id,
-                        move || finish_apply(prefs.apply_mode(target), error),
-                    )
-                })),
+            select::segmented_group(
+                "mode-group",
+                prefs::Mode::ALL
+                    .iter()
+                    .map(|target| {
+                        let target = *target;
+                        let test_id = match target {
+                            prefs::Mode::Light => "appearance-light",
+                            prefs::Mode::Dark => "appearance-dark",
+                            prefs::Mode::System => "appearance-system",
+                        };
+                        select::segmented_radio(
+                            move || mode.get() == target,
+                            move || t!(target.label_key()),
+                            test_id,
+                            move || finish_apply(prefs.apply_mode(target), error),
+                        )
+                    })
+                    .collect(),
+            ),
         ))
-        .child(
-            text(move || error.get().unwrap_or_default())
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                text(move || error.get().unwrap_or_default())
+                    .text_size(px(12.0))
+                    .text_color(move || theme().destructive)
+            },
+        ))
         .into_element()
 }
 
@@ -214,28 +319,35 @@ fn language_section() -> AnyElement {
         .child(layout::section_title(|| t!("appearance.section.language")))
         .child(select::radio_group(
             || t!("appearance.section.language"),
-            view()
-                .test_id("language-group")
-                .children(prefs::LanguagePref::ALL.iter().map(|target| {
-                    let target = *target;
-                    let test_id = match target {
-                        prefs::LanguagePref::System => "language-system",
-                        prefs::LanguagePref::ZhCn => "language-zh-cn",
-                        prefs::LanguagePref::En => "language-en",
-                    };
-                    select::radio_row(
-                        move || language.get() == target,
-                        move || t!(target.label_key()),
-                        test_id,
-                        move || finish_apply(prefs.apply_language(target), error),
-                    )
-                })),
+            select::segmented_group(
+                "language-group",
+                prefs::LanguagePref::ALL
+                    .iter()
+                    .map(|target| {
+                        let target = *target;
+                        let test_id = match target {
+                            prefs::LanguagePref::System => "language-system",
+                            prefs::LanguagePref::ZhCn => "language-zh-cn",
+                            prefs::LanguagePref::En => "language-en",
+                        };
+                        select::segmented_radio(
+                            move || language.get() == target,
+                            move || t!(target.label_key()),
+                            test_id,
+                            move || finish_apply(prefs.apply_language(target), error),
+                        )
+                    })
+                    .collect(),
+            ),
         ))
-        .child(
-            text(move || error.get().unwrap_or_default())
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                text(move || error.get().unwrap_or_default())
+                    .text_size(px(12.0))
+                    .text_color(move || theme().destructive)
+            },
+        ))
         .into_element()
 }
 
@@ -249,40 +361,33 @@ fn motion_section() -> AnyElement {
         .child(layout::section_title(|| t!("appearance.section.motion")))
         .child(select::radio_group(
             || t!("appearance.section.motion"),
-            view()
-                .test_id("motion-group")
-                .children(prefs::MotionPref::ALL.iter().map(|target| {
-                    let target = *target;
-                    let test_id = match target {
-                        prefs::MotionPref::System => "motion-system",
-                        prefs::MotionPref::Reduce => "motion-reduce",
-                    };
-                    select::radio_row(
-                        move || motion.get() == target,
-                        move || t!(target.label_key()),
-                        test_id,
-                        move || finish_apply(prefs.apply_motion(target), error),
-                    )
-                })),
+            select::segmented_group(
+                "motion-group",
+                prefs::MotionPref::ALL
+                    .iter()
+                    .map(|target| {
+                        let target = *target;
+                        let test_id = match target {
+                            prefs::MotionPref::System => "motion-system",
+                            prefs::MotionPref::Reduce => "motion-reduce",
+                        };
+                        select::segmented_radio(
+                            move || motion.get() == target,
+                            move || t!(target.label_key()),
+                            test_id,
+                            move || finish_apply(prefs.apply_motion(target), error),
+                        )
+                    })
+                    .collect(),
+            ),
         ))
-        .child(
-            text(move || error.get().unwrap_or_default())
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
-        .into_element()
-}
-
-/// Describe the current opaque surface; no material preference is offered yet.
-fn material_note_section() -> impl IntoElement {
-    view()
-        .flex_col()
-        .gap_2()
-        .child(layout::section_title(|| t!("appearance.section.material")))
-        .child(
-            text(move || t!("appearance.material_note"))
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                text(move || error.get().unwrap_or_default())
+                    .text_size(px(12.0))
+                    .text_color(move || theme().destructive)
+            },
+        ))
         .into_element()
 }

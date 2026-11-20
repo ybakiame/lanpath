@@ -24,6 +24,7 @@ mod log_service;
 mod logs_view;
 mod memory_logs_view;
 mod overview_view;
+mod preferences_storage;
 mod profiles;
 mod profiles_view;
 mod request_settings;
@@ -42,18 +43,25 @@ mod windows_access;
 mod windows_file;
 
 mod app_state;
+mod navigation;
+mod shell;
+mod workspace_panels;
+pub use preferences_storage::AppStorage;
+
+fn launch_window_json() -> String {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../nsh.json"))
+        .expect("embedded NSH manifest must parse");
+    manifest["window"].to_string()
+}
 
 /// 独立系统代理守护的入口分派（`--proxy-guardian`）；必须是 crate 公开
 /// 接口以便二进制在任何 NSH/GUI/存储初始化前调用。
 pub mod proxy_guardian;
 
 use logs_view::logs_page;
-use profiles_view::profiles_page;
 use request_settings_view::request_settings_page;
-use subscriptions_view::subscription_page;
 
 use backup_view::backup_page;
-use config_view::config_page;
 use core_view::core_page;
 
 // NSH CLI 的 describe/test 需要 UI set 元数据；原生启动仍使用下方 Rust root。
@@ -73,7 +81,9 @@ pub fn prepare_native_data_dir() -> lanpath_common::LanpathResult<std::path::Pat
 pub fn root() -> Root {
     let translations = i18n::translations().expect("embedded locales must parse");
     Root::of::<App>()
-        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Amethyst))
+        .app_id("com.ybakiame.lanpath.desktop.nsh")
+        .main_window_json(&launch_window_json())
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Ocean))
         .translations(translations)
 }
 
@@ -81,7 +91,9 @@ pub fn root() -> Root {
 pub fn gallery_root() -> Root {
     let translations = i18n::translations().expect("embedded locales must parse");
     Root::of::<ui::gallery::Gallery>()
-        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Amethyst))
+        .app_id("com.ybakiame.lanpath.desktop.nsh")
+        .main_window_json(&launch_window_json())
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Ocean))
         .translations(translations)
 }
 
@@ -169,18 +181,20 @@ pub fn App() -> impl IntoElement {
     let failure_state = startup_error;
     let main_state = startup_error;
     // 默认首页为概览。
-    let page = signal(Page::Overview);
+    let (page, requested, navigation_dialog) = navigation::install();
     let rule_seed = signal(String::new());
     view()
         .flex_1()
         .flex_col()
-        .bg(move || theme().background)
+        .bg(ui::prefs::window_bg)
         .text_color(move || theme().foreground)
-        .child(ui::title_bar::title_bar())
+        .child(ui::title_bar::workspace_title_bar(move || {
+            t!(page.get().label_key())
+        }))
         .child(ui::feedback::toast_host())
         .child(when(
             move || failure_state.get().is_some(),
-            move || startup_failure(failure_state),
+            move || shell::startup_failure(failure_state),
         ))
         .child(when(
             move || main_state.get().is_none(),
@@ -200,7 +214,7 @@ pub fn App() -> impl IntoElement {
                             .flex_1()
                             .min_h(px(0.0))
                             .flex_row()
-                            .child(sidebar(page))
+                            .child(shell::sidebar(page, requested))
                             .child(
                                 view()
                                     .flex_1()
@@ -208,29 +222,22 @@ pub fn App() -> impl IntoElement {
                                     .p_6()
                                     .child(when(
                                         move || page.get() == Page::Overview,
-                                        move || overview_view::overview_page(page),
-                                    ))
-                                    .child(when(
-                                        move || page.get() == Page::Subscription,
-                                        subscription_page,
+                                        move || overview_view::overview_page(requested),
                                     ))
                                     .child(when(
                                         move || page.get() == Page::RequestSettings,
                                         request_settings_page,
                                     ))
-                                    .child(when(
-                                        move || page.get() == Page::Profiles,
-                                        profiles_page,
-                                    ))
                                     .child(when(move || page.get() == Page::Core, core_page))
-                                    .child(when(move || page.get() == Page::Config, config_page))
                                     .child(when(
                                         move || page.get() == Page::Rules,
                                         move || rules_view::rules_page(rule_seed),
                                     ))
                                     .child(when(
                                         move || page.get() == Page::Diagnostics,
-                                        move || diagnostics_view::diagnostics_page(page, rule_seed),
+                                        move || {
+                                            diagnostics_view::diagnostics_page(requested, rule_seed)
+                                        },
                                     ))
                                     .child(when(move || page.get() == Page::Logs, logs_page))
                                     .child(when(move || page.get() == Page::Backup, backup_page))
@@ -242,184 +249,9 @@ pub fn App() -> impl IntoElement {
                     )
                     // 全局状态栏：真实订阅/核心/运行状态（共享信号）；不显示
                     // 常态“已保存”提示。
-                    .child(global_status_bar())
+                    .child(shell::global_status_bar())
             },
         ))
-}
-
-/// 全局状态栏：左侧真实运行状态（共享命令 busy 阶段优先），右侧真实
-/// 当前生效订阅与实际选中核心（与概览/核心页同一信号源）。
-fn global_status_bar() -> impl IntoElement {
-    let state = app_state::current();
-    let status = state.status;
-    let command = state.command;
-    let subscription = state.active_subscription;
-    let core = state.active_core;
-    let subscription_error = state.subscription_error;
-    let core_error = state.core_error;
-    ui::feedback::status_bar(
-        text(move || {
-            let status = status.get();
-            let command = command.get();
-            let mut line = if command.busy {
-                app_state::command_pending_line(&command, &status)
-            } else {
-                app_state::runtime_status_line(&status)
-            };
-            if app_state::proxy_recovery_visible(&status) {
-                line.push_str(&t!("status.proxy_recovery_short"));
-            }
-            if subscription_error.get().is_some() || core_error.get().is_some() {
-                line.push_str(&app_state::summary_error_short_line());
-            }
-            line
-        }),
-        text(move || {
-            let subscription = subscription
-                .get()
-                .map(|subscription| subscription.name)
-                .unwrap_or_else(|| t!("status.none"));
-            let core = core
-                .get()
-                .map(|selection| {
-                    format!(
-                        "{} {}",
-                        selection.core_type,
-                        app_state::core_tag(&selection.version)
-                    )
-                })
-                .unwrap_or_else(|| t!("status.none"));
-            t!("status.summary", subscription = subscription, core = core)
-        }),
-    )
-}
-
-/// 启动失败全窗提示：数据根打不开（被占用/准入拒绝/恢复事务冲突）时
-/// 不进入任何业务页，真实错误与处置建议直接上屏；原配置未被修改。
-fn startup_failure(error: Signal<Option<String>>) -> impl IntoElement {
-    view()
-        .flex_1()
-        .flex_col()
-        .gap_3()
-        .p_6()
-        .bg(move || theme().background)
-        .text_color(move || theme().foreground)
-        .child(text("Lanpath NSH Desktop").text_size(px(24.0)))
-        .child(
-            text("启动失败：数据根无法打开（可能被其他实例占用、准入拒绝，或恢复事务存在冲突）")
-                .text_color(move || theme().destructive),
-        )
-        .child(text(move || error.get().unwrap_or_default()))
-        .child(
-            text("原配置未被修改。请关闭其他实例或按错误提示处理，然后重新启动应用。")
-                .text_color(move || theme().muted_foreground),
-        )
-}
-
-fn sidebar(page: Signal<Page>) -> impl IntoElement {
-    view()
-        .w(px(216.0))
-        .flex_none()
-        .min_h(px(0.0))
-        .test_id("app-sidebar")
-        .bg(move || theme().sidebar)
-        .border_r(px(1.0))
-        .border_color(move || theme().sidebar_border)
-        .child(
-            scroll().flex_1().min_h(px(0.0)).child(
-                view()
-                    .w_full()
-                    .flex_none()
-                    .flex_col()
-                    .p_4()
-                    .gap_2()
-                    .text_color(move || theme().sidebar_foreground)
-                    .child(
-                        text(|| t!("app.title"))
-                            .text_size(px(17.0))
-                            .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(
-                        text(|| t!("app.tagline"))
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
-                    )
-                    .child(ui::layout::separator())
-                    // 导航分组：只列入本切片真实实现的页面入口。
-                    .child(nav_group("nav.group.workspace"))
-                    .child(nav_item(page, Page::Overview))
-                    .child(nav_item(page, Page::Subscription))
-                    .child(nav_group("nav.group.core_config"))
-                    .child(nav_item(page, Page::Core))
-                    .child(nav_item(page, Page::Profiles))
-                    .child(nav_item(page, Page::RequestSettings))
-                    .child(nav_item(page, Page::Config))
-                    .child(nav_item(page, Page::Rules))
-                    .child(nav_group("nav.group.tools"))
-                    .child(nav_item(page, Page::Diagnostics))
-                    .child(nav_item(page, Page::Logs))
-                    .child(nav_item(page, Page::Backup))
-                    .child(nav_group("nav.group.settings"))
-                    .child(nav_item(page, Page::Appearance)),
-            ),
-        )
-}
-
-/// 分组标签（静态展示，本切片不做折叠交互）。
-fn nav_group(label_key: &'static str) -> impl IntoElement {
-    text(move || t!(label_key))
-        .text_size(px(12.0))
-        .px(px(12.0))
-        .pt(px(6.0))
-        .text_color(move || theme().muted_foreground)
-}
-
-fn nav_item(page: Signal<Page>, target: Page) -> impl IntoElement {
-    let selected = move || page.get() == target;
-    let label_key = target.label_key();
-    let el = nsh_base::button()
-        .selected(selected)
-        .w_full()
-        .flex_row()
-        .justify_start()
-        .px(px(12.0))
-        .py(px(8.0))
-        .rounded(move || theme().radius)
-        .items_center()
-        .cursor_pointer()
-        .transition_colors()
-        .bg(move || {
-            if selected() {
-                theme().sidebar_accent
-            } else {
-                transparent_black().into()
-            }
-        })
-        .text_color(move || {
-            if selected() {
-                theme().sidebar_accent_foreground
-            } else {
-                theme().sidebar_foreground
-            }
-        })
-        .on_press(move || page.set(target))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                // 固定选择标记槽：未选中时保留同样宽度并使用透明圆点，
-                // 避免选中态推动标签，破坏整列的左对齐扫描轴。
-                .child(
-                    view()
-                        .size(px(6.0))
-                        .flex_none()
-                        .rounded_full()
-                        .bg(move || theme().sidebar_primary)
-                        .opacity(move || if selected() { 1.0_f32 } else { 0.0_f32 }),
-                )
-                .child(text(move || t!(label_key)).text_size(px(14.0))),
-        )
-        .into_element();
-    view().test_id(target.test_id()).child(el).into_element()
+        .child(workspace_panels::host())
+        .child(navigation_dialog)
 }

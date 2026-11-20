@@ -71,7 +71,7 @@ fn fresh_root_defaults_to_overview_with_steps_and_only_first_actionable() {
     let mut app = start_app(entries).0;
     wait_overview_steps(&mut app);
     let seen = texts(&app);
-    for expected in ["工作区", "核心配置", "工具与恢复", "设置"] {
+    for expected in ["使用", "配置", "排查与恢复"] {
         assert!(
             seen.contains(&expected),
             "missing nav group {expected}: {seen:?}"
@@ -163,7 +163,7 @@ fn overview_updates_after_an_offpage_subscription_refresh_completes() {
     // 刷新在途时设为生效，再立即离开订阅页。
     app.press("id:subscription-row-离页生效 >> text:设为生效")
         .unwrap();
-    app.press("role:button[概览]").unwrap();
+    common::navigate(&mut app, "role:button[概览]");
     // 新生效订阅尚无节点，概览保持未配置步骤，不伪造已就绪。
     let seen = texts(&app);
     assert!(!seen.contains(&"当前订阅"), "{seen:?}");
@@ -198,7 +198,7 @@ fn configured_overview_shows_real_subscription_core_summary_and_status_bar() {
     // 管理操作导航到现有真实页面。
     app.press("id:overview-manage-subscriptions").unwrap();
     app.wait_for("id:subscription-name").unwrap();
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     app.wait_for("当前订阅").unwrap();
     app.press("id:overview-choose-core").unwrap();
     app.wait_for("id:core-check-remote").unwrap();
@@ -235,7 +235,7 @@ fn starting_from_overview_shares_real_state_across_pages() {
     );
 
     // 切到核心页：同一共享状态（不是页面私有轮询），停止在核心页完成。
-    app.press("核心").unwrap();
+    common::navigate(&mut app, "核心");
     app.wait_for("id:core-check-remote").unwrap();
     app.wait_for_within(
         "text:/运行中：sing-box v1.2.3 · mixed 18371/",
@@ -250,7 +250,7 @@ fn starting_from_overview_shares_real_state_across_pages() {
     .unwrap();
 
     // 回概览：真实状态一致（未运行），且不再 busy。
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     app.wait_for_within("未运行", Duration::from_secs(30))
         .unwrap();
     let seen = texts(&app);
@@ -273,7 +273,7 @@ fn start_task_survives_leaving_the_overview_page() {
     app.wait_for("当前订阅").unwrap();
     app.press("id:overview-start").unwrap();
     // 启动在途时立即离页：核心页必须看到同一命令的完成结果。
-    app.press("核心").unwrap();
+    common::navigate(&mut app, "核心");
     app.wait_for("id:core-check-remote").unwrap();
     app.wait_for_within(
         "text:/已完成二进制校验并启动：sing-box v1.2.3 · mixed 18381/",
@@ -313,7 +313,7 @@ fn selecting_a_core_updates_the_shared_summary() {
     app.press("id:core-use-sing-box-1.2.3").unwrap();
     app.wait_for("sing-box · v1.2.3").unwrap();
     // 回到概览：进入已配置摘要视图，订阅/核心摘要为真实值。
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     app.wait_for("当前订阅").unwrap();
     let seen = texts(&app);
     for expected in [
@@ -344,7 +344,6 @@ fn configured_overview_and_status_bar_follow_english() {
         "Choose core…",
         "Runtime Status",
         "Validate & Start",
-        "Stop",
         "Not running",
         "Subscription: 运行订阅 · Core: sing-box v1.2.3",
     ] {
@@ -385,10 +384,10 @@ fn subscription_summary_failure_keeps_last_value_and_surfaces_error() {
     let manifest = dir.path().join("subscriptions.toml");
     let original = std::fs::read(&manifest).expect("read valid manifest");
     std::fs::write(&manifest, "broken = [").expect("corrupt subscriptions manifest");
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for_within("text:/加载订阅失败/", Duration::from_secs(10))
         .unwrap();
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     app.wait_for("id:overview-subscription-error").unwrap();
 
     let seen = texts(&app);
@@ -407,9 +406,9 @@ fn subscription_summary_failure_keeps_last_value_and_surfaces_error() {
 
     // 修复清单并重新读取后错误清除，值仍为真实数据。
     std::fs::write(&manifest, original).expect("restore manifest");
-    app.press("订阅").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     wait_overview_steps(&mut app);
     let seen = texts(&app);
     assert!(
@@ -437,10 +436,10 @@ fn core_summary_failure_keeps_last_value_and_surfaces_error() {
     assert!(texts(&app).contains(&"sing-box v1.2.3"));
 
     std::fs::write(dir.path().join("app.toml"), "broken = [").expect("corrupt app config");
-    app.press("核心").unwrap();
+    common::navigate(&mut app, "核心");
     app.wait_for("当前使用").unwrap();
     app.wait_for("id:core-selection-error").unwrap();
-    app.press("概览").unwrap();
+    common::navigate(&mut app, "概览");
     app.wait_for("id:overview-core-error").unwrap();
 
     let seen = texts(&app);
@@ -472,7 +471,7 @@ fn runtime_result_and_status_follow_language_changes() {
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(30))
         .unwrap();
 
-    app.press("外观").unwrap();
+    common::navigate(&mut app, "外观");
     app.wait_for("id:language-en").unwrap();
     app.press("id:language-en >> text:English").unwrap();
     app.wait_for("Overview").unwrap();

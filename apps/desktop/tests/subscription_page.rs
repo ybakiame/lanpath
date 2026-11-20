@@ -33,7 +33,7 @@ fn adding_a_subscription_shows_it_and_clears_the_form() {
         .unwrap();
     app.press("新增订阅").unwrap();
     let seen = texts(&app);
-    for expected in ["共 1 个订阅", "东京专线", "已启用", "未获取节点"] {
+    for expected in ["共 1 个订阅", "东京专线", "未获取节点"] {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
     assert_eq!(
@@ -64,7 +64,7 @@ fn saved_subscriptions_restore_across_relaunches() {
     open_subscriptions(&mut second);
     second.wait_for("持久订阅").unwrap();
     let seen = texts(&second);
-    for expected in ["持久订阅", "共 1 个订阅", "已启用"] {
+    for expected in ["持久订阅", "共 1 个订阅"] {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
 }
@@ -119,16 +119,16 @@ fn toggling_a_subscription_off_and_back_on() {
     app.type_text("id:subscription-url", "https://example.com/t.yaml")
         .unwrap();
     app.press("新增订阅").unwrap();
-    assert!(texts(&app).contains(&"已启用"));
+    assert!(common::subscription_checked(&app, "切换订阅"));
 
     let enabled = format!("{} >> role:switch", enabled_selector(&dir, "切换订阅"));
     app.press(&enabled).unwrap();
     let seen = texts(&app);
-    assert!(seen.contains(&"已停用"), "{seen:?}");
+    assert!(!common::subscription_checked(&app, "切换订阅"));
     assert!(!seen.contains(&"已启用"), "{seen:?}");
 
     app.press(&enabled).unwrap();
-    assert!(texts(&app).contains(&"已启用"));
+    assert!(common::subscription_checked(&app, "切换订阅"));
 }
 
 fn enabled_selector(dir: &tempfile::TempDir, name: &str) -> String {
@@ -252,8 +252,8 @@ fn refresh_survives_leaving_the_page_and_is_seen_by_the_next_page() {
     app.wait_for("正在刷新订阅…").unwrap();
 
     // 旧页面销毁只取消 UI 轮询，业务刷新继续。
-    app.press("role:button[外观]").unwrap();
-    app.press("role:button[订阅]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
+    common::open_subscriptions(&mut app);
     app.wait_for("离页刷新").unwrap();
     app.wait_for("正在刷新订阅…").unwrap();
 
@@ -285,7 +285,7 @@ fn refresh_completed_before_returning_does_not_leave_the_page_busy() {
 
     add_subscription(&mut app, "返回前完成", &server.url("/before-return.yaml"));
     app.wait_for("正在刷新订阅…").unwrap();
-    app.press("role:button[外观]").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
@@ -300,7 +300,7 @@ fn refresh_completed_before_returning_does_not_leave_the_page_busy() {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    app.press("role:button[订阅]").unwrap();
+    common::open_subscriptions(&mut app);
     app.wait_for("2 个节点 · 格式 ClashYaml").unwrap();
     let seen = texts(&app);
     assert!(!seen.contains(&"正在刷新订阅…"), "{seen:?}");
@@ -480,7 +480,7 @@ fn source_dialog_shows_the_last_successful_content_read_only() {
     let seen = texts(&app);
     assert!(seen.contains(&"格式：ClashYaml"), "{seen:?}");
     assert!(seen.iter().any(|text| text.contains("节点甲")), "{seen:?}");
-    app.press("关闭").unwrap();
+    app.press("id:source-dialog-close").unwrap();
     app.wait_for("共 1 个订阅").unwrap();
 }
 
@@ -521,13 +521,13 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     app.press("id:subscription-row-甲 >> text:设为生效")
         .unwrap();
     app.wait_for("已设为当前生效订阅").unwrap();
-    assert!(texts(&app).contains(&"当前生效"));
+    assert!(texts(&app).contains(&"当前订阅"));
     // 停用的订阅不能设为生效。
     let enabled = format!("{} >> role:switch", enabled_selector(&dir, "甲"));
     app.press(&enabled).unwrap();
-    app.wait_for("已停用").unwrap();
+    assert!(!common::subscription_checked(&app, "甲"));
     let seen = texts(&app);
-    assert!(!seen.contains(&"当前生效"), "{seen:?}");
+    assert!(!seen.contains(&"当前订阅"), "{seen:?}");
     app.press("id:subscription-row-甲 >> text:设为生效")
         .unwrap();
     app.wait_for("text:/所选订阅已停用，请先启用/").unwrap();
@@ -536,11 +536,11 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     app.press(&enabled).unwrap();
     app.press("id:subscription-row-甲 >> text:设为生效")
         .unwrap();
-    app.wait_for("当前生效").unwrap();
+    app.wait_for("当前订阅").unwrap();
     drop(app);
     let mut reopened = start_app(entries.clone()).0;
     open_subscriptions(&mut reopened);
-    reopened.wait_for("当前生效").unwrap();
+    reopened.wait_for("当前订阅").unwrap();
 
     reopened
         .press("id:subscription-row-甲 >> text:更多")
@@ -549,7 +549,7 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     reopened.wait_for("删除订阅“甲”？").unwrap();
     reopened.press("确认删除").unwrap();
     let seen = texts(&reopened);
-    assert!(!seen.contains(&"当前生效"), "{seen:?}");
+    assert!(!seen.contains(&"当前订阅"), "{seen:?}");
     assert!(seen.contains(&"共 1 个订阅"), "{seen:?}");
     drop(reopened);
 
@@ -557,7 +557,7 @@ fn active_subscription_sets_persists_and_clears_on_disable_or_remove() {
     let mut third = start_app(entries).0;
     open_subscriptions(&mut third);
     third.wait_for("共 1 个订阅").unwrap();
-    assert!(!texts(&third).contains(&"当前生效"), "{:?}", texts(&third));
+    assert!(!texts(&third).contains(&"当前订阅"), "{:?}", texts(&third));
 }
 
 /// 全局单飞：两个订阅同时点刷新，只有一个请求在途；busy 最终归零，
@@ -628,18 +628,18 @@ fn enabled_switch_has_role_label_checked_and_keyboard_activation() {
     );
 
     // 键盘：桌面端指针按压不夺取键盘焦点；先经输入框取得确定焦点
-    // （名称输入框），再 Tab 4 站（URL → User-Agent → 新增按钮 → 行内
+    // （名称输入框），再 Tab 5 站（URL → User-Agent → 新增按钮 → 筛选框 → 行内
     // 开关），Enter 与 Space 各自激活切换一次。
     app.type_text("id:subscription-name", "draft").unwrap();
-    for _ in 0..4 {
+    for _ in 0..5 {
         app.press_key("tab").unwrap();
     }
     app.press_key("enter").unwrap();
-    app.wait_for("已停用").unwrap();
+    assert!(!common::subscription_checked(&app, "开关订阅"));
     app.press_key("space").unwrap();
-    app.wait_for("已启用").unwrap();
+    assert!(common::subscription_checked(&app, "开关订阅"));
     app.press_key("enter").unwrap();
-    app.wait_for("已停用").unwrap();
+    assert!(!common::subscription_checked(&app, "开关订阅"));
     assert_eq!(
         app.screen().accessibility_state(&enabled).unwrap().checked,
         Some(Checked::False),
@@ -663,7 +663,6 @@ fn subscription_actions_and_switch_label_follow_english() {
     let seen = texts(&app);
     for expected in [
         "Subscriptions",
-        "Enabled",
         "Refresh",
         "Edit",
         "Source",
@@ -673,7 +672,7 @@ fn subscription_actions_and_switch_label_follow_english() {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
     // 本阶段 UI 文案不得残留中文硬编码。
-    for unexpected in ["刷新", "编辑", "设为生效", "更多", "已启用", "新增订阅"] {
+    for unexpected in ["刷新", "编辑", "设为生效", "更多", "新增订阅"] {
         assert!(
             !seen.contains(&unexpected),
             "英文界面出现中文硬编码 {unexpected}: {seen:?}"

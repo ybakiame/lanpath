@@ -8,6 +8,7 @@ use nsh_core::prelude::*;
 
 /// 单行输入（高 40，DESIGN.md 4.4）。
 pub struct Input {
+    element_ref: Option<ElementRef>,
     value: Signal<String>,
     accessible_name: Option<Box<dyn Fn() -> String>>,
     placeholder: Option<Box<dyn Fn() -> String>>,
@@ -16,12 +17,14 @@ pub struct Input {
     invalid: Option<Box<dyn Fn() -> bool>>,
     disabled: Option<Box<dyn Fn() -> bool>>,
     masked: bool,
+    readonly: Option<Box<dyn Fn() -> bool>>,
     test_id: Option<&'static str>,
 }
 
 /// 一个单行输入。
 pub fn input(value: Signal<String>) -> Input {
     Input {
+        element_ref: None,
         value,
         accessible_name: None,
         placeholder: None,
@@ -30,11 +33,16 @@ pub fn input(value: Signal<String>) -> Input {
         invalid: None,
         disabled: None,
         masked: false,
+        readonly: None,
         test_id: None,
     }
 }
 
 impl Input {
+    pub fn element_ref(mut self, reference: ElementRef) -> Self {
+        self.element_ref = Some(reference);
+        self
+    }
     pub fn accessible_name(mut self, name: impl Fn() -> String + 'static) -> Self {
         self.accessible_name = Some(Box::new(name));
         self
@@ -62,6 +70,11 @@ impl Input {
 
     pub fn disabled(mut self, disabled: impl Fn() -> bool + 'static) -> Self {
         self.disabled = Some(Box::new(disabled));
+        self
+    }
+
+    pub fn readonly(mut self, readonly: impl Fn() -> bool + 'static) -> Self {
+        self.readonly = Some(Box::new(readonly));
         self
     }
 
@@ -136,6 +149,7 @@ impl Textarea {
 impl IntoElement for Textarea {
     fn into_element(self) -> AnyElement {
         let value = self.value;
+        let reduced = super::prefs::prefs().reduced;
         let mut el = base_input()
             .value(value)
             .multiline(true)
@@ -145,8 +159,13 @@ impl IntoElement for Textarea {
             .border(px(1.0))
             .bg(move || theme().background)
             .text_color(move || theme().foreground)
+            .placeholder_color(|| color(theme().muted_foreground))
+            .caret_color(|| color(theme().primary))
             .text_size(px(14.0))
             .transition_colors()
+            .duration(move || {
+                super::motion::motion_duration(super::motion::INSTANT_MS, reduced.get())
+            })
             .border_color(move || {
                 if self.invalid.as_ref().is_some_and(|f| f()) {
                     theme().destructive
@@ -154,6 +173,7 @@ impl IntoElement for Textarea {
                     theme().input
                 }
             })
+            .disabled_style(|s| s.opacity(0.55))
             .focus(|s| s.border_color(move || theme().ring));
         if let Some(placeholder) = self.placeholder {
             el = el.placeholder(placeholder);
@@ -177,17 +197,23 @@ impl IntoElement for Textarea {
 impl IntoElement for Input {
     fn into_element(self) -> AnyElement {
         let value = self.value;
+        let reduced = super::prefs::prefs().reduced;
         let mut el = base_input()
             .value(value)
-            .h(px(40.0))
+            .min_h(px(36.0))
             .px(px(12.0))
             .items_center()
             .rounded(move || theme().radius)
             .border(px(1.0))
             .bg(move || theme().background)
             .text_color(move || theme().foreground)
-            .text_size(px(14.0))
+            .placeholder_color(|| color(theme().muted_foreground))
+            .caret_color(|| color(theme().primary))
+            .text_size(px(13.5))
             .transition_colors()
+            .duration(move || {
+                super::motion::motion_duration(super::motion::INSTANT_MS, reduced.get())
+            })
             .border_color(move || {
                 if self.invalid.as_ref().is_some_and(|f| f()) {
                     theme().destructive
@@ -195,7 +221,11 @@ impl IntoElement for Input {
                     theme().input
                 }
             })
+            .disabled_style(|s| s.opacity(0.55))
             .focus(|s| s.border_color(move || theme().ring));
+        if let Some(reference) = self.element_ref {
+            el = el.element_ref(&reference);
+        }
         if let Some(placeholder) = self.placeholder {
             el = el.placeholder(placeholder);
         }
@@ -204,6 +234,9 @@ impl IntoElement for Input {
         }
         if let Some(on_submit) = self.on_submit {
             el = el.on_submit(move |_: &str| on_submit());
+        }
+        if let Some(readonly) = self.readonly {
+            el = el.readonly(readonly);
         }
         if self.masked {
             el = el.masked(true);
@@ -265,7 +298,7 @@ impl Field {
 
 impl IntoElement for Field {
     fn into_element(self) -> AnyElement {
-        let mut el = view().flex_col().gap_2();
+        let mut el = view().flex_col().gap_1();
         if let Some(label) = self.label {
             el = el.child(
                 text(label)

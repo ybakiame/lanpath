@@ -7,21 +7,21 @@ nav.subscriptions: Subscriptions
 nav.request_settings: Request Settings
 nav.profiles: Overrides
 nav.core: Core
-nav.config: Config
+nav.config: Configuration preview
 nav.logs: Logs
 nav.backup: Backup
 nav.appearance: Appearance
 nav.overview: Overview
-nav.group.workspace: Workspace
-nav.group.core_config: Core Config
-nav.group.tools: Tools & Recovery
+nav.group.workspace: Use
+nav.group.core_config: Configure
+nav.group.tools: Troubleshoot & recover
 nav.group.settings: Settings
 
 status.summary: "Subscription: %{subscription} · Core: %{core}"
 status.none: None
 
 overview.title: Overview
-overview.subtitle: "Main path: current subscription → core → validate & start → real status; only real status and the next actionable step"
+overview.subtitle: Check your current configuration and runtime, then take the next step.
 overview.subscription.title: Current Subscription
 overview.subscription.none: No effective subscription yet
 overview.subscription.nodes: "%{count} nodes"
@@ -50,7 +50,7 @@ subscription.refreshing: Refreshing…
 subscription.delete_confirm: Delete
 
 subscription.title: Subscriptions
-subscription.subtitle: Real subscription list · saved to the NSH desktop data root · network only on add/refresh; never starts the core/system proxy
+subscription.subtitle: Organize trusted subscriptions and choose the current configuration source. Restart the core to apply changes.
 subscription.count: "%{count} subscriptions"
 subscription.empty: No subscriptions yet.
 subscription.load_failed: "Failed to load subscriptions: %{error}"
@@ -65,7 +65,7 @@ subscription.refresh_stale: The subscription changed during refresh; the result 
 subscription.refresh_other_in_progress: Another refresh is already running; try again when it finishes
 subscription.root_unavailable: Failed to open the data root
 subscription.unknown: Unknown subscription
-subscription.active_mark: Active
+subscription.active_mark: Current subscription
 subscription.enabled_on: Enabled
 subscription.enabled_off: Disabled
 subscription.nodes: "%{count} nodes"
@@ -201,7 +201,20 @@ appearance.hover_preview: Point at a theme to preview; click to apply and save
 appearance.previewing: "Previewing: %{name}. Click to apply and save."
 appearance.theme.a11y: "Theme: %{name}"
 appearance.save_failed: Couldn't save the appearance setting; the previous value is still active. Free some app storage and try again.
-appearance.section.material: Window Material & Opacity
+appearance.section.backdrop: Window backdrop
+appearance.section.opacity: Surface opacity
+appearance.backdrop.solid: Solid opaque
+appearance.backdrop.mica: Mica
+appearance.backdrop.acrylic: Acrylic frost
+appearance.backdrop.hint: Windows 11 Mica and Acrylic blur are composited natively by DWM; Solid keeps every surface opaque.
+appearance.opacity.value: "%{percent}%"
+gallery.controls.backdrop: Backdrop
+gallery.slider.label: Slider (opacity %{percent}%)
+logs.tab.memory: Memory logs
+logs.tab.disk: Disk logs
+core.section.runtime_ready: Core runtime
+backup.export.title: Export encrypted backup
+backup.import.title: Restore from backup
 appearance.material_note: The window uses an opaque surface. Choose its theme and appearance above
 
 gallery.title: Component Gallery
@@ -301,12 +314,9 @@ rules.up: "Move up"
 rules.down: "Move down"
 rules.delete: "Delete"
 rules.empty: "No matching rules."
-profile.editor: "TypeScript override"
+profile.editor: "Override script"
 profile.name: "Template name"
-profile.url: "Remote TS URL (optional)"
-profile.url_hint: "Remote then local. Fetched during composition; cached source is used if the request fails."
-profile.source: "Local TypeScript (optional)"
-profile.source_hint: "function main(config: any) { return config; }\nType annotations supported. Synchronous; no imports, network or file access."
+profile.source: "Script source"
 profile.cancel: "Cancel"
 profile.save: "Save"
 profile.discard_question: "Discard unsaved changes?"
@@ -329,3 +339,145 @@ diagnostics.ok: "Passed"
 diagnostics.fail: "Failed"
 diagnostics.skip: "Skipped"
 diagnostics.info: "Info"
+
+navigation.dirty_title: Discard changes before leaving?
+navigation.dirty_description: This page has unsaved changes. Keep editing to preserve the draft, or discard it to leave.
+navigation.discard: Discard and leave
+navigation.keep: Keep editing
+navigation.busy_title: Wait for the current operation
+navigation.busy_description: A core, backup, or restore operation is in progress. Wait for it to finish before leaving or quitting.
+
+profiles.subtitle: Adjust configuration with TypeScript. Saved changes apply when the core next starts or restarts.
+profiles.create: "New script…"
+request.subtitle: Choose how subscriptions and remote resources are fetched. Save changes to use them for the next request.
+overview.configuration: Current configuration
+overview.configuration_hint: Restart the core to apply subscription, rule, or override changes.
+overview.next: Next steps
+overview.headline.running: Core is running
+overview.headline.ready: Ready to start the core
+overview.headline.failed: The core could not start
+overview.runtime_hint: Core runtime and system proxy ownership are separate. Use diagnostics to check reachability.
+overview.local_proxy: Local proxy
+overview.await_start: Awaiting start
+overview.path_hint: Configuration dependencies, not a measured network path
+overview.session: Running session
+overview.control_api: Control API
+overview.task.diagnose: Run diagnostics…
+overview.task.diagnose_hint: Check resolution, direct access, and the proxy separately.
+overview.task.rules: Adjust routing
+overview.task.rules_hint: Choose an outbound for domains, apps, or networks.
+overview.task.logs: View logs
+overview.task.logs_hint: Follow runtime output to investigate problems.
+request.mode: Request proxy mode
+request.core_hint: The core proxy uses the saved local port. Requests fail while the core is stopped.
+request.url: Custom proxy URL
+request.url_hint: HTTP(S) and SOCKS5 addresses are supported. Other modes preserve this address without using it.
+request.mirror: GitHub mirror prefix
+request.mirror_hint: Leave empty to use original URLs. Only GitHub resource requests are affected.
+request.reset: Reset
+request.dirty: Unsaved changes
+request.clean: Settings match the saved request policy
+request.discard_title: Discard unsaved request settings?
+request.direct: Direct (no proxy)
+request.system: System proxy
+request.core: Core proxy (saved mixed port)
+request.custom: Custom HTTP(S) / SOCKS5 proxy
+config.subtitle: Preview the current subscription and saved settings. This is not the running configuration or a core validation result.
+core.subtitle: Prepare a core version, validate it, and start a local proxy. Check runtime and proxy ownership separately.
+core.runtime_hint: The binary and configuration are validated before startup. The core listens locally; a separate guardian manages the system proxy.
+logs.subtitle: Inspect memory events and disk output to investigate problems.
+subscription.search: Filter subscriptions by name
+subscription.no_match: No matching subscriptions. Try another name or clear the filter.
+overview.welcome: Start with a subscription
+overview.welcome_hint: Add a subscription, prepare a core, then start your local proxy. Each step shows its status and what to do next.
+backup.password: Backup password
+backup.password_hint: Use at least 12 characters. Save the password separately; it cannot be recovered.
+backup.copy_password: Copy password
+backup.password_copied: Password copied. Save it in your password manager.
+rules.delete_title: Delete this rule?
+rules.delete_hint: The local rule will be removed. The running core keeps its current configuration until restarted.
+rules.delete_confirm: Delete rule
+
+product.backup.title: "Backup"
+product.proxy.title: "System proxy"
+product.core.inventory: "Inventory"
+product.core.selected: "Selected core"
+product.profiles.empty: "No override scripts yet."
+product.logs.empty: "No log events yet."
+product.logs.disk_empty: "No disk log files yet."
+product.logs.detail: "Log details"
+product.logs.clear_title: "Clear memory logs?"
+product.logs.clear_hint: "Only this process’s memory buffer is cleared. Disk files and future log capture are preserved."
+product.core.empty: "No local versions in this channel. Choose another channel or check for updates to download one."
+product.core.delete_hint: "This version and its core files will be permanently removed."
+product.proxy.restore_hint: "Restore only this app’s owned records. External or unknown proxy changes are preserved."
+product.proxy.consent_title: "Allow system proxy takeover?"
+product.proxy.preference: "Manage the system proxy with the core"
+product.proxy.preference_hint: "Enabling requires one-time consent. Changing this while running stops the core and restores the proxy before restarting with the new preference."
+product.proxy.consent_hint: "Once the core starts, the system proxy will use its local port. Consent applies once. Stopping or quitting restores the previous values. Changes made by another app are preserved and reported. Consent is not saved; confirm again after reopening."
+product.proxy.unsupported: "System proxy takeover is available only on Windows. This device can save the preference but cannot take over or restore the proxy."
+product.backup.confirm_title: "Restore this backup?"
+product.backup.confirm_hint: "The core will stop after restoring the system proxy. Current data is saved as an encrypted rollback backup before preparing the restore. Restart to complete it. Configuration changes remain blocked until then."
+product.backup.preview_hint: "This preview expires after five minutes. Changing the file or password requires a new preview. Confirmation prepares replacement; restart to complete the restore."
+product.backup.restart_hint: "Restart to complete the restore. If the app does not restart automatically, close it and open it again."
+product.backup.pending_hint: "Restart from the backup page to complete the restore. The encrypted rollback copy remains available in backup-history/."
+product.backup.rollback_hint: "An encrypted rollback copy is saved in backup-history/ if the restored configuration needs to be reverted."
+product.backup.ack_hint: "Acknowledging dismisses this restore notice. The restored configuration is already in use."
+product.backup.failed_hint: "The original configuration is unchanged. Resolve the issue and import again, or contact support."
+product.startup.hint: "The original configuration is unchanged. Close other instances or resolve the reported problem, then restart."
+product.startup.title: "The application data directory could not be opened. Another instance, access restrictions, or a restore conflict may be responsible."
+product.profiles.delete_hint: "Delete this local override template. Unlink any subscriptions that still use it before deleting."
+product.backup.subtitle: "Export an encrypted backup or preview a restore. Keep your password separately. A restore completes after restart."
+product.backup.password_short: "Backup password"
+product.action.refresh: "Refresh"
+product.action.edit: "Edit"
+product.action.delete: "Delete"
+product.action.cancel: "Cancel"
+product.action.confirm_delete: "Delete"
+product.action.takeover: "Allow takeover"
+product.action.restore_proxy: "Restore system proxy"
+product.action.check_updates: "Check for updates"
+product.action.use: "Use"
+product.action.compose: "Generate preview"
+product.action.generate_password: "Generate password"
+product.action.clear_logs: "Clear memory logs"
+product.action.confirm_clear: "Clear logs"
+product.action.restart: "Restart app"
+product.action.prepare_restore: "Prepare restore"
+product.action.close: "Close"
+product.action.acknowledge: "Dismiss"
+gallery.section.icons: Path icons
+gallery.section.surfaces: Cards & Layout Surface / SelectionCard / Toolbar
+gallery.nav.all: All components
+gallery.nav.group.foundations: Foundations
+gallery.nav.group.controls: Controls
+gallery.nav.group.display: Display & Overlays
+gallery.controls.theme_mint: Try fresh Mint
+gallery.controls.theme_ocean: Reset to Ocean
+gallery.tokens.title: Semantic Tokens
+gallery.action.open_sheet: Open Sheet panel
+gallery.action.swap_glyph: Swap status glyph
+gallery.sheet.title: Auxiliary Sheet
+gallery.sheet.description: Keeps page context intact with a fixed header, independent scrolling, backdrop click and Escape dismissal.
+gallery.card.enabled: Enabled card
+gallery.card.selected: Selected card
+gallery.card.hint: Toggle enabled or selected below to verify that enabled wash and selected border remain distinct.
+gallery.tab.panel: "Active tab: %{name} (indicator glides natively)"
+gallery.segmented.label: Segmented control
+gallery.state.readonly: Read-only field (selectable, not editable)
+gallery.state.active_theme: "Active theme: %{name}"
+request.saved: "Saved: %{mode} · %{mirror}"
+request.mirror_empty: No GitHub mirror
+request.mirror_configured: GitHub mirror configured
+profile.editor_hint: "TypeScript · Synchronously edit and return config. Local suggestions do not provide full type checking."
+profile.completions: "Suggestions"
+profile.discard_hint: "Keep the draft to continue editing, or discard only these unsaved changes."
+profiles.count: "%{count} override scripts"
+
+sidebar.hide: "Hide sidebar"
+sidebar.show: "Show sidebar"
+config.raw: "Subscription source"
+config.final: "Final configuration with overrides"
+config.refresh: "Reload"
+config.no_selection: "Select an enabled subscription first"
+config.loading: "Reading the selected subscription…"

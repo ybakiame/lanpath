@@ -7,21 +7,21 @@ nav.subscriptions: 订阅
 nav.request_settings: 请求设置
 nav.profiles: 覆写
 nav.core: 核心
-nav.config: 配置
+nav.config: 配置预览
 nav.logs: 日志
 nav.backup: 备份
 nav.appearance: 外观
 nav.overview: 概览
-nav.group.workspace: 工作区
-nav.group.core_config: 核心配置
-nav.group.tools: 工具与恢复
+nav.group.workspace: 使用
+nav.group.core_config: 配置
+nav.group.tools: 排查与恢复
 nav.group.settings: 设置
 
 status.summary: 订阅：%{subscription} · 核心：%{core}
 status.none: 无
 
 overview.title: 概览
-overview.subtitle: 主路径：当前订阅 → 核心 → 校验并启动 → 真实状态；只显示真实状态与当前可执行的下一步
+overview.subtitle: 看清当前配置与运行状态，继续下一步。
 overview.subscription.title: 当前订阅
 overview.subscription.none: 尚未设置生效订阅
 overview.subscription.nodes: "%{count} 个节点"
@@ -50,7 +50,7 @@ subscription.refreshing: 正在刷新…
 subscription.delete_confirm: 确认删除
 
 subscription.title: 订阅
-subscription.subtitle: 真实订阅列表 · 保存到 NSH 桌面独立数据根 · 仅新增/刷新时按需联网，不启动核心/系统代理
+subscription.subtitle: 整理可信订阅，刷新后选择当前配置来源。更改配置后，重启核心生效。
 subscription.count: 共 %{count} 个订阅
 subscription.empty: 尚无订阅。
 subscription.load_failed: 加载订阅失败:%{error}
@@ -65,7 +65,7 @@ subscription.refresh_stale: 刷新期间订阅已被修改或删除，结果未�
 subscription.refresh_other_in_progress: 另一个订阅刷新正在进行，请完成后再试
 subscription.root_unavailable: 打开数据根失败
 subscription.unknown: 未知订阅
-subscription.active_mark: 当前生效
+subscription.active_mark: 当前订阅
 subscription.enabled_on: 已启用
 subscription.enabled_off: 已停用
 subscription.nodes: "%{count} 个节点"
@@ -201,7 +201,20 @@ appearance.hover_preview: 指向主题可预览，点击应用并保存
 appearance.previewing: 正在预览：%{name}；点击应用并保存
 appearance.theme.a11y: 主题：%{name}
 appearance.save_failed: 外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。
-appearance.section.material: 窗口材质与不透明度
+appearance.section.backdrop: 窗口背景材质
+appearance.section.opacity: 背景不透明度
+appearance.backdrop.solid: 纯色不透明
+appearance.backdrop.mica: 云母 Mica
+appearance.backdrop.acrylic: 亚克力磨砂
+appearance.backdrop.hint: Windows 11 原生磨砂/云母由系统 DWM 合成；纯色模式保持完全不透明。
+appearance.opacity.value: "%{percent}%"
+gallery.controls.backdrop: 窗口材质
+gallery.slider.label: 滑块 Slider（透明度 %{percent}%）
+logs.tab.memory: 内存日志
+logs.tab.disk: 磁盘日志
+core.section.runtime_ready: 核心运行控制
+backup.export.title: 导出加密备份
+backup.import.title: 从备份恢复
 appearance.material_note: 当前使用不透明窗口，可在上方切换主题与明暗模式
 
 gallery.title: 组件画廊
@@ -301,12 +314,9 @@ rules.up: "上移"
 rules.down: "下移"
 rules.delete: "删除"
 rules.empty: "没有匹配的规则。"
-profile.editor: "TypeScript 覆写"
+profile.editor: "覆写脚本"
 profile.name: "模板名称"
-profile.url: "远程 TS URL（可选）"
-profile.url_hint: "远程 → 本地，合成时下载；下载失败沿用缓存。"
-profile.source: "本地 TypeScript（可选）"
-profile.source_hint: "function main(config: any) { return config; }\n支持类型注解；同步执行，不支持 import、网络或文件访问。"
+profile.source: "脚本内容"
 profile.cancel: "取消"
 profile.save: "保存"
 profile.discard_question: "有未保存修改，要丢弃吗？"
@@ -329,3 +339,145 @@ diagnostics.ok: "通过"
 diagnostics.fail: "失败"
 diagnostics.skip: "跳过"
 diagnostics.info: "说明"
+
+navigation.dirty_title: 离开前要放弃修改吗？
+navigation.dirty_description: 当前页面有未保存的内容。继续编辑可保留草稿，放弃后离开此页面。
+navigation.discard: 放弃并离开
+navigation.keep: 继续编辑
+navigation.busy_title: 请等待当前操作完成
+navigation.busy_description: 核心、备份或恢复操作正在进行。完成后再离开或退出，避免中断操作。
+
+profiles.subtitle: 以 TypeScript 调整配置；保存后在下次启动或重启核心时应用。
+profiles.create: "新建脚本…"
+request.subtitle: 设置订阅与远程资源的请求路径。更改策略后保存，下一次请求使用新设置。
+overview.configuration: 当前配置
+overview.configuration_hint: 更改订阅、规则或覆写后，重启核心生效。
+overview.next: 继续处理
+overview.headline.running: 核心正在运行
+overview.headline.ready: 准备好启动核心
+overview.headline.failed: 核心未能启动
+overview.runtime_hint: 核心运行与系统代理归属分别确认；网络可达性可通过诊断检查。
+overview.local_proxy: 本地代理
+overview.await_start: 待启动
+overview.path_hint: 配置依赖关系，不代表网络实测路径
+overview.session: 运行会话
+overview.control_api: 控制接口
+overview.task.diagnose: 运行诊断…
+overview.task.diagnose_hint: 分别检查解析、直连和代理。
+overview.task.rules: 调整分流
+overview.task.rules_hint: 为域名、应用或网段选择出口。
+overview.task.logs: 查看日志
+overview.task.logs_hint: 保留运行输出，沿证据排查。
+request.mode: 请求代理模式
+request.core_hint: 核心代理使用已保存的本地端口。核心未运行时，请求会失败。
+request.url: 自定义代理 URL
+request.url_hint: 支持 HTTP(S) / SOCKS5 地址；仅在自定义模式使用。其他模式会保留地址。
+request.mirror: GitHub 镜像前缀
+request.mirror_hint: 留空使用原始地址；仅影响 GitHub 资源请求。
+request.reset: 重置
+request.dirty: 有未保存的修改
+request.clean: 设置与已保存的请求策略一致
+request.discard_title: 放弃未保存的请求设置修改？
+request.direct: 直连（不使用代理）
+request.system: 跟随系统代理
+request.core: 核心代理（指向已保存的 mixed_port）
+request.custom: 自定义 HTTP(S) / SOCKS5 代理
+config.subtitle: 按当前订阅与已保存设置合成预览。预览不代表正在运行的配置，也不替代核心校验。
+core.subtitle: 准备核心版本，校验后启动本地代理。运行会话与系统代理分别确认。
+core.runtime_hint: 启动前先校验二进制与配置。核心仅监听本地地址，系统代理由独立守护接管和恢复。
+logs.subtitle: 查看内存事件与磁盘原文，保留现场并沿输出排查。
+subscription.search: 筛选订阅名称
+subscription.no_match: 没有匹配的订阅，试试其他名称或清空筛选。
+overview.welcome: 从一个订阅开始
+overview.welcome_hint: 添加订阅、准备核心，再启动本地代理。每一步都可以查看状态并继续处理。
+backup.password: 备份密码
+backup.password_hint: 至少 12 个字符。导出后请单独保存密码，丢失无法找回。
+backup.copy_password: 复制密码
+backup.password_copied: 密码已复制，请保存到密码管理器。
+rules.delete_title: 删除这条规则？
+rules.delete_hint: 将移除本地规则；运行中的核心保持现有配置，重启后生效。
+rules.delete_confirm: 删除规则
+
+product.backup.title: "备份"
+product.proxy.title: "系统代理"
+product.core.inventory: "库存"
+product.core.selected: "当前使用"
+product.profiles.empty: "尚无覆写脚本。"
+product.logs.empty: "暂无日志。"
+product.logs.disk_empty: "暂无磁盘日志文件。"
+product.logs.detail: "日志详情"
+product.logs.clear_title: "清空内存日志？"
+product.logs.clear_hint: "仅清空本次进程的日志缓冲，不删除磁盘文件，不停止后续采集。"
+product.core.empty: "此通道尚无本地版本，可切换通道或检查更新后下载。"
+product.core.delete_hint: "将删除该版本目录及其中的核心文件，无法撤销。"
+product.proxy.restore_hint: "只恢复本应用持有的记录；外来或未知变化的代理不会被覆盖。"
+product.proxy.consent_title: "启用系统代理接管？"
+product.proxy.preference: "随核心启停设置系统代理"
+product.proxy.preference_hint: "启用前需确认一次性授权。运行中切换会先停止核心、恢复代理，再按新偏好启动。"
+product.proxy.consent_hint: "核心启动后，系统代理将指向本地代理端口。仅本次接管；停止核心或退出时按原值精确归还。若其他程序修改了代理，将保留其更改并提示处理。授权不保存，重启应用后需重新确认。"
+product.proxy.unsupported: "系统代理接管仅支持 Windows；下方开关只保存偏好（本机不接管），恢复操作不可用"
+product.backup.confirm_title: "恢复此备份？"
+product.backup.confirm_hint: "将停止核心（系统代理按原值精确恢复），把当前配置加密保存为回滚备份，然后准备恢复所选备份。准备完成后需重启应用；重启前订阅、覆写、请求设置与核心库存的修改均被拒绝。"
+product.backup.preview_hint: "预览绑定一次性授权，300 秒后过期；改密码或换文件需重新解密。确认后不可撤销，准备完成需重启应用。"
+product.backup.restart_hint: "重启自动完成恢复；若点击后应用没有重启，请手动重启。"
+product.backup.pending_hint: "准备成功后在备份页重启应用即完成恢复；原配置始终可从本数据根 backup-history/ 的回滚备份还原。"
+product.backup.rollback_hint: "回滚备份已加密保存在本数据根 backup-history/；若新配置异常可据此还原。"
+product.backup.ack_hint: "确认后才清除恢复标记；恢复后的配置已在正常使用。"
+product.backup.failed_hint: "原配置未被修改；处理后可重新导入备份，或联系支持。"
+product.startup.hint: "原配置未被修改。请关闭其他实例或按错误提示处理，然后重新启动应用。"
+product.startup.title: "启动失败：数据根无法打开（可能被其他实例占用、准入拒绝，或恢复事务存在冲突）"
+product.profiles.delete_hint: "只删除本地覆写模板。仍有关联订阅时，请先解除关联再删除。"
+product.backup.subtitle: "导出 age 加密备份（.zip.age），或从备份恢复 · 密码只保存在内存，丢失无法找回 · 恢复需重启应用完成"
+product.backup.password_short: "备份密码"
+product.action.refresh: "刷新"
+product.action.edit: "编辑"
+product.action.delete: "删除"
+product.action.cancel: "取消"
+product.action.confirm_delete: "确认删除"
+product.action.takeover: "确认接管"
+product.action.restore_proxy: "恢复系统代理"
+product.action.check_updates: "检查更新"
+product.action.use: "使用"
+product.action.compose: "生成配置预览"
+product.action.generate_password: "生成强密码"
+product.action.clear_logs: "清空内存日志"
+product.action.confirm_clear: "确认清空"
+product.action.restart: "重启应用"
+product.action.prepare_restore: "准备恢复"
+product.action.close: "关闭"
+product.action.acknowledge: "我知道了"
+gallery.section.icons: 循径图标
+gallery.section.surfaces: 卡片与布局 Surface / SelectionCard / Toolbar
+gallery.nav.all: 全部组件
+gallery.nav.group.foundations: 基础系统
+gallery.nav.group.controls: 交互控件
+gallery.nav.group.display: 展示与浮层
+gallery.controls.theme_mint: 体验清新 Mint
+gallery.controls.theme_ocean: 切换默认 Ocean
+gallery.tokens.title: 语义色板 Semantic Tokens
+gallery.action.open_sheet: 打开 Sheet 面板
+gallery.action.swap_glyph: 切换状态图标
+gallery.sheet.title: 辅助工作面板 Sheet
+gallery.sheet.description: 保持当前页面上下文，头尾固定、正文独立滚动，支持遮罩与 Escape 关闭。
+gallery.card.enabled: 已启用卡片
+gallery.card.selected: 当前选中卡片
+gallery.card.hint: 点击下方开关或选择按钮，观察启用底色与选中边框的独立表达。
+gallery.tab.panel: "当前激活标签：%{name}（指示块随选择平滑滑动）"
+gallery.segmented.label: 分段控制 SegmentedControl
+gallery.state.readonly: 只读字段（不可编辑但可复制）
+gallery.state.active_theme: "当前主题：%{name}"
+request.saved: "已保存：%{mode} · %{mirror}"
+request.mirror_empty: GitHub 镜像未配置
+request.mirror_configured: GitHub 镜像已配置
+profile.editor_hint: "TypeScript · 同步执行，仅修改并返回 config；本地提示不包含完整类型检查。"
+profile.completions: "编写提示"
+profile.discard_hint: "保留草稿可继续编辑；放弃只丢弃本次修改。"
+profiles.count: "共 %{count} 个覆写脚本"
+
+sidebar.hide: "隐藏侧栏"
+sidebar.show: "显示侧栏"
+config.raw: "订阅原文"
+config.final: "覆写后的最终配置"
+config.refresh: "重新读取"
+config.no_selection: "请先选择一个启用的订阅"
+config.loading: "正在读取当前订阅…"

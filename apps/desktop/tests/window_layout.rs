@@ -42,8 +42,13 @@ fn overview_action_is_centered_and_sidebar_fills_available_height() {
         let nodes = app.screen().layout_nodes();
         let sidebar = by_id(&nodes, "app-sidebar");
         let parent = nodes.iter().find(|node| node.id == sidebar.parent).unwrap();
-        assert!((sidebar.bounds.size.height.0 - parent.bounds.size.height.0).abs() < 1.0);
-        assert!(sidebar.bounds.size.height.0 > height - 90.0);
+        assert!(
+            ((sidebar.bounds.origin.y.0 + sidebar.bounds.size.height.0)
+                - (parent.bounds.origin.y.0 + parent.bounds.size.height.0))
+                .abs()
+                < 1.0
+        );
+        assert!(sidebar.bounds.size.height.0 > height - 120.0);
     }
 }
 
@@ -52,7 +57,7 @@ fn rule_select_trigger_centers_text_vertically() {
     let (_dir, entries) = common::data_root();
     let mut app = common::start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("规则").unwrap();
+    common::navigate(&mut app, "规则");
     app.wait_for("id:rules-target").unwrap();
     let nodes = app.screen().layout_nodes();
     let label = nodes
@@ -64,7 +69,7 @@ fn rule_select_trigger_centers_text_vertically() {
         })
         .unwrap();
     let trigger = nodes.iter().find(|node| node.id == label.parent).unwrap();
-    assert_eq!(trigger.bounds.size.height.0, 40.0);
+    assert_eq!(trigger.bounds.size.height.0, 36.0);
     assert!((trigger.bounds.center().y.0 - label.bounds.center().y.0).abs() < 1.0);
 
     app.press("域名后缀").unwrap();

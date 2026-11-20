@@ -6,7 +6,7 @@ fn quick_add_batch_failure_disable_and_reopen_use_real_storage() {
     let (dir, entries) = data_root();
     let mut app = start_app(entries.clone()).0;
     common::wait_ready(&mut app);
-    app.press("规则").unwrap();
+    common::navigate(&mut app, "规则");
     app.type_text("id:rules-target", "example.com").unwrap();
     app.submit("id:rules-target").unwrap();
     app.wait_for("规则已保存，下次启动或重启核心时应用。")
@@ -57,7 +57,7 @@ fn quick_add_batch_failure_disable_and_reopen_use_real_storage() {
     drop(app);
     let mut reopened = start_app(entries).0;
     common::wait_ready(&mut reopened);
-    reopened.press("规则").unwrap();
+    common::navigate(&mut reopened, "规则");
     reopened.wait_for("text:/batch.example.com/").unwrap();
 }
 #[test]
@@ -65,7 +65,7 @@ fn diagnostics_domain_prefills_quick_rule_and_checks_saved_order() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
-    app.press("诊断").unwrap();
+    common::navigate(&mut app, "诊断");
     app.clear("id:diagnostics-target").unwrap();
     app.type_text("id:diagnostics-target", "docs.example.com")
         .unwrap();
@@ -75,7 +75,7 @@ fn diagnostics_domain_prefills_quick_rule_and_checks_saved_order() {
         Some("docs.example.com")
     );
     app.press("添加规则").unwrap();
-    app.press("诊断").unwrap();
+    common::navigate(&mut app, "诊断");
     app.clear("id:diagnostics-target").unwrap();
     app.type_text("id:diagnostics-target", "docs.example.com")
         .unwrap();
@@ -91,18 +91,14 @@ fn diagnostics_domain_prefills_quick_rule_and_checks_saved_order() {
 #[test]
 fn override_editor_exposes_only_typescript() {
     let (_dir, entries) = data_root();
-    let mut app = start_app(entries).0;
+    let mut app = common::start_app_desktop(entries).0;
     common::wait_ready(&mut app);
-    app.press("覆写").unwrap();
-    app.press("新建覆写模板").unwrap();
-    app.wait_for("本地 TypeScript（可选）").unwrap();
+    common::open_profiles(&mut app);
+    app.press("id:profiles-create").unwrap();
+    app.wait_for("id:profile-js").unwrap();
     assert!(!app.screen().texts().iter().any(|t| t.contains("YAML")));
     app.type_text("id:profile-name", "TS 模板").unwrap();
-    app.type_text(
-        "id:profile-js",
-        "function main(config: any) { return config; }",
-    )
-    .unwrap();
+    common::replace_script(&mut app, "function main(config: any) { return config; }");
     app.press("保存").unwrap();
     app.wait_for("覆写模板已校验并保存").unwrap();
 }

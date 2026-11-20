@@ -4,11 +4,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use nsh_base::{button, dialog, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::log_buffer::LOG_CAPACITY;
 use crate::log_service::LogService;
+use crate::ui::icon::{Icon, Tone, icon_sized};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, surface};
 
 /// 级别下限选项：与 `log_buffer::level_rank` 的秩一致，默认“信息”。
 const LEVELS: [(u8, &str); 5] = [
@@ -86,7 +88,6 @@ pub(super) fn memory_logs(service: Arc<LogService>) -> impl IntoElement {
         status: signal(String::new()),
         disk_warning: signal(None),
     };
-    // 轮询句柄随 owner 存活：切页卸载即取消；暂停只停自动刷新，采集不停。
     let ticker: Stored<Option<Spawned<()>>> = stored(None);
     ticker.with(|slot| {
         let poll = state.clone();
@@ -102,6 +103,7 @@ pub(super) fn memory_logs(service: Arc<LogService>) -> impl IntoElement {
     let pause_label = state.clone();
     let refresh = state.clone();
     let warning = state.clone();
+    let warning_banner = state.clone();
     let status = state.clone();
     let rows = state.clone();
     let empty = state.clone();
@@ -109,121 +111,142 @@ pub(super) fn memory_logs(service: Arc<LogService>) -> impl IntoElement {
     view()
         .flex_1()
         .flex_col()
-        .gap_2()
+        .gap_3()
         .min_h(px(0.0))
         .child(
-            view()
-                .flex_row()
-                .items_center()
+            surface(SurfaceLevel::Card)
+                .p_3()
+                .flex_col()
                 .gap_2()
-                .flex_wrap()
-                .child(level_filter(toolbar.clone()))
-                .child(limit_filter(toolbar.clone()))
-                .child(view().flex_1())
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || {
-                            let paused = !toolbar.paused.get();
-                            toolbar.paused.set(paused);
-                            if !paused {
-                                toolbar.refresh();
-                            }
-                        })
-                        .child(text(move || {
-                            if pause_label.paused.get() {
-                                "继续"
-                            } else {
-                                "暂停"
-                            }
-                        })),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .flex_wrap()
+                        .child(level_filter(toolbar.clone()))
+                        .child(limit_filter(toolbar.clone()))
+                        .child(view().flex_1())
+                        .child(
+                            crate::ui::button(crate::ui::ButtonVariant::Outline)
+                                .size(crate::ui::ButtonSize::Sm)
+                                .on_press(move || {
+                                    let paused = !toolbar.paused.get();
+                                    toolbar.paused.set(paused);
+                                    if !paused {
+                                        toolbar.refresh();
+                                    }
+                                })
+                                .label(move || {
+                                    if pause_label.paused.get() {
+                                        "继续".to_owned()
+                                    } else {
+                                        "暂停".to_owned()
+                                    }
+                                }),
+                        )
+                        .child(
+                            crate::ui::button(crate::ui::ButtonVariant::Outline)
+                                .size(crate::ui::ButtonSize::Sm)
+                                .prefix(|| icon_sized(Icon::Refresh, Tone::Muted, 13.0))
+                                .on_press(move || refresh.refresh())
+                                .label(|| t!("product.action.refresh")),
+                        )
+                        .child(
+                            crate::ui::button(crate::ui::ButtonVariant::Outline)
+                                .size(crate::ui::ButtonSize::Sm)
+                                .on_press(move || warning.confirm_clear.set(true))
+                                .label(|| t!("product.action.clear_logs")),
+                        ),
                 )
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || refresh.refresh())
-                        .child(text("刷新")),
-                )
-                .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().destructive)
-                        .on_press(move || warning.confirm_clear.set(true))
-                        .child(text("清空内存日志").text_color(move || theme().destructive)),
+                    text(move || status.status.get())
+                        .test_id("logs-memory-status")
+                        .text_size(px(12.0))
+                        .text_color(move || theme().muted_foreground),
                 ),
         )
+        .child(when(
+            move || warning_banner.disk_warning.get().is_some(),
+            move || {
+                let warn = warning_banner.disk_warning;
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || {
+                        warn.get()
+                            .map(|error| format!("磁盘日志写入失败：{error}"))
+                            .unwrap_or_default()
+                    })
+                    .text_size(px(12.5))
+                    .text_color(move || theme().destructive),
+                )
+            },
+        ))
         .child(
-            text(move || {
-                warning
-                    .disk_warning
-                    .get()
-                    .map(|error| format!("磁盘日志写入失败：{error}"))
-                    .unwrap_or_default()
-            })
-            .text_size(px(12.0))
-            .text_color(move || theme().destructive),
-        )
-        .child(
-            text(move || status.status.get())
-                .test_id("logs-memory-status")
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            scroll().flex_1().min_h(px(120.0)).child(
-                view()
-                    .flex_col()
-                    .gap_1()
-                    .child(when(
-                        move || rows.rows.get().is_empty(),
-                        || text("暂无日志。").text_color(move || theme().muted_foreground),
-                    ))
-                    .child(each(
-                        rows.rows,
-                        |row: &MemoryRow| row.id,
-                        move |item, _index| memory_row(rows.clone(), item),
-                    )),
-            ),
+            surface(SurfaceLevel::Card)
+                .flex_1()
+                .min_h(px(140.0))
+                .p_2()
+                .child(
+                    scroll().flex_1().child(
+                        view()
+                            .flex_col()
+                            .gap_1()
+                            .child(when(
+                                move || rows.rows.get().is_empty(),
+                                || {
+                                    crate::ui::empty_with_icon(
+                                        Some(Icon::Logs),
+                                        || t!("nav.logs"),
+                                        || t!("product.logs.empty"),
+                                    )
+                                },
+                            ))
+                            .child(each(
+                                rows.rows,
+                                |row: &MemoryRow| row.id,
+                                move |item, _index| memory_row(rows.clone(), item),
+                            )),
+                    ),
+                ),
         )
         .child(when(
             move || empty.detail.get().is_some(),
             move || {
                 let panel = empty.clone();
-                view()
+                let close = empty.clone();
+                surface(SurfaceLevel::Card)
+                    .p_3()
                     .flex_col()
-                    .gap_1()
-                    .p_2()
-                    .rounded(move || theme().radius)
-                    .border(px(1.0))
-                    .border_color(move || theme().border)
-                    .bg(move || theme().card)
+                    .gap_2()
                     .child(
-                        text("日志详情")
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                text(|| t!("product.logs.detail"))
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(move || theme().muted_foreground),
+                            )
+                            .child(
+                                crate::ui::button(crate::ui::ButtonVariant::Ghost)
+                                    .size(crate::ui::ButtonSize::Sm)
+                                    .prefix(|| icon_sized(Icon::Close, Tone::Muted, 13.0))
+                                    .label(|| t!("common.close"))
+                                    .on_press(move || close.detail.set(None)),
+                            ),
                     )
                     .child(
                         text(move || panel.detail.get().map(|row| row.line).unwrap_or_default())
                             .selectable(true)
-                            .text_size(px(12.0)),
+                            .text_size(px(12.5)),
                     )
             },
         ))
-        .child(when(
-            move || detail.confirm_clear.get(),
-            move || clear_dialog(detail.clone()),
-        ))
+        .child(clear_dialog(detail))
 }
 
 fn level_filter(state: MemoryState) -> impl IntoElement {
@@ -233,29 +256,15 @@ fn level_filter(state: MemoryState) -> impl IntoElement {
         .children(LEVELS.map(|(rank, label)| {
             let filter = state.clone();
             let selected = move || filter.min_rank.get() == rank;
-            button()
-                .px_2()
-                .py_1()
-                .rounded(move || theme().radius)
-                .bg(move || {
-                    if selected() {
-                        theme().primary
-                    } else {
-                        theme().card
-                    }
-                })
+            crate::ui::button(crate::ui::ButtonVariant::Ghost)
+                .selected(selected)
+                .size(crate::ui::ButtonSize::Sm)
                 .on_press(move || {
                     filter.min_rank.set(rank);
                     filter.revision.set(None);
                     filter.refresh();
                 })
-                .child(text(label).text_size(px(12.0)).text_color(move || {
-                    if selected() {
-                        theme().primary_foreground
-                    } else {
-                        theme().foreground
-                    }
-                }))
+                .label(move || label.to_owned())
         }))
 }
 
@@ -263,27 +272,15 @@ fn limit_filter(state: MemoryState) -> impl IntoElement {
     view().flex_row().gap_1().children(LIMITS.map(|limit| {
         let filter = state.clone();
         let selected = move || filter.limit.get() == limit;
-        button()
-            .px_2()
-            .py_1()
-            .rounded(move || theme().radius)
-            .bg(move || {
-                if selected() {
-                    theme().secondary
-                } else {
-                    theme().card
-                }
-            })
+        crate::ui::button(crate::ui::ButtonVariant::Ghost)
+            .selected(selected)
+            .size(crate::ui::ButtonSize::Sm)
             .on_press(move || {
                 filter.limit.set(limit);
                 filter.revision.set(None);
                 filter.refresh();
             })
-            .child(
-                text(format!("最近 {limit} 条"))
-                    .text_size(px(12.0))
-                    .text_color(move || theme().foreground),
-            )
+            .label(move || format!("最近 {limit} 条"))
     }))
 }
 
@@ -291,87 +288,37 @@ fn memory_row(state: MemoryState, item: ReadSignal<MemoryRow>) -> impl IntoEleme
     let select = state.clone();
     let highlight = state;
     let test_id = format!("log-row-{}", item.get().id);
-    button()
-        .px_2()
-        .py_1()
-        .rounded(move || theme().radius)
-        .items_center()
-        .bg(move || {
-            if highlight
+    crate::ui::button(crate::ui::ButtonVariant::Ghost)
+        .full_width()
+        .selected(move || {
+            highlight
                 .detail
                 .get()
                 .is_some_and(|selected| selected.id == item.get().id)
-            {
-                theme().secondary
-            } else {
-                theme().background
-            }
         })
+        .size(crate::ui::ButtonSize::Sm)
         .on_press(move || select.detail.set(Some(item.get())))
-        .child(
-            text(move || item.get().line.clone())
-                .test_id(&test_id)
-                .text_size(px(12.0))
-                .truncate()
-                .min_w(px(0.0)),
-        )
+        .test_id(&test_id)
+        .label(move || item.get().line.clone())
 }
 
 fn clear_dialog(state: MemoryState) -> AnyElement {
-    let on_cancel = state.clone();
-    let cancel_button = state.clone();
+    let open = state.confirm_clear;
+    let cancel = state.clone();
     let confirm = state;
-    dialog()
-        .on_cancel(move || on_cancel.confirm_clear.set(false))
-        .child(
-            view()
-                .flex_col()
-                .gap_3()
-                .w(px(360.0))
-                .p_4()
-                .rounded(move || theme().radius)
-                .bg(move || theme().card)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("清空内存日志？"))
-                .child(
-                    text("仅清空本次进程的日志缓冲，不删除磁盘文件，不停止后续采集。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .border(px(1.0))
-                                .border_color(move || theme().border)
-                                .on_press(move || cancel_button.confirm_clear.set(false))
-                                .child(text("取消")),
-                        )
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .bg(move || theme().destructive)
-                                .on_press(move || {
-                                    confirm.confirm_clear.set(false);
-                                    confirm.service.buffer().clear();
-                                    confirm.revision.set(None);
-                                    confirm.detail.set(None);
-                                    confirm.refresh();
-                                })
-                                .child(
-                                    text("确认清空").text_color(move || theme().primary_foreground),
-                                ),
-                        ),
-                ),
-        )
+    crate::ui::confirm_dialog(move || open.get())
+        .destructive()
+        .title(|| t!("product.logs.clear_title"))
+        .description(|| t!("product.logs.clear_hint"))
+        .cancel_label(|| t!("product.action.cancel"))
+        .confirm_label(|| t!("product.action.confirm_clear"))
+        .on_cancel(move || cancel.confirm_clear.set(false))
+        .on_confirm(move || {
+            confirm.confirm_clear.set(false);
+            confirm.service.buffer().clear();
+            confirm.revision.set(None);
+            confirm.detail.set(None);
+            confirm.refresh();
+        })
         .into_element()
 }

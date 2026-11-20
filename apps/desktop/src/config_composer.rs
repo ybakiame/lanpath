@@ -13,6 +13,9 @@
 //! 途中设置页的修改不改变本次请求策略；业务锁不跨 await，写回仍走
 //! `Subscriptions::refresh_with_config` 的 id/URL/UA 防 stale 实现。
 
+mod selection;
+pub(crate) use selection::SelectedPreview;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -38,6 +41,7 @@ pub(crate) enum PreviewFormat {
 }
 
 impl PreviewFormat {
+    #[cfg(test)]
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Json => "JSON",
@@ -64,6 +68,7 @@ impl ConfigPreview {
         self.format
     }
 
+    #[cfg(test)]
     pub(crate) fn core_type(&self) -> CoreType {
         self.core_type
     }
@@ -121,6 +126,7 @@ impl ConfigComposer {
     /// 全程持有活动读保护：备份恢复准备（写保护）会等本次合成真正结束；
     /// 恢复已准备（待重启）时直接拒绝。日志只记节点数、警告数与结果，
     /// 不记配置正文、节点凭据、远程地址或代理地址。
+    #[cfg(test)]
     pub(crate) async fn compose(&self) -> LanpathResult<ConfigPreview> {
         let _activity = self.root.activity().read().await;
         self.root.ensure_writable()?;

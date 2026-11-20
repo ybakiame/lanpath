@@ -1,6 +1,5 @@
-//! 覆写模板页：NSH 桌面独立数据根上的真实模板列表。模板保存共享
-//! `lanpath-client::ProfileStoreV2`（本根 `profiles.json`）；TypeScript 本地
-//! 覆写经共享校验（空允许），远程覆写地址可选、规范化并共享校验后保存，
+//! 首页覆写脚本面板。脚本保存共享 `lanpath-client::ProfileStoreV2`
+//! （本根 `profiles.json`）；本地 TypeScript 经共享校验后保存，
 //! 仅在后续配置合成时解析——本页不下载、不预览、不显示“已生效”，
 //! 不启动核心、系统代理或 TUN。删除被订阅引用的模板会被拒绝并显示真实
 //! 错误。列表/编辑/删除与订阅业务共用数据根的同一把业务锁。
@@ -8,8 +7,8 @@
 mod editor;
 mod rows;
 
+use crate::ui::{ButtonVariant, button};
 use lanpath_client::Profile;
-use nsh_base::{button, theme};
 use nsh_core::prelude::*;
 use uuid::Uuid;
 
@@ -24,7 +23,6 @@ pub(super) struct ProfileEditState {
     id: Signal<Option<Uuid>>,
     name: Signal<String>,
     js_override: Signal<String>,
-    js_url: Signal<String>,
     dirty: Signal<bool>,
     error: Signal<Option<String>>,
     confirm_discard: Signal<bool>,
@@ -37,7 +35,6 @@ impl ProfileEditState {
             id: signal(None),
             name: signal(String::new()),
             js_override: signal(String::new()),
-            js_url: signal(String::new()),
             dirty: signal(false),
             error: signal(None),
             confirm_discard: signal(false),
@@ -47,8 +44,8 @@ impl ProfileEditState {
     fn open_new(&self) {
         self.id.set(None);
         self.name.set(String::new());
-        self.js_override.set(String::new());
-        self.js_url.set(String::new());
+        self.js_override
+            .set(crate::ui::code_editor::DEFAULT_SCRIPT.to_owned());
         self.dirty.set(false);
         self.error.set(None);
         self.confirm_discard.set(false);
@@ -60,7 +57,6 @@ impl ProfileEditState {
         self.id.set(Some(profile.id));
         self.name.set(profile.name.clone());
         self.js_override.set(profile.js_override.clone());
-        self.js_url.set(profile.js_url.clone().unwrap_or_default());
         self.dirty.set(false);
         self.error.set(None);
         self.confirm_discard.set(false);
@@ -150,24 +146,34 @@ impl ProfilesPageState {
 pub(super) fn profiles_page() -> impl IntoElement {
     let state = ProfilesPageState::new();
     let create_state = state.clone();
+    let dirty = state.edit.dirty;
+    crate::navigation::protect(move || {
+        if !crate::workspace_panels::is_open() {
+            return crate::navigation::LeaveState::Clean;
+        }
+        if dirty.get() {
+            crate::navigation::LeaveState::Dirty
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
     view()
         .flex_1()
         .flex_col()
         .gap_4()
-        .child(text("覆写").text_size(px(24.0)))
         .child(
-            text("真实覆写模板列表 · 保存到 NSH 桌面独立数据根 · 远程覆写地址仅在配置合成时解析，本页不下载/预览，不启动核心/系统代理")
-                .text_color(move || theme().muted_foreground),
+            text(|| t!("profiles.subtitle"))
+                .text_size(px(12.0))
+                .text_color(move || nsh_base::theme().muted_foreground),
         )
         .child(
-            button()
-                .px_4()
-                .py_2()
-                .rounded(move || theme().radius)
-                .items_center()
-                .bg(move || theme().primary)
-                .on_press(move || create_state.edit.open_new())
-                .child(text("新建覆写模板").text_color(move || theme().primary_foreground)),
+            button(ButtonVariant::Outline)
+                .test_id("profiles-create")
+                .label(|| t!("profiles.create"))
+                .prefix(|| {
+                    crate::ui::icon::icon(crate::ui::icon::Icon::Plus, crate::ui::icon::Tone::Muted)
+                })
+                .on_press(move || create_state.edit.open_new()),
         )
         .child(rows::profile_list(state.clone()))
         .child(when(
@@ -185,8 +191,7 @@ pub(super) fn save_edit(state: &ProfilesPageState) {
     let id = state.edit.id.get();
     let name = state.edit.name.get();
     let js = state.edit.js_override.get();
-    let js_url = optional_text(&state.edit.js_url.get());
-    match service.save(id, &name, js, js_url) {
+    match service.save(id, &name, js, None) {
         Ok(_) => {
             state.edit.close();
             state.reload();
@@ -197,13 +202,6 @@ pub(super) fn save_edit(state: &ProfilesPageState) {
             .error
             .set(Some(format!("保存覆写模板失败:{error}"))),
     }
-}
-
-/// 空白输入归一化为 `None`（与业务层 `normalize_optional_url` 一致，
-/// 业务层保存时会再次规范化）。
-fn optional_text(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_owned())
 }
 
 /// 订阅页/模板行共用的模板名解析：找不到（被外部删除或文件损坏）时

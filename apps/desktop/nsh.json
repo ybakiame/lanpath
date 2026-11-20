@@ -6,5 +6,19 @@
   "rust": ".",
   "root": "App",
   "appearance": "system",
-  "locales": ["zh-CN", "en"]
+  "locales": [
+    "zh-CN",
+    "en"
+  ],
+  "window": {
+    "defaultSize": {
+      "width": 1180,
+      "height": 800
+    },
+    "minSize": {
+      "width": 960,
+      "height": 640
+    },
+    "backdrop": "popover"
+  }
 }

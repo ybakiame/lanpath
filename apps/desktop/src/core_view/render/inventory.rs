@@ -1,13 +1,16 @@
 //! 核心库存卡片：类型/通道切换、远端查询与下载、本地版本行和展示排序。
 //! 只读 `CorePageState` 的 Signal，把交互转发给 `core_view` 的后台操作。
 
-use nsh_base::{button, radio, radio_group, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use super::super::{
     CHANNELS, CorePageState, LocalCoreRow, TYPES, core_tag, spawn_check_remote, spawn_download,
     spawn_select, supported_channel,
 };
+use crate::ui::icon::{Icon, Tone, icon_sized};
+use crate::ui::layout::{SurfaceLevel, section_title, surface};
+use crate::ui::select::{segmented_group, segmented_radio};
 use lanpath_client::cores::{CoreChannel, channel_of_version};
 use lanpath_common::CoreType;
 
@@ -18,62 +21,77 @@ pub(super) fn inventory_card(state: CorePageState) -> impl IntoElement {
     let check_state = state.clone();
     let rows_state = state.clone();
     let empty_state = state.clone();
-    view()
+    surface(SurfaceLevel::Card)
+        .p_5()
         .flex_col()
-        .gap_3()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text("库存").text_size(px(15.0)))
+        .gap_4()
         .child(
-            radio_group().flex_row().gap_3().children(
-                TYPES
-                    .iter()
-                    .map(|(kind, label)| type_radio(type_state.clone(), *kind, label)),
-            ),
+            view()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(section_title(|| t!("product.core.inventory")))
+                .child({
+                    let press_state = check_state.clone();
+                    let busy_state = check_state;
+                    crate::ui::button(crate::ui::ButtonVariant::Outline)
+                        .test_id("core-check-remote")
+                        .size(crate::ui::ButtonSize::Sm)
+                        .prefix(|| icon_sized(Icon::Refresh, Tone::Muted, 14.0))
+                        .loading(move || busy_state.busy.get())
+                        .on_press(move || spawn_check_remote(press_state.clone()))
+                        .label(|| t!("product.action.check_updates"))
+                }),
         )
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_3()
-                .child(radio_group().flex_row().gap_3().children(
-                    CHANNELS.iter().map(|(channel, label)| {
-                        channel_radio(channel_state.clone(), *channel, label)
-                    }),
+                .child(segmented_group(
+                    "core-type-group",
+                    TYPES
+                        .iter()
+                        .map(|(kind, label)| {
+                            type_radio(type_state.clone(), *kind, label).into_element()
+                        })
+                        .collect(),
                 ))
-                .child(view().flex_1())
-                .child({
-                    let press_state = check_state.clone();
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
-                        .on_press(move || spawn_check_remote(press_state.clone()))
-                        .child(
-                            view()
-                                .test_id("core-check-remote")
-                                .child(text("检查更新").text_size(px(12.0))),
-                        )
-                }),
+                .child(segmented_group(
+                    "core-channel-group",
+                    CHANNELS
+                        .iter()
+                        .map(|(channel, label)| {
+                            channel_radio(channel_state.clone(), *channel, label).into_element()
+                        })
+                        .collect(),
+                )),
         )
         .child(remote_status_row(state))
         .child(when(
             move || filtered_rows(&empty_state).is_empty() && empty_state.error.get().is_none(),
             || {
-                text("此通道尚无本地版本，可切换通道或检查更新后下载。")
-                    .text_size(px(12.0))
-                    .text_color(move || theme().muted_foreground)
+                crate::ui::empty_with_icon(
+                    Some(Icon::Core),
+                    || t!("product.core.inventory"),
+                    || t!("product.core.empty"),
+                )
             },
         ))
-        .child(each(
-            rows_state.local,
-            |row: &LocalCoreRow| row.path.clone(),
-            move |item, _index| core_row(rows_state.clone(), item),
-        ))
+        .child({
+            let card_state = rows_state.clone();
+            let rows = computed(move || filtered_rows(&rows_state));
+            crate::ui::cards::card_grid(
+                rows,
+                112.0,
+                Some(2),
+                |row: &LocalCoreRow| row.path.to_string_lossy().to_string(),
+                move |item| core_row(card_state.clone(), item).into_element(),
+            )
+        })
 }
 
 /// 远端状态行：本地最新 / 远程版本 / busy 阶段 / 下载按钮。
@@ -86,38 +104,57 @@ fn remote_status_row(state: CorePageState) -> impl IntoElement {
     let download_button_state = state;
     view()
         .flex_col()
-        .gap_2()
+        .gap_3()
+        .p_3()
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted.opacity(0.4))
+        .border(px(1.0))
+        .border_color(move || theme().border)
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(text(move || {
-                    let rows = filtered_rows(&local_latest_state);
-                    match rows.first() {
-                        Some(row) => format!("本地：{}", core_tag(&row.version)),
-                        None => "本地：未安装".to_owned(),
-                    }
-                }))
-                .child(text(move || {
-                    let channel = remote_text_state.channel.get().as_str();
-                    match remote_text_state
-                        .remote
-                        .get()
-                        .iter()
-                        .find(|row| row.channel == channel)
-                    {
-                        Some(row) => format!("远程：{}", core_tag(&row.version)),
-                        None => "远程：尚未检查".to_owned(),
-                    }
-                }))
+                .child(crate::ui::badge(
+                    crate::ui::BadgeVariant::Outline,
+                    move || {
+                        let rows = filtered_rows(&local_latest_state);
+                        match rows.first() {
+                            Some(row) => format!("本地：{}", core_tag(&row.version)),
+                            None => "本地：未安装".to_owned(),
+                        }
+                    },
+                ))
+                .child(crate::ui::badge(
+                    crate::ui::BadgeVariant::Outline,
+                    move || {
+                        let channel = remote_text_state.channel.get().as_str();
+                        match remote_text_state
+                            .remote
+                            .get()
+                            .iter()
+                            .find(|row| row.channel == channel)
+                        {
+                            Some(row) => format!("远程：{}", core_tag(&row.version)),
+                            None => "远程：尚未检查".to_owned(),
+                        }
+                    },
+                ))
                 .child(view().flex_1())
                 .child(when(
                     move || busy_state.busy.get(),
                     move || {
-                        text(move || stage_state.stage.get().unwrap_or_default())
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground)
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(crate::ui::spinner())
+                            .child(
+                                text(move || stage_state.stage.get().unwrap_or_default())
+                                    .text_size(px(12.5))
+                                    .text_color(move || theme().muted_foreground),
+                            )
                     },
                 )),
         )
@@ -142,17 +179,12 @@ fn download_button(state: CorePageState) -> AnyElement {
         format!("下载 {} 并选中", core_tag(&version))
     };
     let press_state = state;
-    button()
-        .px_3()
-        .py_1()
-        .rounded(move || theme().radius)
-        .bg(move || theme().primary)
+    crate::ui::button(crate::ui::ButtonVariant::Primary)
+        .test_id("core-download")
+        .size(crate::ui::ButtonSize::Md)
+        .prefix(|| icon_sized(Icon::Download, Tone::OnPrimary, 14.0))
         .on_press(move || spawn_download(press_state.clone(), version.clone()))
-        .child(
-            view()
-                .test_id("core-download")
-                .child(text(label).text_color(move || theme().primary_foreground)),
-        )
+        .label(move || label.clone())
         .into_element()
 }
 
@@ -171,130 +203,109 @@ fn core_row(state: CorePageState, item: ReadSignal<LocalCoreRow>) -> impl IntoEl
     let use_id = format!("core-use-{}-{version}", core_type.binary_name());
     let delete_id = format!("core-delete-{}-{version}", core_type.binary_name());
     let show_actions = !row.active;
-    view()
+    crate::ui::cards::selection_card(move || item.get().active, move || item.get().active)
         .test_id(&row_id)
-        .flex_row()
-        .items_center()
+        .label(format!("{core_type} {}", core_tag(&version)))
+        .min_h(px(88.0))
+        .flex_col()
+        .justify_between()
         .gap_3()
-        .py_2()
-        .child(text(core_tag(&version)))
-        .child(when(
-            move || item.get().active,
-            || {
-                text("当前使用")
-                    .text_size(px(12.0))
-                    .text_color(move || theme().primary)
-            },
-        ))
-        .child(view().flex_1())
-        .child(when(
-            move || show_actions,
-            move || {
-                let press_state = use_state.clone();
-                let press_version = use_version.clone();
-                let press_path = use_path.clone();
-                button()
-                    .px_3()
-                    .py_1()
-                    .rounded(move || theme().radius)
-                    .border(px(1.0))
-                    .border_color(move || theme().border)
-                    .on_press(move || {
-                        spawn_select(
-                            press_state.clone(),
-                            core_type,
-                            press_version.clone(),
-                            press_path.clone(),
-                        )
-                    })
-                    .child(
-                        view()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    text(core_tag(&version))
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
+                .child(when(
+                    move || item.get().active,
+                    || {
+                        crate::ui::badge(crate::ui::BadgeVariant::Success, || {
+                            t!("product.core.selected")
+                        })
+                    },
+                )),
+        )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .justify_end()
+                .gap_2()
+                .child(when(
+                    move || show_actions,
+                    move || {
+                        let press_state = use_state.clone();
+                        let press_version = use_version.clone();
+                        let press_path = use_path.clone();
+                        crate::ui::button(crate::ui::ButtonVariant::Outline)
                             .test_id(&use_id)
-                            .child(text("使用").text_size(px(12.0))),
-                    )
-            },
-        ))
-        .child(when(
-            move || show_actions,
-            move || {
-                let dialog_state = delete_state.clone();
-                let dialog_version = delete_version.clone();
-                let dialog_path = delete_path.clone();
-                button()
-                    .px_3()
-                    .py_1()
-                    .rounded(move || theme().radius)
-                    .border(px(1.0))
-                    .border_color(move || theme().destructive)
-                    .on_press(move || {
-                        dialog_state
-                            .pending_delete
-                            .set(Some((dialog_version.clone(), dialog_path.clone())));
-                    })
-                    .child(
-                        view().test_id(&delete_id).child(
-                            text("删除")
-                                .text_size(px(12.0))
-                                .text_color(move || theme().destructive),
-                        ),
-                    )
-            },
-        ))
+                            .size(crate::ui::ButtonSize::Sm)
+                            .on_press(move || {
+                                spawn_select(
+                                    press_state.clone(),
+                                    core_type,
+                                    press_version.clone(),
+                                    press_path.clone(),
+                                )
+                            })
+                            .label(|| t!("product.action.use"))
+                    },
+                ))
+                .child(when(
+                    move || show_actions,
+                    move || {
+                        let dialog_state = delete_state.clone();
+                        let dialog_version = delete_version.clone();
+                        let dialog_path = delete_path.clone();
+                        crate::ui::button(crate::ui::ButtonVariant::Ghost)
+                            .test_id(&delete_id)
+                            .size(crate::ui::ButtonSize::Sm)
+                            .on_press(move || {
+                                dialog_state
+                                    .pending_delete
+                                    .set(Some((dialog_version.clone(), dialog_path.clone())));
+                            })
+                            .label(|| t!("product.action.delete"))
+                    },
+                )),
+        )
 }
 
-fn type_radio(state: CorePageState, target: CoreType, label: &str) -> impl IntoElement {
+fn type_radio(state: CorePageState, target: CoreType, label: &'static str) -> impl IntoElement {
     let checked = move || state.browsing.get() == target;
     let switch_state = state;
     let test_id = format!("core-type-{}", target.binary_name());
-    radio()
-        .checked(checked)
-        .on_change(move |_: &bool| switch_state.switch_type(target))
-        .child(
-            view()
-                .test_id(&test_id)
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(radio_dot(checked))
-                .child(text(label.to_owned())),
-        )
+    segmented_radio(
+        checked,
+        move || label.to_owned(),
+        test_id,
+        move || switch_state.switch_type(target),
+    )
 }
 
-fn channel_radio(state: CorePageState, target: CoreChannel, label: &str) -> impl IntoElement {
+fn channel_radio(
+    state: CorePageState,
+    target: CoreChannel,
+    label: &'static str,
+) -> impl IntoElement {
     let checked = move || state.channel.get() == target;
     let switch_state = state;
     let test_id = format!("core-channel-{}", target.as_str());
-    radio()
-        .checked(checked)
-        .on_change(move |_: &bool| {
+    segmented_radio(
+        checked,
+        move || label.to_owned(),
+        test_id,
+        move || {
             if !switch_state.busy.get() {
                 switch_state.channel.set(target);
             }
-        })
-        .child(
-            view()
-                .test_id(&test_id)
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(radio_dot(checked))
-                .child(text(label.to_owned())),
-        )
-}
-
-fn radio_dot(checked: impl Fn() -> bool + 'static) -> impl IntoElement {
-    view()
-        .size(px(14.0))
-        .rounded_full()
-        .border(px(1.0))
-        .border_color(move || theme().muted_foreground)
-        .bg(move || {
-            if checked() {
-                theme().primary
-            } else {
-                theme().card
-            }
-        })
+        },
+    )
 }
 
 /// 展示用版本降序（与共享 compare_core_versions 同一语义：数字段数值比较，

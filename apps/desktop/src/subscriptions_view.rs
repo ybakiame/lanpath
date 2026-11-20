@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lanpath_client::{Profile, Subscription};
-use nsh_base::theme;
 use nsh_core::prelude::*;
 use uuid::Uuid;
 
@@ -105,6 +104,10 @@ pub(super) struct SourceView {
 #[derive(Clone)]
 pub(super) struct SubscriptionPageState {
     service: Option<Arc<Subscriptions>>,
+    search: Signal<String>,
+    draft_name: Signal<String>,
+    draft_url: Signal<String>,
+    draft_user_agent: Signal<String>,
     /// 覆写模板业务：与订阅服务共用同一数据根的同一把业务锁；
     /// 列表用于绑定选择与行内模板名展示。
     profiles_service: Option<Profiles>,
@@ -147,6 +150,10 @@ impl SubscriptionPageState {
                 );
                 let state = Self {
                     service: Some(service),
+                    search: signal(String::new()),
+                    draft_name: signal(String::new()),
+                    draft_url: signal(String::new()),
+                    draft_user_agent: signal(String::new()),
                     profiles_service,
                     list: signal(Vec::new()),
                     profiles: signal(profiles),
@@ -167,6 +174,10 @@ impl SubscriptionPageState {
             }
             Err(error) => Self {
                 service: None,
+                search: signal(String::new()),
+                draft_name: signal(String::new()),
+                draft_url: signal(String::new()),
+                draft_user_agent: signal(String::new()),
                 profiles_service,
                 list: signal(Vec::new()),
                 profiles: signal(profiles),
@@ -274,12 +285,30 @@ impl SubscriptionPageState {
 pub(super) fn subscription_page() -> impl IntoElement {
     let state = SubscriptionPageState::new();
     spawn_refresh_activity_monitor(state.clone());
+    let draft = state.clone();
+    crate::navigation::protect(move || {
+        if !crate::workspace_panels::is_open() {
+            return crate::navigation::LeaveState::Clean;
+        }
+        if draft.edit.dirty.get()
+            || !draft.draft_name.get().is_empty()
+            || !draft.draft_url.get().is_empty()
+            || !draft.draft_user_agent.get().is_empty()
+        {
+            crate::navigation::LeaveState::Dirty
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
     view()
         .flex_1()
         .flex_col()
         .gap_4()
-        .child(text(|| t!("subscription.title")).text_size(px(24.0)))
-        .child(text(|| t!("subscription.subtitle")).text_color(move || theme().muted_foreground))
+        .child(
+            text(|| t!("subscription.subtitle"))
+                .text_size(px(12.0))
+                .text_color(move || nsh_base::theme().muted_foreground),
+        )
         .child(add_form::add_subscription_form(state.clone()))
         .child(rows::subscription_list(state))
 }

@@ -8,55 +8,107 @@ use nsh_core::prelude::*;
 
 use crate::app_state::{self, AppState};
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
+use crate::ui::icon::{Icon, Tone, icon};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, section_title, surface};
 
 pub(super) fn runtime_card() -> impl IntoElement {
     let shared = app_state::current();
     let status = shared.status;
     let command = shared.command;
-    view()
+    surface(SurfaceLevel::Card)
+        .flex_1()
+        .min_w(px(0.0))
+        .p_5()
         .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text("运行").text_size(px(15.0)))
+        .gap_3()
         .child(
-            text("校验并启动：先以真实核心二进制校验配置（sing-box check / Mihomo -t），再以用户态 loopback mixed + Clash API 启动 · TUN/VPN 不接管；系统代理经独立守护接管/恢复（见下方分区）")
-                .text_size(px(12.0))
+            view()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(section_title(|| t!("overview.runtime.title")))
+                .child(
+                    when(
+                        move || status.get().running,
+                        || {
+                            crate::ui::badge_with_icon(
+                                crate::ui::BadgeVariant::Success,
+                                Some(Icon::Shield),
+                                || t!("runtime.status.running"),
+                            )
+                        },
+                    )
+                    .otherwise(|| {
+                        crate::ui::badge(crate::ui::BadgeVariant::Outline, || {
+                            t!("runtime.status.stopped")
+                        })
+                    }),
+                ),
+        )
+        .child(
+            text(|| t!("core.runtime_hint"))
+                .text_size(px(12.5))
                 .text_color(move || theme().muted_foreground),
         )
-        .child(text(move || {
-            let status = status.get();
-            let command = command.get();
-            if command.busy {
-                return app_state::command_pending_line(&command, &status);
-            }
-            app_state::runtime_status_line(&status)
-        }))
         .child(
-            text(move || app_state::exit_error_line(&status.get().exit_error))
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
+            text(move || {
+                let status = status.get();
+                let command = command.get();
+                if command.busy {
+                    return app_state::command_pending_line(&command, &status);
+                }
+                app_state::runtime_status_line(&status)
+            })
+            .text_size(px(13.5))
+            .font_weight(FontWeight::MEDIUM)
+            .selectable(true),
         )
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_3()
                 .child(start_button(shared.clone()))
                 .child(stop_button(shared)),
         )
-        .child(
-            text(move || app_state::command_result_line(&command.get().result))
-                .text_size(px(12.0))
-                .text_color(move || theme().primary),
-        )
-        .child(
-            text(move || app_state::command_error_line(&command.get().error))
-                .text_size(px(12.0))
-                .text_color(move || theme().destructive),
-        )
+        .child(when(
+            move || status.get().exit_error.is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || app_state::exit_error_line(&status.get().exit_error))
+                        .text_size(px(12.5))
+                        .text_color(move || theme().destructive)
+                        .selectable(true),
+                )
+            },
+        ))
+        .child(when(
+            move || command.get().result.is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Success,
+                    text(move || app_state::command_result_line(&command.get().result))
+                        .text_size(px(12.5))
+                        .text_color(move || theme().primary)
+                        .selectable(true),
+                )
+            },
+        ))
+        .child(when(
+            move || command.get().error.is_some(),
+            move || {
+                alert_banner(
+                    AlertTone::Danger,
+                    text(move || app_state::command_error_line(&command.get().error))
+                        .text_size(px(12.5))
+                        .text_color(move || theme().destructive)
+                        .selectable(true),
+                )
+            },
+        ))
 }
 
 /// “校验并启动”：运行中/在途/命令 busy 时禁用（共享命令单飞）。
@@ -64,9 +116,11 @@ fn start_button(shared: AppState) -> AnyElement {
     let status = shared.status;
     let command = shared.command;
     button(ButtonVariant::Primary)
-        .size(ButtonSize::Sm)
+        .size(ButtonSize::Md)
         .test_id("core-start")
-        .label(|| "校验并启动".to_owned())
+        .prefix(|| icon(Icon::Play, Tone::OnPrimary))
+        .label(|| t!("overview.runtime.start"))
+        .loading(move || command.get().busy && !status.get().running)
         .disabled(move || {
             let status = status.get();
             status.running || status.operation.is_some() || command.get().busy
@@ -80,9 +134,11 @@ fn stop_button(shared: AppState) -> AnyElement {
     let status = shared.status;
     let command = shared.command;
     button(ButtonVariant::Outline)
-        .size(ButtonSize::Sm)
+        .size(ButtonSize::Md)
         .test_id("core-stop")
-        .label(|| "停止".to_owned())
+        .prefix(|| icon(Icon::Stop, Tone::Muted))
+        .label(|| t!("overview.runtime.stop"))
+        .loading(move || command.get().busy && status.get().running)
         .disabled(move || {
             let status = status.get();
             !status.running || status.operation.is_some() || command.get().busy

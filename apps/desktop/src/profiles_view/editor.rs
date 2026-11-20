@@ -1,126 +1,80 @@
-//! TypeScript 覆写编辑：共享语义控件与脏草稿保护。
+//! 覆写脚本的原生代码 Dialog；确认取消时保留 Editor 的选择、撤销和输入状态。
 use super::{ProfilesPageState, save_edit};
 use crate::ui::{
     button::{ButtonVariant, button},
-    input::{field, input, textarea},
-    layout::{SurfaceLevel, surface},
+    input::{field, input},
 };
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 pub(super) fn profile_editor_dialog(state: ProfilesPageState) -> AnyElement {
-    let cancel = state.clone();
-    let form = state.clone();
-    let confirm = state.clone();
-    crate::ui::overlay::editor_dialog(
-        || t!("profile.editor"),
-        move || cancel.edit.request_cancel(),
-        surface(SurfaceLevel::Popover)
-            .w(px(520.0))
-            .max_h(px(560.0))
-            .p_4()
-            .child(
-                scroll().child(
-                    view()
-                        .flex_col()
-                        .gap_3()
-                        .child(when(
-                            move || !state.edit.confirm_discard.get(),
-                            move || edit_form(form.clone()),
-                        ))
-                        .child(when(
-                            move || confirm.edit.confirm_discard.get(),
-                            move || discard_confirm(confirm.clone()),
-                        )),
-                ),
-            ),
-    )
-}
-
-fn edit_form(state: ProfilesPageState) -> impl IntoElement {
     let name = state.edit.name;
-    let url = state.edit.js_url;
     let source = state.edit.js_override;
     let dirty = state.edit.dirty;
     let error = state.edit.error;
+    let confirm = state.edit.confirm_discard;
     let cancel = state.clone();
-    let save = state;
-    view()
+    let footer_cancel = state.clone();
+    let save = state.clone();
+    let discard = state;
+    let focus = element_ref();
+    let body = view()
+        .flex_1()
+        .min_h(px(0.0))
         .flex_col()
         .gap_3()
-        .child(crate::ui::layout::section_title(|| t!("profile.editor")))
         .child(
             field().label(|| t!("profile.name")).control(
                 input(name)
+                    .element_ref(focus)
                     .test_id("profile-name")
                     .accessible_name(|| t!("profile.name"))
-                    .on_change(move |v| {
-                        name.set(v);
+                    .on_change(move |value| {
+                        name.set(value);
                         dirty.set(true);
                     }),
             ),
         )
-        .child(
-            field()
-                .label(|| t!("profile.url"))
-                .hint(|| t!("profile.url_hint"))
-                .control(
-                    input(url)
-                        .test_id("profile-js-url")
-                        .accessible_name(|| t!("profile.url"))
-                        .on_change(move |v| {
-                            url.set(v);
-                            dirty.set(true);
-                        }),
-                ),
-        )
-        .child(
-            field()
-                .label(|| t!("profile.source"))
-                .hint(|| t!("profile.source_hint"))
-                .control(
-                    textarea(source)
-                        .test_id("profile-js")
-                        .accessible_name(|| t!("profile.source"))
-                        .on_change(move |v| {
-                            source.set(v);
-                            dirty.set(true);
-                        }),
-                ),
-        )
-        .child(
-            text(move || error.get().unwrap_or_default())
-                .text_color(move || nsh_base::theme().destructive),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap_3()
-                .child(
-                    button(ButtonVariant::Ghost)
-                        .label(|| t!("profile.cancel"))
-                        .on_press(move || cancel.edit.request_cancel()),
-                )
-                .child(
-                    button(ButtonVariant::Primary)
-                        .label(|| t!("profile.save"))
-                        .on_press(move || save_edit(&save)),
-                ),
-        )
-}
-fn discard_confirm(state: ProfilesPageState) -> impl IntoElement {
-    let keep = state.clone();
-    view()
-        .flex_col()
+        .child(crate::ui::code_editor::code_editor(source, dirty))
+        .child(when(
+            move || error.get().is_some(),
+            move || {
+                text(move || error.get().unwrap_or_default())
+                    .text_color(move || theme().destructive)
+            },
+        ));
+    let footer = view()
+        .flex_row()
+        .justify_end()
         .gap_3()
-        .child(text(|| t!("profile.discard_question")))
         .child(
             button(ButtonVariant::Outline)
-                .label(|| t!("profile.keep"))
-                .on_press(move || keep.edit.confirm_discard.set(false)),
+                .label(|| t!("profile.cancel"))
+                .on_press(move || footer_cancel.edit.request_cancel()),
         )
         .child(
-            button(ButtonVariant::Destructive)
-                .label(|| t!("profile.discard"))
-                .on_press(move || state.edit.close()),
+            button(ButtonVariant::Primary)
+                .label(|| t!("profile.save"))
+                .on_press(move || save_edit(&save)),
+        );
+    view()
+        .child(crate::ui::dialog::form_dialog(
+            || t!("profile.editor"),
+            crate::ui::dialog::DialogSize::Code,
+            focus,
+            move || cancel.edit.request_cancel(),
+            body,
+            footer,
+        ))
+        .child(
+            crate::ui::confirm_dialog(move || confirm.get())
+                .title(|| t!("profile.discard_question"))
+                .description(|| t!("profile.discard_hint"))
+                .destructive()
+                .confirm_label(|| t!("profile.discard"))
+                .cancel_label(|| t!("profile.keep"))
+                .on_cancel(move || confirm.set(false))
+                .on_confirm(move || discard.edit.close()),
         )
+        .into_element()
 }

@@ -1,10 +1,12 @@
-//! 主题注册：13 组命名主题（amethyst 默认），每组完整浅色/深色配对，
+//! 主题注册：14 组命名主题（包含高饱和活跃清新主题 `mint`），每组完整浅色/深色配对，
 //! 集中产出语义 token（`Tokens`）并经 `nsh_core::element::set_tokens`
 //! 运行时切换——`theme()` 读取处随新 token 重建，无需重建组件树。
 //! 语义状态色（错误/警告/成功）各主题固定，不被主题色取代；
 //! 圆角为 number token（`radius` 6pt、`radius-sm` 4pt、`radius-lg` 8pt）。
 //! 浅色背景保持高亮度微色相分层，避免低饱和脏灰；正文/主色对比度
 //! 由构建器自动校验（≥4.5:1），单测逐项断言。
+
+mod circulation;
 
 use std::sync::LazyLock;
 
@@ -17,6 +19,7 @@ pub enum ThemeId {
     Amethyst,
     Indigo,
     Ocean,
+    Mint,
     Forest,
     Sand,
     Rose,
@@ -31,10 +34,11 @@ pub enum ThemeId {
 
 impl ThemeId {
     /// 全部主题，网格显示顺序。
-    pub const ALL: [ThemeId; 13] = [
+    pub const ALL: [ThemeId; 14] = [
         ThemeId::Amethyst,
         ThemeId::Indigo,
         ThemeId::Ocean,
+        ThemeId::Mint,
         ThemeId::Forest,
         ThemeId::Sand,
         ThemeId::Rose,
@@ -53,6 +57,7 @@ impl ThemeId {
             ThemeId::Amethyst => "amethyst",
             ThemeId::Indigo => "indigo",
             ThemeId::Ocean => "ocean",
+            ThemeId::Mint => "mint",
             ThemeId::Forest => "forest",
             ThemeId::Sand => "sand",
             ThemeId::Rose => "rose",
@@ -97,6 +102,10 @@ const fn params(id: ThemeId) -> Params {
         ThemeId::Ocean => Params {
             hue: 205.0,
             saturation: 0.62,
+        },
+        ThemeId::Mint => Params {
+            hue: 168.0,
+            saturation: 0.96,
         },
         ThemeId::Forest => Params {
             hue: 150.0,
@@ -415,6 +424,7 @@ fn palette(id: ThemeId, dark: bool) -> Vec<(&'static str, Hsla)> {
     // 对比色，全部主题统一注册。
     colors.push(("chart-upload", series[1]));
     colors.push(("chart-download", series[0]));
+    circulation::refine(&mut colors, id, dark);
     colors
 }
 

@@ -1,19 +1,6 @@
 //! 备份页：加密备份导出与恢复导入/确认。复用共享 `lanpath-client::backup`
 //! 的 age 加密、一次性预览与启动事务（见 `backup` 业务模块）；本页只做
-//! 交互与真实状态上屏：
-//!
-//! - 导出：密码输入恒掩码；至少 12 字符，或一键生成共享强密码；经 NSH
-//!   原生保存对话框选定目标后写出真实 `.zip.age`——绝不覆盖已有文件，
-//!   失败真实上屏。成功后清空密码输入。
-//! - 导入：经原生打开对话框选择文件（16 MiB 上限）；密码输入后解密
-//!   预览（版本/时间/订阅数/覆写数/文件数/字节），preview_id 一次性、
-//!   300 秒过期；修改文件或密码立即 discard。密码与明文不落日志/storage。
-//! - 恢复确认：确认后停止核心（含系统代理守护恢复），再准备加密回滚与
-//!   `.backup-pending`；成功标记待重启，一切业务写被拒（业务层门），
-//!   重启经 NSH 可靠重启 API（旧进程退出后才拉起新进程），失败提示
-//!   手动重启，不伪装已重启。
-//! - 启动结果：`.backup-applied.json` 摘要与 `.backup-failed` 真实错误
-//!   在此展示；用户确认提示后才 acknowledge 清除标记。
+//! 交互与真实状态上屏。
 
 mod export_card;
 mod import_card;
@@ -22,11 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lanpath_client::backup::BackupSummary;
-use nsh_base::{button, theme};
+use nsh_base::theme;
 use nsh_core::prelude::*;
 
 use crate::backup::Backup;
 use crate::core_runtime::CoreRuntime;
+use crate::ui::icon::{Icon, Tone, icon};
+use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, section_title, surface};
 
 /// 预览绑定的展示信息：摘要 + 一次性 id（明文/口令只进共享进程内缓存）。
 #[derive(Clone)]
@@ -39,19 +28,12 @@ pub(super) struct PreviewInfo {
 /// 导出/导入/准备/预览过期调度各自独立，重复点击只替换未完成任务。
 #[derive(Clone)]
 pub(super) struct BackupPageState {
-    /// 页面级 owner：在页面构建时捕获。恢复准备从确认弹窗发起——弹窗的
-    /// 临时 owner 在确认按下后随弹窗关闭被销毁，在其下 spawn 会被立即
-    /// 取消；工作任务必须挂在页面 owner 下（随离开页面才取消）。
     pub(super) owner: Owner,
     pub(super) service: Option<Arc<Backup>>,
     pub(super) runtime: Option<Arc<CoreRuntime>>,
-    /// 打开数据根或读取恢复结果的真实错误（含 `.backup-failed`）。
     pub(super) startup_error: Signal<Option<String>>,
-    /// 上次启动已应用恢复的摘要（待用户确认）。
     pub(super) restored: Signal<Option<BackupSummary>>,
-    /// 用户已确认恢复提示（acknowledge 成功）。
     pub(super) acknowledged: Signal<bool>,
-    /// 已有待恢复备份（准备成功后或启动时检测到 `.backup-pending`）。
     pub(super) pending: Signal<bool>,
     pub(super) export_password: Signal<String>,
     pub(super) exporting: Signal<bool>,
@@ -144,202 +126,223 @@ impl BackupPageState {
 
 pub(crate) fn backup_page() -> impl IntoElement {
     let state = BackupPageState::new();
+    let transaction = state.clone();
+    crate::navigation::protect(move || {
+        if transaction.exporting.get() || transaction.importing.get() || transaction.preparing.get()
+        {
+            crate::navigation::LeaveState::Busy
+        } else if !transaction.pending.get()
+            && (!transaction.export_password.get().is_empty()
+                || !transaction.import_password.get().is_empty()
+                || transaction.import_bytes.get().is_some())
+        {
+            crate::navigation::LeaveState::Dirty
+        } else {
+            crate::navigation::LeaveState::Clean
+        }
+    });
     let ack_state = state.clone();
     let restored_state = state.clone();
     let startup_state = state.clone();
     let cards_state = state.clone();
     let banner_state = state.clone();
+    let prepare_status = state.prepare_status;
     view()
         .flex_1()
         .flex_col()
-        .gap_4()
-        .child(text("备份").text_size(px(24.0)))
+        .min_h(px(0.0))
         .child(
-            text("导出 age 加密备份（.zip.age），或从备份恢复 · 密码只保存在内存，丢失无法找回 · 恢复需重启应用完成")
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(when(
-            move || startup_state.startup_error.get().is_some(),
-            move || {
-                let state = startup_state.clone();
+            scroll().flex_1().min_h(px(0.0)).child(
                 view()
-                    .test_id("backup-startup-error")
                     .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .rounded(move || theme().radius)
-                    .border(px(1.0))
-                    .border_color(move || theme().destructive)
-                    .child(
-                        text(move || {
-                            state
-                                .startup_error
-                                .get()
-                                .unwrap_or_else(|| "恢复未完成".to_owned())
-                        })
-                        .text_color(move || theme().destructive),
-                    )
-                    .child(
-                        text("原配置未被修改；处理后可重新导入备份，或联系支持。")
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
-                    )
-            },
-        ))
-        .child(when(
-            move || restored_state.restored.get().is_some() && !restored_state.acknowledged.get(),
-            move || restored_notice(restored_state.clone()),
-        ))
-        .child(when(
-            move || !cards_state.pending.get(),
-            move || {
-                let export_state = cards_state.clone();
-                let import_state = cards_state.clone();
-                view()
-                    .flex_1()
-                    .flex_col()
-                    .gap_4()
-                    .child(export_card::export_card(export_state))
-                    .child(import_card::import_card(import_state))
-            },
-        ))
-        .child(when(
-            move || banner_state.pending.get(),
-            pending_banner,
-        ))
-        .child(
-            text(move || banner_state.prepare_status.get().unwrap_or_default())
-                .test_id("backup-prepare-status")
-                .text_size(px(12.0))
-                .text_color(move || theme().foreground),
+                    .gap_5()
+                    .max_w(px(760.0))
+                    .child(crate::ui::page_header(
+                        || t!("product.backup.title"),
+                        || t!("product.backup.subtitle"),
+                    ))
+                    .child(when(
+                        move || startup_state.startup_error.get().is_some(),
+                        move || {
+                            let state = startup_state.clone();
+                            alert_banner(
+                                AlertTone::Danger,
+                                view()
+                                    .test_id("backup-startup-error")
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(
+                                        view()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(icon(Icon::Warning, Tone::Danger))
+                                            .child(
+                                                text(move || {
+                                                    state
+                                                        .startup_error
+                                                        .get()
+                                                        .unwrap_or_else(|| "恢复未完成".to_owned())
+                                                })
+                                                .text_size(px(13.0))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(move || theme().destructive),
+                                            ),
+                                    )
+                                    .child(
+                                        text(|| t!("product.backup.failed_hint"))
+                                            .text_size(px(12.0))
+                                            .text_color(move || theme().muted_foreground),
+                                    ),
+                            )
+                        },
+                    ))
+                    .child(when(
+                        move || {
+                            restored_state.restored.get().is_some()
+                                && !restored_state.acknowledged.get()
+                        },
+                        move || restored_notice(restored_state.clone()),
+                    ))
+                    .child(when(
+                        move || !cards_state.pending.get(),
+                        move || {
+                            let export_state = cards_state.clone();
+                            let import_state = cards_state.clone();
+                            view()
+                                .flex_col()
+                                .gap_5()
+                                .child(export_card::export_card(export_state))
+                                .child(import_card::import_card(import_state))
+                        },
+                    ))
+                    .child(when(move || banner_state.pending.get(), pending_banner))
+                    .child(when(
+                        move || prepare_status.get().is_some(),
+                        move || {
+                            alert_banner(
+                                AlertTone::Info,
+                                text(move || prepare_status.get().unwrap_or_default())
+                                    .test_id("backup-prepare-status")
+                                    .text_size(px(12.5))
+                                    .text_color(move || theme().foreground),
+                            )
+                        },
+                    )),
+            ),
         )
-        .child(when(
-            move || ack_state.confirm_restore.get(),
-            move || import_card::restore_dialog(ack_state.clone()),
-        ))
+        .child(import_card::restore_dialog(ack_state))
 }
 
 /// 上次启动已应用恢复的摘要 + 确认按钮：确认（acknowledge）后才清标记。
 fn restored_notice(state: BackupPageState) -> impl IntoElement {
     let ack = state.clone();
     let summary_state = state;
-    view()
-        .test_id("backup-restored")
-        .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text(move || {
-            summary_state
-                .restored
-                .get()
-                .map(|summary| {
-                    format!(
-                        "上次启动已从备份恢复：版本 v{} · {} · 订阅 {} · 覆写 {} · 文件 {}",
-                        summary.version,
-                        summary.created_at,
-                        summary.subscriptions,
-                        summary.profiles,
-                        summary.files
-                    )
+    alert_banner(
+        AlertTone::Success,
+        view()
+            .test_id("backup-restored")
+            .flex_col()
+            .gap_3()
+            .child(
+                text(move || {
+                    summary_state
+                        .restored
+                        .get()
+                        .map(|summary| {
+                            format!(
+                                "上次启动已从备份恢复：版本 v{} · {} · 订阅 {} · 覆写 {} · 文件 {}",
+                                summary.version,
+                                summary.created_at,
+                                summary.subscriptions,
+                                summary.profiles,
+                                summary.files
+                            )
+                        })
+                        .unwrap_or_default()
                 })
-                .unwrap_or_default()
-        }))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().primary)
-                        .on_press(move || ack.acknowledge())
-                        .child(
-                            text("我知道了")
-                                .test_id("backup-acknowledge")
-                                .text_color(move || theme().primary_foreground),
-                        ),
-                )
-                .child(
-                    text("确认后才清除恢复标记；恢复后的配置已在正常使用。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
+                .text_size(px(13.0))
+                .font_weight(FontWeight::MEDIUM),
+            )
+            .child(
+                view()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        crate::ui::button(crate::ui::ButtonVariant::Primary)
+                            .size(crate::ui::ButtonSize::Sm)
+                            .on_press(move || ack.acknowledge())
+                            .test_id("backup-acknowledge")
+                            .label(|| t!("product.action.acknowledge")),
+                    )
+                    .child(
+                        text(|| t!("product.backup.ack_hint"))
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground),
+                    ),
+            ),
+    )
 }
 
 /// 待重启横幅：一切业务写已被业务层拒绝，只剩重启入口。
 fn pending_banner() -> impl IntoElement {
-    view()
-        .test_id("backup-pending")
-        .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().destructive)
-        .child(
-            text(
-                "恢复已准备完成：请重启应用。重启前订阅、覆写、请求设置与核心库存的修改均被拒绝。",
-            )
-            .text_color(move || theme().destructive),
-        )
-        .child(
-            text("回滚备份已加密保存在本数据根 backup-history/；若新配置异常可据此还原。")
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().primary)
-                        .on_press(|| {
-                            // NSH 可靠重启：旧进程退出后才拉起同程序新进程，
-                            // 新进程的启动事务在数据根锁内应用待恢复备份。
-                            nsh_core::element::desktop::restart();
-                        })
-                        .child(
-                            text("立即重启应用")
-                                .test_id("backup-restart")
-                                .text_color(move || theme().primary_foreground),
-                        ),
+    alert_banner(
+        AlertTone::Warning,
+        view()
+            .test_id("backup-pending")
+            .flex_col()
+            .gap_3()
+            .child(
+                text(
+                    "恢复已准备完成：请重启应用。重启前订阅、覆写、请求设置与核心库存的修改均被拒绝。",
                 )
-                .child(
-                    text("重启自动完成恢复；若点击后应用没有重启，请手动重启。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
+                .text_size(px(13.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(move || theme().destructive),
+            )
+            .child(
+                text(|| t!("product.backup.rollback_hint"))
+                    .text_size(px(12.5))
+                    .text_color(move || theme().muted_foreground),
+            )
+            .child(
+                view()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        crate::ui::button(crate::ui::ButtonVariant::Primary)
+                            .on_press(|| {
+                                nsh_core::element::desktop::restart();
+                            })
+                            .test_id("backup-restart")
+                            .label(|| "立即重启应用".to_owned()),
+                    )
+                    .child(
+                        text(|| t!("product.backup.restart_hint"))
+                            .text_size(px(12.0))
+                            .text_color(move || theme().muted_foreground),
+                    ),
+            ),
+    )
 }
 
 /// 预览有效期（与共享 `PreviewCache` 一致）：到期丢弃授权与摘要。
 pub(super) const PREVIEW_TTL: Duration = Duration::from_secs(300);
 
-/// 卡片容器：圆角边框 + 标题 + 说明，子内容由调用方继续填充。
+/// 卡片容器：语义 Card 表面 + 标题 + 说明，子内容由调用方继续填充。
 pub(super) fn section(title: &'static str, note: &'static str) -> View {
-    view()
+    surface(SurfaceLevel::Card)
+        .p_5()
         .flex_col()
-        .gap_2()
-        .p_3()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(text(title).text_size(px(15.0)))
+        .gap_3()
+        .child(section_title(move || title.to_owned()))
         .child(
             text(note)
-                .text_size(px(12.0))
+                .text_size(px(12.5))
                 .text_color(move || theme().muted_foreground),
         )
 }

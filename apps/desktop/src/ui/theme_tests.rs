@@ -57,6 +57,11 @@ const REQUIRED: &[&str] = &[
     "chart-upload",
     "chart-download",
     "switch-thumb",
+    "success-surface",
+    "warning-surface",
+    "danger-surface",
+    "path-line",
+    "modal-scrim",
 ];
 
 const FILLED_PAIRS: &[(&str, &str)] = &[
@@ -98,12 +103,12 @@ fn assert_contrast(id: ThemeId, dark: bool, foreground: &str, background: &str, 
 }
 
 #[test]
-fn thirteen_themes_with_complete_pairs() {
-    assert_eq!(ThemeId::ALL.len(), 13);
+fn fourteen_themes_with_complete_pairs() {
+    assert_eq!(ThemeId::ALL.len(), 14);
     let mut names: Vec<&str> = ThemeId::ALL.iter().map(|id| id.id_name()).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 13, "主题 ID 必须唯一");
+    assert_eq!(names.len(), 14, "主题 ID 必须唯一");
     let mut required = REQUIRED.to_vec();
     required.sort_unstable();
     for id in ThemeId::ALL {
@@ -132,7 +137,37 @@ fn thirteen_themes_with_complete_pairs() {
     }
     // 存储值往返：未知值回退默认主题，不 panic。
     assert_eq!(ThemeId::from_id_name("ocean"), ThemeId::Ocean);
+    assert_eq!(ThemeId::from_id_name("mint"), ThemeId::Mint);
     assert_eq!(ThemeId::from_id_name("nope"), ThemeId::Amethyst);
+}
+
+#[test]
+fn mint_theme_is_high_saturation_and_fresh_in_both_modes() {
+    let light_primary = color_of(ThemeId::Mint, "primary", false);
+    let dark_primary = color_of(ThemeId::Mint, "primary", true);
+    let light_bg = color_of(ThemeId::Mint, "background", false);
+    let light_accent = color_of(ThemeId::Mint, "accent", false);
+    assert!(
+        light_primary.s >= 0.90,
+        "mint 浅色主色应保持高饱和（s={}）",
+        light_primary.s
+    );
+    assert!(
+        dark_primary.s >= 0.85,
+        "mint 深色主色应保持高饱和（s={}）",
+        dark_primary.s
+    );
+    assert!(
+        light_bg.l >= 0.95 && light_bg.s >= 0.40,
+        "mint 浅色背景应明亮清透（l={}, s={}）",
+        light_bg.l,
+        light_bg.s
+    );
+    assert!(
+        light_accent.s >= 0.65,
+        "mint 浅色强调面应轻快鲜活（s={}）",
+        light_accent.s
+    );
 }
 
 #[test]
@@ -254,4 +289,13 @@ fn degree_hues_convert_to_nsh_normalized_hues() {
     assert!(amethyst.b > amethyst.r && amethyst.r > amethyst.g);
     let ocean = nsh_core::Rgba::from(color_of(ThemeId::Ocean, "primary", false));
     assert!(ocean.b > ocean.g && ocean.g > ocean.r);
+}
+
+#[test]
+fn modal_scrim_has_visible_alpha_in_every_appearance() {
+    for id in ThemeId::ALL {
+        for dark in [false, true] {
+            assert!((color_of(id, "modal-scrim", dark).a - 0.45).abs() < 0.001);
+        }
+    }
 }

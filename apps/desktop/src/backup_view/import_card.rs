@@ -5,9 +5,12 @@
 
 use std::sync::Arc;
 
-use nsh_base::{button, dialog, input, theme};
+use nsh_base::theme;
 use nsh_core::file_dialog::{FileFilter, OpenDialog};
 use nsh_core::prelude::*;
+
+use crate::ui::icon::{Icon, Tone, icon_sized};
+use crate::ui::layout::{AlertTone, alert_banner};
 
 use super::{BackupPageState, PREVIEW_TTL, section};
 
@@ -17,7 +20,8 @@ pub(super) fn import_card(state: BackupPageState) -> impl IntoElement {
     let inspect_state = state.clone();
     let summary_state = state.clone();
     let confirm_state = state.clone();
-    let status_state = state.clone();
+    let import_name = state.import_name;
+    let import_status = state.import_status;
     section(
         "从备份恢复",
         "选择 .zip.age 加密备份并输入密码解密预览；确认恢复会停止核心（系统代理按原值恢复）、生成加密回滚，准备完成后需重启应用。",
@@ -25,174 +29,185 @@ pub(super) fn import_card(state: BackupPageState) -> impl IntoElement {
     .child(
         view()
             .flex_row()
+            .flex_wrap()
             .items_center()
-            .gap_2()
+            .gap_3()
             .child(pick_button(pick_state))
-            .child(text(move || {
-                status_state
-                    .import_name
-                    .get()
-                    .map(|name| format!("已选择：{name}"))
-                    .unwrap_or_else(|| "未选择文件".to_owned())
-            })),
+            .child(
+                text(move || {
+                    import_name
+                        .get()
+                        .map(|name| format!("已选择：{name}"))
+                        .unwrap_or_else(|| "未选择文件".to_owned())
+                })
+                .text_size(px(13.0))
+                .text_color(move || {
+                    if import_name.get().is_some() {
+                        theme().foreground
+                    } else {
+                        theme().muted_foreground
+                    }
+                }),
+            ),
     )
     .child(import_password_input(password_state))
     .child(
         view()
             .flex_row()
+            .flex_wrap()
             .items_center()
-            .gap_2()
-            .child(inspect_button(inspect_state.clone()))
-            .child(
-                text(move || {
-                    if summary_state.importing.get() {
-                        "解密中…".to_owned()
-                    } else if summary_state.preparing.get() {
-                        "准备恢复中…".to_owned()
-                    } else {
-                        String::new()
-                    }
-                })
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-            ),
+            .gap_3()
+            .child(inspect_button(inspect_state))
+            .child(when(
+                move || summary_state.importing.get() || summary_state.preparing.get(),
+                move || {
+                    let s = summary_state.clone();
+                    text(move || {
+                        if s.importing.get() {
+                            "解密中…".to_owned()
+                        } else if s.preparing.get() {
+                            "准备恢复中…".to_owned()
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .text_size(px(12.5))
+                    .text_color(move || theme().muted_foreground)
+                },
+            )),
     )
     .child(when(
         move || confirm_state.preview.get().is_some(),
         move || preview_summary(confirm_state.clone()),
     ))
-    .child(
-        text(move || status_state.import_status.get().unwrap_or_default())
-            .test_id("backup-import-status")
-            .text_size(px(12.0))
-            .text_color(move || theme().destructive),
-    )
+    .child(when(
+        move || import_status.get().is_some(),
+        move || {
+            alert_banner(
+                AlertTone::Danger,
+                text(move || import_status.get().unwrap_or_default())
+                    .test_id("backup-import-status")
+                    .text_size(px(12.5))
+                    .text_color(move || theme().destructive),
+            )
+        },
+    ))
 }
 
 fn pick_button(state: BackupPageState) -> impl IntoElement {
     let label = state.clone();
-    button()
-        .px_3()
-        .py_1()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
+    crate::ui::button(crate::ui::ButtonVariant::Outline)
+        .size(crate::ui::ButtonSize::Sm)
+        .prefix(|| icon_sized(Icon::File, Tone::Muted, 13.0))
         .on_press(move || request_pick(state.clone()))
-        .child(
-            text(move || {
-                if label.import_name.get().is_some() {
-                    "重新选择…"
-                } else {
-                    "选择备份文件…"
-                }
-            })
-            .test_id("backup-pick")
-            .text_color(move || theme().foreground),
-        )
+        .test_id("backup-pick")
+        .label(move || {
+            if label.import_name.get().is_some() {
+                "重新选择…".to_owned()
+            } else {
+                "选择备份文件…".to_owned()
+            }
+        })
 }
 
 fn import_password_input(state: BackupPageState) -> impl IntoElement {
     let change_state = state.clone();
-    input()
-        .test_id("backup-import-password")
-        .value(state.import_password)
-        .placeholder("备份密码")
-        .auto_correct(false)
-        // 口令输入恒掩码；任何修改立即放弃当前预览（与改文件同一语义）。
-        .masked(true)
-        .on_change(move |text: &str| {
-            change_state.import_password.set(text.to_owned());
-            change_state.drop_preview();
-            change_state.import_status.set(None);
-        })
-        .p_2()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().input)
-        .bg(move || theme().background)
+    crate::ui::field()
+        .label(|| t!("backup.import_password"))
+        .control(
+            crate::ui::input(state.import_password)
+                .test_id("backup-import-password")
+                .accessible_name(|| t!("backup.import_password"))
+                .placeholder(|| t!("product.backup.password_short"))
+                .masked()
+                .disabled(move || {
+                    state.exporting.get()
+                        || state.importing.get()
+                        || state.preparing.get()
+                        || state.pending.get()
+                })
+                .on_change(move |text| {
+                    change_state.import_password.set(text);
+                    change_state.drop_preview();
+                    change_state.import_status.set(None);
+                }),
+        )
 }
 
 fn inspect_button(state: BackupPageState) -> impl IntoElement {
-    button()
-        .px_4()
-        .py_2()
-        .rounded(move || theme().radius)
-        .bg(move || theme().primary)
+    let loading = state.clone();
+    crate::ui::button(crate::ui::ButtonVariant::Primary)
+        .size(crate::ui::ButtonSize::Md)
+        .loading(move || loading.importing.get())
         .on_press(move || request_inspect(state.clone()))
-        .child(
-            text("解密并预览")
-                .test_id("backup-inspect")
-                .text_color(move || theme().primary_foreground),
-        )
+        .test_id("backup-inspect")
+        .label(|| "解密并预览".to_owned())
 }
 
 /// 预览摘要 + 恢复入口；重新选择/改密码时已整体丢弃（父卡片条件渲染）。
 fn preview_summary(state: BackupPageState) -> impl IntoElement {
     let confirm = state.clone();
     let reselect = state.clone();
-    let summary_state = state.clone();
+    let summary_state = state;
     view()
         .test_id("backup-preview")
         .flex_col()
-        .gap_2()
-        .p_3()
+        .gap_3()
+        .p_4()
         .rounded(move || theme().radius)
+        .bg(move || theme().muted.opacity(0.45))
         .border(px(1.0))
         .border_color(move || theme().border)
-        .child(text(move || {
-            summary_state
-                .preview
-                .get()
-                .map(|preview| {
-                    let summary = &preview.summary;
-                    format!(
-                        "备份版本 v{} · {} · 平台 {} · 订阅 {} · 覆写 {} · 文件 {} · {} 字节",
-                        summary.version,
-                        summary.created_at,
-                        summary.platform,
-                        summary.subscriptions,
-                        summary.profiles,
-                        summary.files,
-                        summary.bytes
-                    )
-                })
-                .unwrap_or_default()
-        }))
         .child(
-            text("预览绑定一次性授权，300 秒后过期；改密码或换文件需重新解密。确认后不可撤销，准备完成需重启应用。")
+            text(move || {
+                summary_state
+                    .preview
+                    .get()
+                    .map(|preview| {
+                        let summary = &preview.summary;
+                        format!(
+                            "备份版本 v{} · {} · 平台 {} · 订阅 {} · 覆写 {} · 文件 {} · {} 字节",
+                            summary.version,
+                            summary.created_at,
+                            summary.platform,
+                            summary.subscriptions,
+                            summary.profiles,
+                            summary.files,
+                            summary.bytes
+                        )
+                    })
+                    .unwrap_or_default()
+            })
+            .text_size(px(13.0))
+            .font_weight(FontWeight::MEDIUM)
+            .selectable(true),
+        )
+        .child(
+            text(|| t!("product.backup.preview_hint"))
                 .text_size(px(12.0))
                 .text_color(move || theme().muted_foreground),
         )
         .child(
             view()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
                 .child(
-                    button()
-                        .px_4()
-                        .py_2()
-                        .rounded(move || theme().radius)
-                        .bg(move || theme().destructive)
+                    crate::ui::button(crate::ui::ButtonVariant::Destructive)
+                        .size(crate::ui::ButtonSize::Md)
                         .on_press(move || confirm.confirm_restore.set(true))
-                        .child(
-                            text("恢复此备份…")
-                                .test_id("backup-confirm-open")
-                                .text_color(move || theme().primary_foreground),
-                        ),
+                        .test_id("backup-confirm-open")
+                        .label(|| "恢复此备份…".to_owned()),
                 )
                 .child(
-                    button()
-                        .px_3()
-                        .py_1()
-                        .rounded(move || theme().radius)
-                        .border(px(1.0))
-                        .border_color(move || theme().border)
+                    crate::ui::button(crate::ui::ButtonVariant::Outline)
+                        .size(crate::ui::ButtonSize::Sm)
                         .on_press(move || {
                             reselect.drop_preview();
                             reselect.import_status.set(None);
                         })
-                        .child(text("放弃预览")),
+                        .label(|| "放弃预览".to_owned()),
                 ),
         )
 }
@@ -235,7 +250,6 @@ fn request_pick(state: BackupPageState) {
                 match result {
                     Ok(None) => {}
                     Ok(Some((path, bytes))) => {
-                        // 换文件：旧预览立即失效（共享缓存 discard + 清摘要）。
                         state.drop_preview();
                         state.import_name.set(Some(
                             path.file_name()
@@ -311,8 +325,7 @@ fn request_inspect(state: BackupPageState) {
     });
 }
 
-/// 预览过期调度：到期时若该预览仍绑定，丢弃授权与摘要（共享缓存本身
-/// 对过期 take 同样拒绝，这里是 UI 层的及时清理）。离页随 owner 取消。
+/// 预览过期调度：到期时若该预览仍绑定，丢弃授权与摘要。
 fn schedule_preview_expiry(state: BackupPageState, preview_id: String) {
     let task_state = state.clone();
     state.owner.run(move || {
@@ -337,72 +350,33 @@ fn schedule_preview_expiry(state: BackupPageState, preview_id: String) {
 
 /// 恢复确认弹窗：明确停止核心/系统代理与重启要求，确认后才准备。
 pub(super) fn restore_dialog(state: BackupPageState) -> AnyElement {
+    let open = state.confirm_restore;
     let cancel_state = state.clone();
     let confirm_state = state;
-    dialog()
+    crate::ui::confirm_dialog(move || open.get())
+        .destructive()
+        .confirm_test_id("backup-confirm-restore")
+        .title(|| t!("product.backup.confirm_title"))
+        .description(|| {
+            format!(
+                "{}\n{}",
+                t!("product.backup.confirm_hint"),
+                t!("product.backup.pending_hint")
+            )
+        })
+        .cancel_label(|| t!("product.action.cancel"))
+        .confirm_label(|| "确认恢复".to_owned())
         .on_cancel(move || cancel_state.confirm_restore.set(false))
-        .child(
-            view()
-                .flex_col()
-                .gap_3()
-                .w(px(460.0))
-                .p_4()
-                .rounded(move || theme().radius)
-                .bg(move || theme().card)
-                .border(px(1.0))
-                .border_color(move || theme().border)
-                .child(text("恢复此备份？"))
-                .child(
-                    text("将停止核心（系统代理按原值精确恢复），把当前配置加密保存为回滚备份，然后准备恢复所选备份。准备完成后需重启应用；重启前订阅、覆写、请求设置与核心库存的修改均被拒绝。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    text("准备成功后在备份页重启应用即完成恢复；原配置始终可从本数据根 backup-history/ 的回滚备份还原。")
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .border(px(1.0))
-                                .border_color(move || theme().border)
-                                .on_press(move || cancel_state.confirm_restore.set(false))
-                                .child(text("取消")),
-                        )
-                        .child(
-                            button()
-                                .px_3()
-                                .py_1()
-                                .rounded(move || theme().radius)
-                                .bg(move || theme().destructive)
-                                .on_press(move || request_prepare(confirm_state.clone()))
-                                .child(
-                                    text("确认恢复")
-                                        .test_id("backup-confirm-restore")
-                                        .text_color(move || theme().primary_foreground),
-                                ),
-                        ),
-                ),
-        )
+        .on_confirm(move || request_prepare(confirm_state.clone()))
         .into_element()
 }
 
-/// 确认后的恢复准备：消费一次性预览授权 → 活动屏障写保护（等在途任务
-/// 清零）→ 停止核心 → 业务锁内生成加密回滚并落 pending。成功标记待
-/// 重启；失败真实上屏且不遗留 pending（授权已消费，需重新解密）。
+/// 确认后的恢复准备：消费一次性预览授权 → 活动屏障写保护 → 停止核心 →
+/// 业务锁内生成加密回滚并落 pending。
 fn request_prepare(state: BackupPageState) {
     if state.preparing.get() {
         return;
     }
-    // 导出写出进行中不启动恢复：避免 pending 翻转杀死在途写出任务。
     if state.exporting.get() {
         state
             .prepare_status
@@ -433,8 +407,6 @@ fn request_prepare(state: BackupPageState) {
     state.prepare_status.set(None);
     state.import_status.set(None);
     let preview_id = preview.preview_id;
-    // 从确认弹窗发起：弹窗 owner 在确认按下后销毁，spawn 必须挂页面
-    // owner（离开页面才取消在途准备，绝不半途留下半准备状态）。
     state.owner.run(move || {
         state.prepare_task.with(|slot| {
             slot.replace(spawn(async move {

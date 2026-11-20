@@ -24,8 +24,8 @@ pub enum BadgeVariant {
 fn badge_bg(variant: BadgeVariant) -> fn(&nsh_base::Theme) -> AdaptiveColor {
     match variant {
         BadgeVariant::Default => |t| t.secondary,
-        BadgeVariant::Success => |t| t.color("success").unwrap_or(t.secondary),
-        BadgeVariant::Warning => |t| t.color("warning").unwrap_or(t.secondary),
+        BadgeVariant::Success => |t| t.color("success-surface").unwrap_or(t.secondary),
+        BadgeVariant::Warning => |t| t.color("warning-surface").unwrap_or(t.secondary),
         BadgeVariant::Destructive => |t| t.destructive,
         BadgeVariant::Outline => |_| transparent_black().into(),
     }
@@ -34,14 +34,8 @@ fn badge_bg(variant: BadgeVariant) -> fn(&nsh_base::Theme) -> AdaptiveColor {
 fn badge_fg(variant: BadgeVariant) -> fn(&nsh_base::Theme) -> AdaptiveColor {
     match variant {
         BadgeVariant::Default => |t| t.secondary_foreground,
-        BadgeVariant::Success => |t| {
-            t.color("success-foreground")
-                .unwrap_or(t.secondary_foreground)
-        },
-        BadgeVariant::Warning => |t| {
-            t.color("warning-foreground")
-                .unwrap_or(t.secondary_foreground)
-        },
+        BadgeVariant::Success => |t| t.color("success").unwrap_or(t.secondary_foreground),
+        BadgeVariant::Warning => |t| t.color("warning").unwrap_or(t.secondary_foreground),
         BadgeVariant::Destructive => |t| {
             t.color("destructive-foreground")
                 .unwrap_or(t.secondary_foreground)
@@ -50,19 +44,40 @@ fn badge_fg(variant: BadgeVariant) -> fn(&nsh_base::Theme) -> AdaptiveColor {
     }
 }
 
-/// 一个徽章（小标签）。
+/// 一个徽章（小标签；自适应最小高度以兼容系统文字放大）。
 pub fn badge(variant: BadgeVariant, label: impl Fn() -> String + 'static) -> AnyElement {
+    badge_with_icon(variant, None, label)
+}
+
+/// 带可选语义图标的徽章（不只靠颜色传递状态）。
+pub fn badge_with_icon(
+    variant: BadgeVariant,
+    leading: Option<super::icon::Icon>,
+    label: impl Fn() -> String + 'static,
+) -> AnyElement {
     let (bg, fg) = (badge_bg(variant), badge_fg(variant));
     let bordered = matches!(variant, BadgeVariant::Outline);
+    let tone = match variant {
+        BadgeVariant::Success => super::icon::Tone::Success,
+        BadgeVariant::Warning => super::icon::Tone::Warning,
+        BadgeVariant::Destructive => super::icon::Tone::OnPrimary,
+        BadgeVariant::Default | BadgeVariant::Outline => super::icon::Tone::Muted,
+    };
     let mut el = view()
-        .h(px(20.0))
+        .flex_row()
+        .min_h(px(22.0))
+        .py(px(2.0))
         .px(px(8.0))
+        .gap_1()
         .items_center()
         .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
         .bg(move || bg(&theme()))
         .text_color(move || fg(&theme()));
     if bordered {
         el = el.border(px(1.0)).border_color(move || theme().border);
+    }
+    if let Some(kind) = leading {
+        el = el.child(super::icon::icon_sized(kind, tone, 12.0));
     }
     el.child(
         text(label)
@@ -73,7 +88,7 @@ pub fn badge(variant: BadgeVariant, label: impl Fn() -> String + 'static) -> Any
 }
 
 /// 开口圆环绘制（spinner 的静态形态）。
-fn spinner_ring() -> AnyElement {
+fn spinner_ring(variant: Option<super::ButtonVariant>) -> AnyElement {
     view()
         .size(px(16.0))
         .child(canvas(move || {
@@ -82,7 +97,13 @@ fn spinner_ring() -> AnyElement {
                 .arc(px(8.0), px(8.0), px(6.0), radians(-120.0), radians(180.0))
                 .line_width(px(2.0))
                 .line_cap(nsh_core::canvas::LineCap::Round)
-                .stroke_color(color(theme().primary))
+                .stroke_color(color(match variant {
+                    Some(super::ButtonVariant::Primary) => theme().primary_foreground,
+                    Some(super::ButtonVariant::Destructive) => theme()
+                        .color("destructive-foreground")
+                        .unwrap_or(theme().foreground),
+                    _ => theme().primary,
+                }))
                 .stroke()
         }))
         .into_element()
@@ -91,10 +112,18 @@ fn spinner_ring() -> AnyElement {
 /// 加载 spinner：主题主色的开口圆环，循环旋转；减少动效（系统或本应用
 /// 偏好）时渲染为静止弧，立即可读。
 pub fn spinner() -> AnyElement {
+    spinner_variant(None)
+}
+
+pub(super) fn button_spinner(variant: super::ButtonVariant) -> AnyElement {
+    spinner_variant(Some(variant))
+}
+
+fn spinner_variant(variant: Option<super::ButtonVariant>) -> AnyElement {
     let reduced = super::prefs::prefs().reduced;
     view()
         .child(when(
-            move || !reduced.get(),
+            move || !reduced.get() && super::motion::window_active(),
             move || {
                 let spin = motion();
                 let spec = MotionSpec::new(
@@ -107,21 +136,31 @@ pub fn spinner() -> AnyElement {
                     [Keyframe::new(0.0), Keyframe::new(360.0)],
                 );
                 let spin = spin.entering(spec);
-                view().child(view().bind_motion(&spin).child(spinner_ring()))
+                view().child(view().bind_motion(&spin).child(spinner_ring(variant)))
             },
         ))
-        .child(when(move || reduced.get(), spinner_ring))
+        .child(when(
+            move || reduced.get() || !super::motion::window_active(),
+            move || spinner_ring(variant),
+        ))
         .into_element()
 }
 
 /// 骨架屏占位：静态 `muted` 表面，加载完成后由真实内容替换。
 pub fn skeleton() -> AnyElement {
-    view()
-        .h(px(16.0))
-        .w_full()
-        .rounded(move || theme().radius)
-        .bg(move || theme().muted)
-        .into_element()
+    skeleton_line(None)
+}
+
+/// 指定宽度的骨架屏条（`None` 占满父容器）。
+pub fn skeleton_line(width: Option<f32>) -> AnyElement {
+    let base = view()
+        .h(px(14.0))
+        .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
+        .bg(move || theme().muted);
+    match width {
+        Some(w) => base.w(px(w)).into_element(),
+        None => base.w_full().into_element(),
+    }
 }
 
 /// 空状态：标题 + 说明，居中、弱化色。
@@ -129,37 +168,64 @@ pub fn empty(
     title: impl Fn() -> String + 'static,
     description: impl Fn() -> String + 'static,
 ) -> AnyElement {
-    view()
+    empty_with_icon(None, title, description)
+}
+
+/// 带图标的空状态：温和提示对象与下一步。
+pub fn empty_with_icon(
+    leading: Option<super::icon::Icon>,
+    title: impl Fn() -> String + 'static,
+    description: impl Fn() -> String + 'static,
+) -> AnyElement {
+    let mut el = view()
         .flex_col()
         .items_center()
         .justify_center()
         .gap_2()
-        .p_6()
-        .child(
-            text(title)
-                .text_size(px(15.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(move || theme().foreground),
-        )
-        .child(
-            text(description)
-                .text_size(px(13.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .into_element()
+        .p_6();
+    if let Some(kind) = leading {
+        el = el.child(
+            view()
+                .size(px(40.0))
+                .rounded(move || theme().radius)
+                .bg(move || theme().muted)
+                .items_center()
+                .justify_center()
+                .child(super::icon::icon_sized(
+                    kind,
+                    super::icon::Tone::Muted,
+                    20.0,
+                )),
+        );
+    }
+    el.child(
+        text(title)
+            .text_size(px(15.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(move || theme().foreground),
+    )
+    .child(
+        text(description)
+            .text_size(px(13.0))
+            .text_color(move || theme().muted_foreground),
+    )
+    .into_element()
 }
 
-/// 窗口状态栏：底部通栏，左/右内容槽，辅助字号。
+/// 窗口状态栏：底部通栏，左/右内容槽，辅助字号，适配磨砂透明度。
 pub fn status_bar(left: impl IntoElement, right: impl IntoElement) -> AnyElement {
     view()
         .flex_row()
-        .h(px(28.0))
-        .px(px(12.0))
+        .min_h(px(30.0))
+        .gap_4()
+        .flex_none()
+        .text_size(px(12.0))
+        .px(px(14.0))
         .items_center()
         .justify_between()
         .border_t(px(1.0))
         .border_color(move || theme().border)
-        .bg(move || theme().card)
+        .bg(super::prefs::chrome_bg)
         .child(left)
         .child(right)
         .into_element()
@@ -254,12 +320,13 @@ pub fn toast_host() -> AnyElement {
                                 });
                             })
                             .rounded(move || theme().radius)
-                            .px(px(12.0))
-                            .py(px(10.0))
-                            .bg(move || theme().card)
-                            .text_color(move || theme().card_foreground)
+                            .px(px(16.0))
+                            .py(px(12.0))
+                            .bg(move || theme().popover)
+                            .text_color(move || theme().popover_foreground)
                             .border(px(1.0))
                             .border_color(move || theme().border)
+                            .shadow_lg()
                             .child(text(move || item.get().1).text_size(px(13.0)))
                     },
                 ))

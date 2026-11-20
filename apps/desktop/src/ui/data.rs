@@ -82,3 +82,23 @@ pub fn log_viewer(value: Signal<String>) -> AnyElement {
         )
         .into_element()
 }
+
+/// Read-only source/configuration document with built-in language highlighting.
+pub fn code_viewer(value: Signal<String>, language: Signal<String>) -> AnyElement {
+    editor()
+        .test_id("config-preview")
+        .accessibility_label("配置预览正文")
+        .value(move || Some(value.get().into()))
+        .language(move || SharedString::from(language.get()))
+        .read_only(true)
+        .line_numbers(true)
+        .highlighting(true)
+        .soft_wrap(true)
+        .font_size(px(12.0))
+        .flex_1()
+        .min_h(px(0.0))
+        .border(px(1.0))
+        .border_color(move || theme().border)
+        .rounded(move || theme().radius)
+        .into_element()
+}

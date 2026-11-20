@@ -33,3 +33,17 @@ pub const PRESS_SCALE_ICON: f32 = 0.95;
 pub fn motion_duration(token: f32, reduced: bool) -> f32 {
     if reduced { 0.0 } else { token }
 }
+
+/// 连续等待反馈只在前台窗口运行；静态状态文字始终保留。
+pub(super) fn window_active() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        nsh_core::element::desktop::main_window()
+            .state()
+            .is_none_or(|s| s.focused && !s.minimized)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
+    }
+}

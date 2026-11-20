@@ -16,6 +16,8 @@ use super::motion::{self, PRESS_SCALE, PRESS_SCALE_ICON};
 pub enum ButtonVariant {
     /// 主提交。
     Primary,
+    /// Transparent content surface; selection is drawn by its child.
+    Preview,
     /// 次要动作。
     Secondary,
     /// 描边动作。
@@ -39,7 +41,7 @@ impl ButtonSize {
     fn height(self) -> Option<f32> {
         match self {
             ButtonSize::Sm => Some(28.0),
-            ButtonSize::Md => Some(32.0),
+            ButtonSize::Md => Some(34.0),
             ButtonSize::Lg => Some(40.0),
             ButtonSize::Content => None,
         }
@@ -47,16 +49,17 @@ impl ButtonSize {
 
     fn text(self) -> f32 {
         match self {
-            ButtonSize::Sm => 12.0,
-            ButtonSize::Md | ButtonSize::Lg | ButtonSize::Content => 14.0,
+            ButtonSize::Sm => 12.5,
+            ButtonSize::Md => 13.5,
+            ButtonSize::Lg | ButtonSize::Content => 14.0,
         }
     }
 
     fn pad_x(self) -> f32 {
         match self {
-            ButtonSize::Sm => 12.0,
-            ButtonSize::Md => 16.0,
-            ButtonSize::Lg => 20.0,
+            ButtonSize::Sm => 10.0,
+            ButtonSize::Md => 14.0,
+            ButtonSize::Lg => 18.0,
             ButtonSize::Content => 4.0,
         }
     }
@@ -84,6 +87,15 @@ fn state_color(theme: &nsh_base::Theme, name: &str, fallback: AdaptiveColor) -> 
 
 fn surface(variant: ButtonVariant) -> Surface {
     match variant {
+        ButtonVariant::Preview => Surface {
+            bg: |_| transparent_black().into(),
+            fg: |t| t.foreground,
+            hover_bg: |_| transparent_black().into(),
+            hover_fg: |t| t.foreground,
+            active_bg: |_| transparent_black().into(),
+            active_fg: |t| t.foreground,
+            bordered: false,
+        },
         ButtonVariant::Primary => Surface {
             bg: |t| t.primary,
             fg: |t| t.primary_foreground,
@@ -153,7 +165,7 @@ pub struct Button {
     loading: Option<Box<dyn Fn() -> bool>>,
     prefix: Option<Rc<dyn Fn() -> AnyElement>>,
     on_press: Option<Box<dyn Fn()>>,
-    test_id: Option<&'static str>,
+    test_id: Option<String>,
     accessibility_label: Option<SharedString>,
     accessible_name: Option<Box<dyn Fn() -> SharedString>>,
     selected: Option<Box<dyn Fn() -> bool>>,
@@ -211,8 +223,8 @@ impl Button {
         self
     }
 
-    pub fn test_id(mut self, id: &'static str) -> Self {
-        self.test_id = Some(id);
+    pub fn test_id(mut self, id: impl Into<String>) -> Self {
+        self.test_id = Some(id.into());
         self
     }
 
@@ -243,7 +255,8 @@ impl Button {
 
 impl IntoElement for Button {
     fn into_element(self) -> AnyElement {
-        let surface = surface(self.variant);
+        let variant = self.variant;
+        let surface = surface(variant);
         let size = self.size;
         let full_width = self.full_width;
         let disabled = Rc::new(self.disabled);
@@ -269,12 +282,13 @@ impl IntoElement for Button {
         if full_width {
             el = el.w_full();
         }
-        if let Some(selected) = self.selected {
-            let selected = Rc::new(selected);
-            el = el.selected(move || selected());
-        }
+        let selected = Rc::new(self.selected);
+        let selection_prop = selected.clone();
+        let selection_bg = selected.clone();
+        let selection_fg = selected;
+        el = el.selected(move || selection_prop.as_ref().as_ref().is_some_and(|f| f()));
         if let Some(height) = size.height() {
-            el = el.h(px(height));
+            el = el.min_h(px(height));
         }
         let mut el = el
             .px(px(size.pad_x()))
@@ -282,11 +296,27 @@ impl IntoElement for Button {
             .items_center()
             .gap_2()
             .rounded(move || theme().radius)
-            .cursor_pointer()
+            .cursor(Cursor::Default)
             .transition_colors()
             .duration(move || motion::motion_duration(motion::FAST_MS, reduced.get()))
-            .bg(move || (surface.bg)(&theme()))
-            .text_color(move || (surface.fg)(&theme()))
+            .bg(move || {
+                if variant != ButtonVariant::Preview
+                    && selection_bg.as_ref().as_ref().is_some_and(|f| f())
+                {
+                    theme().accent
+                } else {
+                    (surface.bg)(&theme())
+                }
+            })
+            .text_color(move || {
+                if variant != ButtonVariant::Preview
+                    && selection_fg.as_ref().as_ref().is_some_and(|f| f())
+                {
+                    theme().accent_foreground
+                } else {
+                    (surface.fg)(&theme())
+                }
+            })
             .hover(|s| {
                 s.bg(move || (surface.hover_bg)(&theme()))
                     .text_color(move || (surface.hover_fg)(&theme()))
@@ -307,7 +337,7 @@ impl IntoElement for Button {
             .transition_transform()
             .duration(move || motion::motion_duration(motion::FAST_MS, reduced.get()));
         if surface.bordered {
-            el = el.border(px(1.0)).border_color(move || theme().border);
+            el = el.border(px(1.0)).border_color(move || theme().input);
         }
         if let Some(on_press) = self.on_press {
             el = el.on_press(move || {
@@ -328,10 +358,10 @@ impl IntoElement for Button {
         let has_leading = prefix.is_some() || loading.is_some();
         let leading = when(
             move || loading_for_content.as_ref().as_ref().is_some_and(|f| f()),
-            || {
+            move || {
                 view()
                     .test_id("button-loading-indicator")
-                    .child(super::feedback::spinner())
+                    .child(super::feedback::button_spinner(variant))
                     .into_element()
             },
         );
@@ -341,11 +371,22 @@ impl IntoElement for Button {
         };
         let mut children: Vec<AnyElement> = Vec::new();
         if has_leading {
-            children.push(leading);
+            children.push(if loading.is_some() {
+                view()
+                    .size(px(18.0))
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .child(leading)
+                    .into_element()
+            } else {
+                leading
+            });
         }
         if let Some(label) = self.label {
             children.push(
                 text(label)
+                    .when(full_width, |label| label.flex_1().min_w(px(0.0)).truncate())
                     .text_size(px(size.text()))
                     .font_weight(FontWeight::MEDIUM)
                     .into_element(),
@@ -361,137 +402,16 @@ impl IntoElement for Button {
             .children(children)
             .into_element();
         let content = match self.test_id {
-            Some(id) => view().test_id(id).child(content).into_element(),
+            Some(id) => view()
+                .test_id(&id)
+                .when(full_width, |v| v.w_full().min_w(px(0.0)))
+                .child(content)
+                .into_element(),
             None => content,
         };
         el.child(content).into_element()
     }
 }
 
-/// 图标按钮：正方形幽灵按钮，可访问名称必填（纯图标对屏幕阅读器
-/// 不可见），press 缩放 0.95。
-pub struct IconButton {
-    size: f32,
-    content: Option<AnyElement>,
-    disabled: Option<Box<dyn Fn() -> bool>>,
-    on_press: Option<Box<dyn Fn()>>,
-    test_id: Option<&'static str>,
-    accessibility_label: Option<Box<dyn Fn() -> SharedString>>,
-}
-
-pub fn icon_button() -> IconButton {
-    IconButton {
-        size: 32.0,
-        content: None,
-        disabled: None,
-        on_press: None,
-        test_id: None,
-        accessibility_label: None,
-    }
-}
-
-impl IconButton {
-    /// 工具尺寸 28（默认 32）。
-    pub fn tool_size(mut self) -> Self {
-        self.size = 28.0;
-        self
-    }
-
-    pub fn child(mut self, content: impl IntoElement) -> Self {
-        self.content = Some(content.into_element());
-        self
-    }
-
-    pub fn disabled(mut self, disabled: impl Fn() -> bool + 'static) -> Self {
-        self.disabled = Some(Box::new(disabled));
-        self
-    }
-
-    pub fn on_press(mut self, on_press: impl Fn() + 'static) -> Self {
-        self.on_press = Some(Box::new(on_press));
-        self
-    }
-
-    pub fn test_id(mut self, id: &'static str) -> Self {
-        self.test_id = Some(id);
-        self
-    }
-
-    pub fn accessibility_label(mut self, label: impl Fn() -> SharedString + 'static) -> Self {
-        self.accessibility_label = Some(Box::new(label));
-        self
-    }
-}
-
-impl IntoElement for IconButton {
-    fn into_element(self) -> AnyElement {
-        let label = self
-            .accessibility_label
-            .unwrap_or_else(|| panic!("icon_button 必须提供 accessibility_label"));
-        let label = move || Some(label());
-        let size = self.size;
-        let pressed = signal(false);
-        let press_down = pressed;
-        let press_up = pressed;
-        let scaled = pressed;
-        let reduced = super::prefs::prefs().reduced;
-        let disabled = self.disabled;
-        let blocked: Rc<dyn Fn() -> bool> = Rc::new(move || disabled.as_ref().is_some_and(|f| f()));
-        let blocked_for_disabled = blocked.clone();
-        let blocked_for_press = blocked.clone();
-
-        let mut el = base_button()
-            .disabled(move || blocked_for_disabled())
-            .on_press_down(move || press_down.set(true))
-            .on_press_up(move || press_up.set(false))
-            .size(px(size))
-            .items_center()
-            .justify_center()
-            .rounded(move || theme().radius)
-            .cursor_pointer()
-            .transition_colors()
-            .duration(move || motion::motion_duration(motion::FAST_MS, reduced.get()))
-            .text_color(move || theme().foreground)
-            .hover(|s| {
-                s.bg(move || theme().accent)
-                    .text_color(move || theme().accent_foreground)
-            })
-            .active(|s| {
-                s.bg(move || {
-                    theme()
-                        .color("accent-active")
-                        .unwrap_or_else(|| theme().accent)
-                })
-                .text_color(move || {
-                    theme()
-                        .color("accent-active-foreground")
-                        .unwrap_or_else(|| theme().accent_foreground)
-                })
-            })
-            .disabled_style(|s| s.opacity(0.5))
-            .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
-            .scale(move || {
-                if scaled.get() && !reduced.get() {
-                    PRESS_SCALE_ICON
-                } else {
-                    1.0
-                }
-            })
-            .transition_transform()
-            .duration(move || motion::motion_duration(motion::FAST_MS, reduced.get()))
-            .accessibility_label(label);
-        if let Some(on_press) = self.on_press {
-            el = el.on_press(move || {
-                if !blocked_for_press() {
-                    on_press();
-                }
-            });
-        }
-        let content = self.content.unwrap_or_else(|| view().into_element());
-        let content = match self.test_id {
-            Some(id) => view().test_id(id).child(content).into_element(),
-            None => content,
-        };
-        el.child(content).into_element()
-    }
-}
+mod icon;
+pub use icon::{IconButton, icon_button};
