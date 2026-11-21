@@ -1,11 +1,10 @@
 use axum::{extract::State, http::Uri, routing::get};
-use lanpath_client::local_override::{
-    CustomRuleSet, CustomRuleSetSource, LocalOverrideService, LocalRule, RuleAction, RuleMatchType,
-    RuleSetFormat, RuleSetManager, prepare_missing_rule_sets_warn_only,
-};
 use lanpath_client::profile::{
     ProfileStoreV2, apply_yaml_override, resolve_remote_overrides,
     resolve_remote_overrides_with_context,
+};
+use lanpath_client::rulesets::{
+    RuleSetEntry, RuleSetFormat, RuleSetSource, RuleSetStore, prepare_referenced_missing,
 };
 use lanpath_client::{
     ClientConfig, RemoteFetchContext, RemoteResource, RemoteResourceService, RequestProxyMode,
@@ -80,32 +79,15 @@ fn config(root: &Path) -> ClientConfig {
     config.save().unwrap();
     config
 }
-fn rule(tag: &str) -> LocalRule {
-    LocalRule {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: tag.into(),
-        enabled: true,
-        match_type: RuleMatchType::RuleSet,
-        target: tag.into(),
-        action: RuleAction::Direct,
-        advanced: Default::default(),
-        note: String::new(),
-        created_at: 0,
-        sort_order: 0,
-        builtin: false,
-    }
-}
-fn resource(id: &str, source: CustomRuleSetSource) -> CustomRuleSet {
-    CustomRuleSet {
+fn resource(id: &str, source: RuleSetSource) -> RuleSetEntry {
+    RuleSetEntry {
         id: id.into(),
         name: id.into(),
         tag: id.into(),
         source,
         category: String::new(),
         remote_state: Default::default(),
-        last_updated: 0,
-        remote_updated_at: 0,
-        builtin: false,
+        created_at: 0,
     }
 }
 
@@ -184,21 +166,21 @@ async fn profile_and_rules_share_admitted_custom_policy_after_saved_policy_chang
         ClientConfig::load(root.path()).unwrap().request_proxy_mode,
         RequestProxyMode::None
     );
-    let service = LocalOverrideService::new(root.path().into());
-    let mut local = service.load().unwrap();
-    local.singbox.rules = vec![rule("owned")];
-    local.singbox.rule_sets.clear();
-    local.custom_rule_sets = vec![resource(
+    let store = RuleSetStore::new(root.path().into());
+    let mut entries = vec![resource(
         "owned",
-        CustomRuleSetSource::Remote {
+        RuleSetSource::Remote {
             url: format!("{}/rules.json", origin.base),
             format: RuleSetFormat::Source,
         },
     )];
-    service.save(local).unwrap();
-    prepare_missing_rule_sets_warn_only(root.path(), &json!({}), &context, &|_| {}).await;
-    let path = RuleSetManager::new(root.path().into())
-        .custom_rule_set_file_path("owned", RuleSetFormat::Source);
+    store.save(&entries).unwrap();
+    let cfg = json!({ "route": { "rules": [{ "rule_set": "owned", "outbound": "direct" }] } });
+    let (changed, warnings) =
+        prepare_referenced_missing(root.path(), &cfg, &mut entries, &context).await;
+    assert!(changed);
+    assert!(warnings.is_empty());
+    let path = store.backing_file_path("owned", RuleSetFormat::Source);
     let downloaded: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(
         downloaded["rules"][0]["domain_suffix"],
@@ -216,47 +198,42 @@ async fn cache_only_restores_manual_rules_but_never_downloads_or_ages_remote_wor
     saved.request_proxy_mode = RequestProxyMode::Core;
     saved.mixed_port = foreign.port();
     saved.save().unwrap();
-    let service = LocalOverrideService::new(root.path().into());
-    let mut local = service.load().unwrap();
-    local.singbox.rules = vec![rule("manual"), rule("missing")];
-    local.singbox.rule_sets.clear();
-    local.custom_rule_sets = vec![
+    let store = RuleSetStore::new(root.path().into());
+    let mut entries = vec![
         resource(
             "manual",
-            CustomRuleSetSource::Manual {
+            RuleSetSource::Manual {
                 content: json!({"version":3,"rules":[{"domain":["local.owned"]}]}).to_string(),
             },
         ),
         resource(
             "missing",
-            CustomRuleSetSource::Remote {
+            RuleSetSource::Remote {
                 url: format!("{}/rules.json", foreign.base),
                 format: RuleSetFormat::Source,
             },
         ),
     ];
-    service.save(local).unwrap();
-    let manager = RuleSetManager::new(root.path().into());
-    let manual = manager.custom_rule_set_file_path("manual", RuleSetFormat::Source);
+    store.save(&entries).unwrap();
+    let manual = store.backing_file_path("manual", RuleSetFormat::Source);
     std::fs::remove_file(&manual).unwrap();
     let context = RemoteFetchContext::cache_only();
-    prepare_missing_rule_sets_warn_only(root.path(), &json!({}), &context, &|_| {}).await;
+    let cfg = json!({
+        "route": {
+            "rules": [
+                { "rule_set": "manual", "outbound": "direct" },
+                { "rule_set": "missing", "outbound": "direct" }
+            ]
+        }
+    });
+    let _ = prepare_referenced_missing(root.path(), &cfg, &mut entries, &context).await;
     let restored: Value = serde_json::from_slice(&std::fs::read(manual).unwrap()).unwrap();
     assert_eq!(restored["rules"][0]["domain"], json!(["local.owned"]));
     assert!(
-        !manager
-            .custom_rule_set_file_path("missing", RuleSetFormat::Source)
+        !store
+            .backing_file_path("missing", RuleSetFormat::Source)
             .exists()
     );
-    let declared = json!({"route":{"rule_set":[{"type":"remote","tag":"geoip-private","format":"binary","url":"https://owned.invalid/missing.srs"}]}});
-    let available = lanpath_client::ruleset_manager::prepare_builtin_rule_sets(
-        root.path(),
-        &declared,
-        &context,
-    )
-    .await;
-    assert!(available.is_empty());
-    assert!(!lanpath_client::ruleset_manager::builtin_dir(root.path()).exists());
     let remotes = RemoteResourceService::new(root.path());
     remotes
         .add(RemoteResource {

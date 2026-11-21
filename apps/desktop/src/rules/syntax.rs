@@ -44,7 +44,15 @@ fn parse_line(line: &str) -> Result<LocalRule, String> {
             validate_port(target)?;
             RuleMatchType::Port
         }
-        _ => return Err("匹配类型：domain / suffix / keyword / cidr / process / port".into()),
+        "ruleset" => {
+            validate_ruleset_target(target)?;
+            RuleMatchType::RuleSet
+        }
+        _ => {
+            return Err(
+                "匹配类型：domain / suffix / keyword / cidr / process / port / ruleset".into(),
+            );
+        }
     };
     let target = if matches!(
         match_type,
@@ -112,6 +120,19 @@ pub(super) fn validate_port(target: &str) -> Result<(), String> {
     }
     Ok(())
 }
+pub(super) fn validate_ruleset_target(target: &str) -> Result<(), String> {
+    let tags = lanpath_client::rules::parse_rule_set_tags(target);
+    if tags.is_empty() {
+        return Err("请输入规则集标签或 @分组（多个用逗号分隔）".into());
+    }
+    for token in &tags {
+        let raw = token
+            .strip_prefix(lanpath_client::rulesets::GROUP_REF_PREFIX)
+            .unwrap_or(token);
+        lanpath_client::rulesets::validate_rule_set_tag(raw).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 pub(crate) fn rule_line(rule: &LocalRule) -> String {
     let kind = match rule.match_type {
         RuleMatchType::Domain => "domain",
@@ -137,6 +158,7 @@ pub(crate) fn editable(rule: &LocalRule) -> bool {
                 | RuleMatchType::IpCidr
                 | RuleMatchType::ProcessName
                 | RuleMatchType::Port
+                | RuleMatchType::RuleSet
         )
         && !matches!(rule.action, RuleAction::Outbound { .. })
 }

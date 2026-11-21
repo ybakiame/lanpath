@@ -137,8 +137,8 @@ async fn icons_and_source_survive_cache_clear_and_portable_backup() {
     src.icon = Some(LocalIcon::from_bytes("module.png", b"\x89PNG\r\n\x1a\nfixture").unwrap());
     let document = store.prepare(None, src, &assets("$done({});")).unwrap();
     store.save(document, true).await.unwrap();
-    std::fs::create_dir_all(root.path().join("cache/icons")).unwrap();
-    std::fs::remove_dir_all(root.path().join("cache")).unwrap();
+    std::fs::create_dir_all(root.path().join(".cache/icons")).unwrap();
+    std::fs::remove_dir_all(root.path().join(".cache")).unwrap();
     let saved = store.load().unwrap().pop().unwrap();
     assert!(saved.source().icon.is_some());
     // These exports include resources/imports unchanged, including the original source and icon.

@@ -59,9 +59,9 @@ pub(crate) use types::{
     CoreExit, CoreOperation, CoreStatus, RuntimeStage, SessionSummary, StartOutcome,
 };
 
-/// 新数据根默认 mixed 端口（GPUI 实验值；避免与生产 17890 冲突）。
+/// 新数据根默认 mixed 端口。
 pub(crate) const DEFAULT_MIXED_PORT: u16 = 17899;
-/// 新数据根默认 Clash API 端口（GPUI 实验值；避免与生产 9090 冲突）。
+/// 新数据根默认 Clash API 端口。
 pub(crate) const DEFAULT_CLASH_API_PORT: u16 = 19090;
 
 /// 启动/停止在途标记（`status` 在 lifecycle 锁被占时据此如实上报，不伪造）。

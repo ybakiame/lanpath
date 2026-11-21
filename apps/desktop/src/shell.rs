@@ -112,7 +112,9 @@ fn page_icon(page: Page) -> Icon {
         Page::Overview => Icon::Overview,
         Page::Subscription => Icon::Subscription,
         Page::Core => Icon::Core,
+        Page::Overwrite => Icon::Layers,
         Page::Rules => Icon::Rules,
+        Page::RuleSets => Icon::Shield,
         Page::Profiles => Icon::Code,
         Page::RequestSettings => Icon::Sliders,
         Page::Config => Icon::File,
@@ -226,7 +228,9 @@ fn expanded_sidebar(active: Signal<Page>, requested: Signal<Page>) -> AnyElement
                     .child(nav_item(active, requested, positions, Page::Overview))
                     .child(group("nav.group.core_config", false))
                     .child(nav_item(active, requested, positions, Page::Core))
+                    .child(nav_item(active, requested, positions, Page::Overwrite))
                     .child(nav_item(active, requested, positions, Page::Rules))
+                    .child(nav_item(active, requested, positions, Page::RuleSets))
                     .child(nav_item(
                         active,
                         requested,

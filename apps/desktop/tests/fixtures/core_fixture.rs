@@ -97,8 +97,12 @@ fn main() {
     if behavior.contains_key("fixture_write_bogus_pid")
         && let Some(dir) = &config_dir
     {
-        for name in ["sing-box.pid", "mihomo.pid"] {
-            let _ = std::fs::write(dir.join(name), b"bogus pid record");
+        for rel in ["runtime/sing-box/sing-box.pid", "runtime/mihomo/mihomo.pid"] {
+            let path = dir.join(rel);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, b"bogus pid record");
         }
     }
     // 延迟删除 pid 身份记录：引擎在 spawn 约 500ms 后写记录，延迟删除
@@ -110,8 +114,8 @@ fn main() {
     {
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(ms));
-            for name in ["sing-box.pid", "mihomo.pid"] {
-                let _ = std::fs::remove_file(dir.join(name));
+            for rel in ["runtime/sing-box/sing-box.pid", "runtime/mihomo/mihomo.pid"] {
+                let _ = std::fs::remove_file(dir.join(rel));
             }
         });
     }

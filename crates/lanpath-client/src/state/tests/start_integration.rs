@@ -315,8 +315,8 @@ async fn start_pushes_rule_mode_via_clash_api_when_enabled() {
     let status = state.status().await;
     assert_eq!(status.rule_mode, "global");
     assert_eq!(
-        status.rule_count, 8,
-        "2 sniff/dns-hijack + 1 realip resolve + 1 IPv6 reject + 2 baseline clash_mode mode rules + 1 MITM whitelist + 1 built-in private-direct rule (merged)"
+        status.rule_count, 7,
+        "2 sniff/dns-hijack + 1 realip resolve + 1 IPv6 reject + 2 baseline clash_mode mode rules + 1 MITM whitelist"
     );
     assert_eq!(
         status.clash_api_url,

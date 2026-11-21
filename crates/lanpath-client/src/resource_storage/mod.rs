@@ -1,5 +1,4 @@
-//! GPUI opts into unified resource storage by creating `app.toml`.
-//! Other shells retain their legacy manifests and paths.
+//! 统一资源与缓存目录映射（以 `app.toml` 为数据根入口，可重建缓存位于 `.cache/`）。
 use lanpath_common::LanpathResult;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -32,16 +31,16 @@ pub fn unified(root: &Path) -> bool {
     crate::settings::app_settings_path(root).is_file()
 }
 
-/// Only reconstructible data belongs below `cache/`.
+/// Only reconstructible data belongs below `.cache/`.
 pub fn cache_path(root: &Path, legacy: &str) -> PathBuf {
     let relative = if unified(root) {
         match legacy {
-            "remote_cache" => "cache/remotes",
-            "remote_refresh.json" => "cache/remotes/refresh.json",
-            "scripts" => "cache/scripts",
-            "icons" => "cache/icons",
-            "subscription_cache" => "cache/subscriptions",
-            "profile_cache" => "cache/profiles",
+            "remote_cache" => ".cache/remotes",
+            "remote_refresh.json" => ".cache/remotes/refresh.json",
+            "scripts" => ".cache/scripts",
+            "icons" => ".cache/icons",
+            "subscription_cache" => ".cache/subscriptions",
+            "profile_cache" => ".cache/profiles",
             _ => legacy,
         }
     } else {
@@ -67,7 +66,7 @@ pub fn load(root: &Path) -> LanpathResult<ResourceSettings> {
         || (section.is_none() && root.join("remotes.json").exists())
     {
         return Err(lanpath_common::LanpathError::Config(
-            "旧资源清单尚未迁移，请重启 GPUI 完成自动迁移后重试".into(),
+            "检测到不受支持的旧资源清单布局，请使用新的数据目录".into(),
         ));
     }
     section

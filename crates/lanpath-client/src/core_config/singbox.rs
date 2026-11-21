@@ -194,7 +194,7 @@ pub fn apply_singbox_panel_features(composed: &mut Value, features: &PanelFeatur
     // RealIP mode (FakeIP off): still enable `experimental.cache_file` when the config
     // references any **remote** rule set — since sing-box 1.14 the cache file is the offline
     // fallback for the synchronous startup rule-set download (restore-from-cache instead of
-    // failing the whole core when the URL is unreachable, see `ensure_cn_rule_sets` docs).
+    // failing the whole core when the URL is unreachable).
     // Gated on remote-rule-set presence so rule-set-less configs keep no `experimental` bloat;
     // FakeIP mode already pins it above (with `store_fakeip`). Not exempt on DNS takeover:
     // cache_file is experimental, not part of the user-owned DNS slice. Existing keys

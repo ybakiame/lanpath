@@ -95,7 +95,7 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
     let seen = texts(&app);
     for expected in [
         "准备核心版本，校验后启动本地代理。运行会话与系统代理分别确认。",
-        "启动前先校验二进制与配置。核心仅监听本地地址，系统代理由独立守护接管和恢复。",
+        "运行状态与概览及状态栏同步；启停核心请前往概览页操作。核心仅监听本地地址，系统代理由独立守护接管和恢复。",
         "未运行",
         "此通道尚无本地版本，可切换通道或检查更新后下载。",
         "本地：未安装",
@@ -146,9 +146,11 @@ fn navigating_to_the_core_page_shows_scope_notes_and_empty_states() {
             "missing restore action: {seen:?}"
         );
     }
-    // 运行卡片按钮存在（fixture 启动用例见下文；这里只验证空态展示）。
-    assert!(seen.contains(&"校验并启动"), "{seen:?}");
-    assert!(seen.contains(&"停止"), "{seen:?}");
+    // 核心启停统一收敛至概览页，核心页运行卡片仅作只读状态展示。
+    assert!(!seen.contains(&"校验并启动"), "{seen:?}");
+    assert!(!seen.contains(&"停止"), "{seen:?}");
+    assert!(!app.screen().matches("id:core-start").unwrap());
+    assert!(!app.screen().matches("id:core-stop").unwrap());
 }
 
 /// 已选中的核心独立显示；切到另一库存类型浏览时空列表提示出现，
@@ -445,8 +447,7 @@ fn mihomo_selection_shows_summary_and_config_preview_note() {
 // 下列用例使用 rustc 现场编译的 fixture 假核心（真实进程/真实监听/真实
 // 回收），不是真实 sing-box/Mihomo；Windows 真实核心验收由主代理执行。
 
-/// 校验并启动 → 真实进程/真实监听 → 停止回收：结果文案明确“已完成二进制
-/// 校验”，状态行显示真实版本/端口，停止回执含真实 kind。
+/// 概览页校验并启动 → 真实进程/真实监听 → 核心页同步显示“运行中”徽标（不重复渲染启停按钮）→ 概览页停止回收。
 #[test]
 fn start_button_validates_launches_and_stops_core() {
     let (dir, entries) = data_root();
@@ -454,12 +455,8 @@ fn start_button_validates_launches_and_stops_core() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18301, 18302);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
-    app.wait_for_within("未运行", Duration::from_secs(30))
-        .unwrap();
-
-    app.press("id:core-start").unwrap();
+    app.wait_for("id:overview-start").unwrap();
+    app.press("id:overview-start").unwrap();
     app.wait_for_within(
         "text:/已完成二进制校验并启动：sing-box v1.2.3 · mixed 18301 · API 18302/",
         Duration::from_secs(45),
@@ -473,7 +470,16 @@ fn start_button_validates_launches_and_stops_core() {
     // 真实监听：mixed 端口在宿主上可连接。
     std::net::TcpStream::connect(("127.0.0.1", 18301)).expect("mixed listener is real");
 
-    app.press("id:core-stop").unwrap();
+    // 切到核心页：展示“运行中”徽标且不渲染重复的启停按钮。
+    open_core_page(&mut app);
+    app.wait_for_within("运行中", Duration::from_secs(10))
+        .unwrap();
+    assert!(!app.screen().matches("id:core-start").unwrap());
+    assert!(!app.screen().matches("id:core-stop").unwrap());
+
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within(
         "已停止核心（强制终止并回收本次进程）",
         Duration::from_secs(30),
@@ -498,9 +504,8 @@ fn start_failure_shows_real_binary_check_error() {
         .unwrap();
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
-    app.press("id:core-start").unwrap();
+    app.wait_for("id:overview-start").unwrap();
+    app.press("id:overview-start").unwrap();
     app.wait_for_within("text:/启动核心失败/", Duration::from_secs(45))
         .unwrap();
     app.wait_for_within("text:/核心配置校验失败/", Duration::from_secs(5))
@@ -511,8 +516,7 @@ fn start_failure_shows_real_binary_check_error() {
         .unwrap();
 }
 
-/// 运行状态跨页共享：启动后切到订阅页再回核心页，仍显示运行中（不是
-/// 页面级按钮状态）；随后停止。
+/// 运行状态跨页共享：概览启动后切到订阅页再切核心页，仍显示运行中；随后回概览停止。
 #[test]
 fn running_state_is_shared_across_page_switches() {
     let (dir, entries) = data_root();
@@ -520,9 +524,8 @@ fn running_state_is_shared_across_page_switches() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18321, 18322);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
-    app.press("id:core-start").unwrap();
+    app.wait_for("id:overview-start").unwrap();
+    app.press("id:overview-start").unwrap();
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
         .unwrap();
 
@@ -535,7 +538,9 @@ fn running_state_is_shared_across_page_switches() {
     )
     .unwrap();
 
-    app.press("id:core-stop").unwrap();
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within(
         "已停止核心（强制终止并回收本次进程）",
         Duration::from_secs(30),
@@ -552,13 +557,13 @@ fn inventory_select_is_rejected_while_core_is_running() {
         common::seed_fixture_core(root, CoreType::SingBox, "1.2.2");
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
-    app.wait_for("v1.2.2").unwrap();
-    app.press("id:core-start").unwrap();
+    app.wait_for("id:overview-start").unwrap();
+    app.press("id:overview-start").unwrap();
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
         .unwrap();
 
+    open_core_page(&mut app);
+    app.wait_for("v1.2.2").unwrap();
     app.press("id:core-use-sing-box-1.2.2").unwrap();
     app.wait_for_within(
         "text:/核心运行期间不可修改核心文件或选择/",
@@ -566,12 +571,16 @@ fn inventory_select_is_rejected_while_core_is_running() {
     )
     .unwrap();
 
-    app.press("id:core-stop").unwrap();
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within(
         "已停止核心（强制终止并回收本次进程）",
         Duration::from_secs(30),
     )
     .unwrap();
+    open_core_page(&mut app);
+    app.wait_for("id:core-use-sing-box-1.2.2").unwrap();
     app.press("id:core-use-sing-box-1.2.2").unwrap();
     app.wait_for_within("text:/已选中 v1.2.2/", Duration::from_secs(30))
         .unwrap();
@@ -595,11 +604,11 @@ fn unexpected_exit_is_detected_by_the_status_poll() {
         .unwrap();
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
-    app.press("id:core-start").unwrap();
+    app.wait_for("id:overview-start").unwrap();
+    app.press("id:overview-start").unwrap();
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
         .unwrap();
+    open_core_page(&mut app);
     // fixture 2.5 秒后自行退出；轮询必须发现异常退出而不是继续显示运行中。
     app.wait_for_within("text:/核心进程异常退出/", Duration::from_secs(45))
         .unwrap();
@@ -667,12 +676,12 @@ fn proxy_preference_change_is_rejected_while_a_core_command_is_busy() {
         seed_runtime_target(root, CoreType::SingBox, "1.2.3", 18397, 18398);
     });
     let mut app = start_app(entries).0;
-    app.wait_for("id:nav-overview").unwrap();
-    open_core_page(&mut app);
+    app.wait_for("id:overview-start").unwrap();
     let config = dir.path().join("app.toml");
     let before = std::fs::read(&config).expect("read app.toml before start");
 
-    app.press("id:core-start").unwrap();
+    app.press("id:overview-start").unwrap();
+    open_core_page(&mut app);
     app.press("id:proxy-toggle >> role:switch").unwrap();
     assert!(
         !texts(&app)
@@ -690,7 +699,9 @@ fn proxy_preference_change_is_rejected_while_a_core_command_is_busy() {
 
     app.wait_for_within("text:/运行中：sing-box v1.2.3/", Duration::from_secs(45))
         .unwrap();
-    app.press("id:core-stop").unwrap();
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within("text:/已停止核心/", Duration::from_secs(30))
         .unwrap();
 }

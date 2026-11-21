@@ -394,3 +394,71 @@ fn restore_relocates_file_references_without_changing_credentials_or_script_data
         secret
     );
 }
+
+#[test]
+fn singbox_overwrite_slices_and_rules_roundtrip_and_relocate_paths() {
+    let source = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let cfg = crate::ClientConfig::new(
+        source.path().into(),
+        String::new(),
+        String::new(),
+        Default::default(),
+    );
+    cfg.save().unwrap();
+    let store = crate::singbox_overwrite::SingboxOverwriteStore::new(source.path().into());
+    store.ensure_initialized().unwrap();
+    let log_output = source.path().join("logs/custom.log");
+    store
+        .save_raw(
+            crate::singbox_overwrite::SingboxSliceKind::Log,
+            &serde_json::json!({
+                "log": { "level": "debug", "output": log_output.to_string_lossy() }
+            })
+            .to_string(),
+        )
+        .unwrap();
+    crate::rules::persist_rules(source.path(), &[]).unwrap();
+    let rs_store = crate::rulesets::RuleSetStore::new(source.path().into());
+    rs_store
+        .save(&[crate::rulesets::RuleSetEntry {
+            id: "rs-backup".into(),
+            tag: "backup-set".into(),
+            name: "Backup Set".into(),
+            category: "custom".into(),
+            source: crate::rulesets::RuleSetSource::Manual {
+                content: serde_json::json!({"version": 2, "rules": [{"domain": ["a.test"]}]})
+                    .to_string(),
+            },
+            remote_state: Default::default(),
+            created_at: 1_700_000_000,
+        }])
+        .unwrap();
+
+    let snapshot = capture(source.path(), None).unwrap();
+    assert!(snapshot.files.contains_key("overwrite/sing-box/log.json"));
+    assert!(snapshot.files.contains_key("overwrite/sing-box/route.json"));
+    assert!(snapshot.files.contains_key("rules.toml"));
+    assert!(snapshot.files.contains_key("rulesets/manifest.json"));
+    assert!(snapshot.files.contains_key("rulesets/files/rs-backup.json"));
+    prepare_restore(target.path(), snapshot, "overwrite-backup-pass", None).unwrap();
+    apply_pending(target.path()).unwrap();
+
+    let restored_store = crate::singbox_overwrite::SingboxOverwriteStore::new(target.path().into());
+    let restored_log = restored_store
+        .load_value(crate::singbox_overwrite::SingboxSliceKind::Log)
+        .unwrap();
+    assert_eq!(restored_log["log"]["level"], "debug");
+    assert_eq!(
+        std::path::Path::new(restored_log["log"]["output"].as_str().unwrap()),
+        target.path().join("logs/custom.log")
+    );
+    assert!(target.path().join("rules.toml").is_file());
+    assert!(target.path().join("rulesets/manifest.json").is_file());
+    assert!(
+        target
+            .path()
+            .join("rulesets/files/rs-backup.json")
+            .is_file()
+    );
+}

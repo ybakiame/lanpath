@@ -155,7 +155,7 @@ async fn start_requires_a_selected_core() {
     seed_subscription(&core.root);
     let error = core.runtime.start().await.expect_err("no core");
     assert!(error.to_string().contains("尚未选择核心"), "{error}");
-    assert!(!core.root.join("sing-box.pid").exists());
+    assert!(!core.root.join("runtime/sing-box/sing-box.pid").exists());
 }
 
 /// TUN 在所有平台都拒绝（Windows 也不会进入提权/守护路径）。
@@ -200,7 +200,7 @@ async fn start_preflight_rejects_occupied_port_without_spawning() {
     let error = core.runtime.start().await.expect_err("occupied");
     assert!(error.to_string().contains("18131"), "{error}");
     assert!(!core.runtime.status().await.running);
-    assert!(!core.root.join("sing-box.pid").exists());
+    assert!(!core.root.join("runtime/sing-box/sing-box.pid").exists());
 }
 
 /// 真实二进制校验失败（fixture check 退出 1）：错误带核心诊断，不 spawn。
@@ -224,7 +224,7 @@ async fn start_fails_when_real_binary_check_fails() {
     assert!(message.contains("核心配置校验失败"), "{message}");
     assert!(message.contains("boom-check-failed"), "{message}");
     assert!(!core.runtime.status().await.running);
-    assert!(!core.root.join("sing-box.pid").exists());
+    assert!(!core.root.join("runtime/sing-box/sing-box.pid").exists());
 }
 
 /// 启动后始终未监听：等待超时 → 回滚回收（pid 记录清理、状态可重试），
@@ -247,7 +247,7 @@ async fn start_rolls_back_when_listener_never_ready_and_retries() {
     let error = core.runtime.start().await.expect_err("listener timeout");
     assert!(error.to_string().contains("等待代理监听"), "{error}");
     assert!(
-        !core.root.join("sing-box.pid").exists(),
+        !core.root.join("runtime/sing-box/sing-box.pid").exists(),
         "回滚必须清理 pid 身份记录"
     );
     assert!(!core.runtime.status().await.running);
@@ -442,7 +442,7 @@ async fn start_stage_failure_rolls_back_with_combined_error_and_retries() {
     assert!(!core.runtime.status().await.running);
 
     // 可重试状态：清理故障记录后，停止（重试回收）成功。
-    std::fs::remove_file(core.root.join("sing-box.pid")).unwrap();
+    std::fs::remove_file(core.root.join("runtime/sing-box/sing-box.pid")).unwrap();
     let kind = core.runtime.stop().await.expect("stop retries cleanup");
     assert_eq!(kind, ProcessStopKind::AlreadyStopped);
 
@@ -490,7 +490,7 @@ async fn identity_read_failure_after_ready_rolls_back_the_live_child() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(!core.runtime.status().await.running);
-    assert!(!core.root.join("sing-box.pid").exists());
+    assert!(!core.root.join("runtime/sing-box/sing-box.pid").exists());
 
     // 可重试：行为恢复后再次启动真实成功。
     behavior_sidecar(&binary, serde_json::json!({}));

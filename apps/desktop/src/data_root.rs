@@ -1,11 +1,8 @@
-//! NSH 桌面独立数据目录：所有权标记 + 进程内租约 + 生产/链接路径准入。
+//! NSH 桌面独立数据目录：所有权标记 + 进程内租约 + 链接路径准入。
 //!
-//! 从 apps/gpui 的 data_root 迁移并适配为 NSH 桌面身份（`.lanpath-desktop-nsh`），
-//! 链接、所有权、租约和路径安全约束与 GPUI 版本一致。程序旁的
-//! `lanpath.portable` 启用同级 data/，路径选择与原生 storage 绑定见 location。
-//! 准入全部通过并持锁后初始化统一 TOML 存储（`app.toml` +
-//! `subscriptions.toml`，见 `storage_init` 模块；breaking change，
-//! 旧 JSON 测试布局明确拒绝）。
+//! 程序旁的 `lanpath.portable` 启用同级 `data/`，路径选择与原生 storage 绑定见 `location`。
+//! 准入全部通过并持锁后初始化统一数据布局（`app.toml`、`subscriptions.toml`、
+//! `overwrite/sing-box/*.json`、`logs/`、`.cache/`、`runtime/`）。
 
 use lanpath_common::{LanpathError, LanpathResult};
 use std::collections::HashMap;
@@ -127,7 +124,9 @@ impl DataRoot {
         // 布局明确拒绝，见 storage_init 模块），再建日志/缓存目录与身份。
         crate::storage_init::initialize(&path)?;
         fs::create_dir_all(path.join("logs"))?;
-        fs::create_dir_all(path.join("cache"))?;
+        fs::create_dir_all(path.join(".cache"))?;
+        fs::create_dir_all(path.join("runtime/sing-box"))?;
+        fs::create_dir_all(path.join("runtime/mihomo"))?;
         let id = identity::load_or_create(&path)?;
         Ok(Self {
             path,

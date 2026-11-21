@@ -58,3 +58,9 @@ README、CHANGELOG 和发布说明仅保留面向使用者的内容。
 
 遇到权威冲突、未经决定的架构/公开接口变化、新强制门禁、数据迁移/删除 或不可确定需求时停下请求决策。
 不得将签名私钥、配置、个人数据、生成产物或宿主绝对路径提交。
+
+<!-- precept:begin v1 -->
+## Precept
+
+This project's confirmed engineering context (the developer's reviewed preferences and the repository's contracts) is served by Precept. Before planning or editing, call `get_effective_context` on the `precept-lanpath` MCP server, and again after your context is compacted. Current repository files and contracts outrank those preferences: report a conflict instead of choosing silently.
+<!-- precept:end -->

@@ -41,7 +41,7 @@ impl ButtonSize {
     fn height(self) -> Option<f32> {
         match self {
             ButtonSize::Sm => Some(28.0),
-            ButtonSize::Md => Some(34.0),
+            ButtonSize::Md => Some(36.0),
             ButtonSize::Lg => Some(40.0),
             ButtonSize::Content => None,
         }

@@ -26,6 +26,7 @@ impl Fixture {
     async fn install_child(&self) {
         let (child, pid) = fixture_child();
         *self.manager.process.write().await = Some(child);
+        std::fs::create_dir_all(self.manager.runtime_dir()).unwrap();
         lifecycle::write_pid_file(&self.manager.pid_path(), pid, &fixture_binary()).unwrap();
         *self.manager.start_time.write().await = Some(Instant::now());
     }
@@ -48,15 +49,17 @@ fn factory_selects_mihomo_with_independent_paths_and_exact_spawn_args() {
     assert_eq!(manager.core_type(), CoreType::Mihomo);
 
     let manager = MihomoProcessManager::new(fixture_binary(), &dir).unwrap();
-    assert_eq!(manager.config_path(), dir.join("mihomo.yaml"));
-    assert_eq!(manager.pid_path(), dir.join("mihomo.pid"));
+    let expected_config = dir.join("runtime").join("mihomo").join("config.yaml");
+    let expected_pid = dir.join("runtime").join("mihomo").join("mihomo.pid");
+    assert_eq!(manager.config_path(), expected_config);
+    assert_eq!(manager.pid_path(), expected_pid);
     assert_eq!(
         manager.spawn_args(),
         [
             OsString::from("-d"),
             dir.as_os_str().to_owned(),
             OsString::from("-f"),
-            dir.join("mihomo.yaml").as_os_str().to_owned(),
+            expected_config.as_os_str().to_owned(),
         ]
     );
 }
@@ -71,7 +74,14 @@ async fn config_write_uses_independent_mihomo_yaml_file() {
 
     let path = fixture.manager.write_config(&config).await.unwrap();
 
-    assert_eq!(path, fixture.dir.join("mihomo.yaml"));
+    assert_eq!(
+        path,
+        fixture
+            .dir
+            .join("runtime")
+            .join("mihomo")
+            .join("config.yaml")
+    );
     let written: Value = serde_yaml::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(written, config);
     assert!(!fixture.manager.pid_path().exists());

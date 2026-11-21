@@ -144,7 +144,7 @@ pub(super) fn disk_logs(service: Arc<LogService>, io_busy: Signal<bool>) -> impl
             || {
                 crate::ui::empty_with_icon(
                     Some(Icon::File),
-                    || t!("logs.tab_disk"),
+                    || t!("logs.tab.disk"),
                     || t!("product.logs.disk_empty"),
                 )
             },

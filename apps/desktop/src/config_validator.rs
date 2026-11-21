@@ -5,15 +5,14 @@
 //! 同样固定为本根），`no_window` 抑制 Windows 控制台窗口，stdout/stderr 并行
 //! drain（各保留最多 32 KiB 诊断），20 秒超时强杀并回收（测试可注入更短超时）。
 //!
-//! 能力边界（不搬 GPUI 全量字段白名单，只守本切片安全语义；未知字段交给
-//! 核心 schema 判定）：
+//! 能力边界（只守安全语义；未知字段交给核心 schema 判定）：
 //!
 //! - sing-box：有且仅有一个 `mixed` inbound，`listen` 必须为 `127.0.0.1`、
 //!   `listen_port` 必须等于已保存 mixed 端口；拒绝任何 tun inbound 与
 //!   `set_system_proxy: true`；`experimental.clash_api` 在启用时必须匹配已保存
 //!   loopback API 端口与密钥，禁用时必须缺席，且不得携带 `external_ui` /
 //!   `external_ui_download_url` 面板下载字段；`log.output`、
-//!   `experimental.cache_file.path` 写路径分别限制在根内 `logs/`、`cache/`，
+//!   `experimental.cache_file.path` 写路径分别限制在根内 `logs/`、`runtime/` 或 `.cache/`，
 //!   `route.rule_set` 本地资源与 `certificate.certificate_path` 读路径限制在
 //!   根内（拒绝链接/junction/硬链接与 `$` 环境变量展开）。
 //! - Mihomo：`mixed-port` 必须等于已保存 mixed 端口；`allow-lan` 只允许
@@ -305,7 +304,12 @@ fn check_singbox(root: &Path, value: &Value, bindings: &ValidatorBindings) -> La
         && let Some(path) = cache.get("path").and_then(Value::as_str)
         && !path.is_empty()
     {
-        write_confined(root, path, "experimental.cache_file.path", "cache")?;
+        write_confined_any(
+            root,
+            path,
+            "experimental.cache_file.path",
+            &["runtime", ".cache"],
+        )?;
     }
     if let Some(sets) = value.pointer("/route/rule_set").and_then(Value::as_array) {
         for (index, set) in sets.iter().enumerate() {
@@ -452,7 +456,7 @@ fn check_mihomo(value: &Value, bindings: &ValidatorBindings) -> LanpathResult<()
 
 mod paths;
 
-pub(crate) use paths::{confined, write_confined};
+pub(crate) use paths::{confined, write_confined, write_confined_any};
 
 #[cfg(test)]
 #[path = "config_validator_tests.rs"]

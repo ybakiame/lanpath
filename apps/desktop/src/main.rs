@@ -55,7 +55,7 @@ fn main() -> std::process::ExitCode {
             app_id: "com.ybakiame.lanpath.desktop.nsh".to_owned(),
             size: (1180, 800),
             cache: platform::CacheOptions::at(platform::CacheLocation::Dir(
-                data_dir.join("cache/nsh"),
+                data_dir.join(".cache/nsh"),
             )),
             data_dir: Some(data_dir),
             storage: Some(storage.clone()),

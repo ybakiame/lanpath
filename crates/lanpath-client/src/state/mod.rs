@@ -77,8 +77,7 @@ pub struct ClientState {
     port_probe: crate::port_guard::PortProbe,
     /// Number of rules in the composed config (written after successful start, cleared on stop; returned by status()).
     rule_count: u64,
-    /// 本次启动未能本地化的内置 CN 规则集 tag（降级启动；空 = 完整分流）。后台重试补齐
-    /// 后由命令层重载核心恢复完整配置（见 `ruleset_manager` 模块文档）。
+    /// 本次启动未能准备完成的规则集 tag（空 = 完整配置）。
     missing_rule_sets: Vec<String>,
 }
 

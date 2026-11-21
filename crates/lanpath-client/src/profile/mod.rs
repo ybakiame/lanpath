@@ -196,8 +196,8 @@ fn dedup_names(nodes: Vec<Value>, key: &str) -> Vec<Value> {
 ///   generated outbounds, never hardcoded) so foreign resolution goes through the proxy. DoH on
 ///   443 shares the well-worn HTTPS path through the proxy (bare 853 is interfered with on some
 ///   node egress networks), aligning with the reference templates.
-/// - `rules` = [`crate::core_config::cn_baseline_dns_rules`]: `clash_mode` direct/global →
-///   local/remote, `geosite-cn` → local; `final = remote` resolves the rest.
+/// - `rules` = [`crate::core_config::clash_mode_dns_rules`]: `clash_mode` direct/global →
+///   local/proxy; `final = proxy` resolves the rest.
 /// - `reverse_mapping = true`: after hijacked DNS resolves a domain, sing-box maps the
 ///   returned IP back to the domain for routing/records. Without it TUN connections arrive as
 ///   bare IPs and Clash API `metadata.host` stays empty whenever payload sniffing cannot
@@ -269,9 +269,8 @@ pub fn singbox_template(nodes: &[Value]) -> Value {
         .unwrap_or(OUTBOUND_TAG_PROXY)
         .to_string();
 
-    // 路由规则不再由模板携带（2026-09 起内置 CN 分流规则物化进 local_override 统一规则
-    // 列表，由 inject_local_override 注入；见 core_config::BUILTIN_ROUTE_RULES）。模板只保留
-    // 规则集注册与 final 兜底。
+    // 路由规则与规则集均不预置内置项，由用户通过配置切片、规则或规则集管理自行添加。
+    // 模板仅提供空 `rule_set` 容器与 `final` 兜底。
     let mut cfg = json!({
         "log": { "level": "info" },
         "dns": {
@@ -287,13 +286,14 @@ pub fn singbox_template(nodes: &[Value]) -> Value {
                     "detour": proxy_tag.clone()
                 }
             ],
-            "rules": crate::core_config::cn_baseline_dns_rules(),
+            "rules": crate::core_config::clash_mode_dns_rules(),
             "final": "proxy",
             "reverse_mapping": true,
             "strategy": "prefer_ipv4"
         },
         "route": {
             "rules": [],
+            "rule_set": [],
             // 兜底走内置 final 分组（节点选择 + 直连），用户可在出站管理调整。
             "final": OUTBOUND_TAG_FINAL,
             "auto_detect_interface": true,
@@ -301,11 +301,6 @@ pub fn singbox_template(nodes: &[Value]) -> Value {
         }
     });
     cfg["outbounds"] = Value::Array(outbounds);
-    // Register the five remote CN-split rule sets (idempotent by tag) plus the direct-dial
-    // HTTP client they download through (never via the proxy, see ensure_cn_rule_sets docs).
-    if let Some(route) = cfg["route"].as_object_mut() {
-        crate::core_config::ensure_cn_rule_sets(route);
-    }
     if let Some(obj) = cfg.as_object_mut() {
         crate::core_config::ensure_rule_set_http_client(obj);
     }

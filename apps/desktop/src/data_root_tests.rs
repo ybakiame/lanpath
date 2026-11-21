@@ -27,7 +27,9 @@ fn absent_and_empty_roots_become_canonical_persistent_owned_directories() {
         assert_eq!(fs::read(path.join(OWNER_FILE)).unwrap(), OWNER_CONTENT);
         assert!(path.join(LOCK_FILE).is_file());
         assert!(path.join("logs").is_dir());
-        assert!(path.join("cache").is_dir());
+        assert!(path.join(".cache").is_dir());
+        assert!(path.join("runtime/sing-box").is_dir());
+        assert!(path.join("runtime/mihomo").is_dir());
         // 统一 TOML 布局随初始化创建。
         assert!(path.join("app.toml").is_file());
         assert!(path.join("subscriptions.toml").is_file());
@@ -186,30 +188,29 @@ fn contenders_do_not_create_logs_or_cache_before_acquiring_the_lock() {
     let temporary = tempfile::tempdir().unwrap();
     let root = DataRoot::open(temporary.path()).unwrap();
     fs::remove_dir(temporary.path().join("logs")).unwrap();
-    fs::remove_dir(temporary.path().join("cache")).unwrap();
+    fs::remove_dir(temporary.path().join(".cache")).unwrap();
     assert!(DataRoot::open(temporary.path()).is_err());
     assert!(!temporary.path().join("logs").exists());
-    assert!(!temporary.path().join("cache").exists());
+    assert!(!temporary.path().join(".cache").exists());
     drop(root);
     let _root = DataRoot::open(temporary.path()).unwrap();
     assert!(temporary.path().join("logs").is_dir());
-    assert!(temporary.path().join("cache").is_dir());
+    assert!(temporary.path().join(".cache").is_dir());
+    assert!(temporary.path().join("runtime/sing-box").is_dir());
 }
 
 #[test]
 fn business_files_are_preserved_on_reopen() {
     let temporary = tempfile::tempdir().unwrap();
     let root = DataRoot::open(temporary.path()).unwrap();
-    // 不属于迁移的业务文件（profiles.json / config_slices.json）与统一
-    // TOML 布局文件都必须跨重开原样保留。
-    for name in ["profiles.json", "config_slices.json"] {
+    for name in ["profiles.json", "rules.toml"] {
         fs::write(root.path().join(name), name.as_bytes()).unwrap();
     }
     let app = fs::read(root.path().join("app.toml")).unwrap();
     let subscriptions = fs::read(root.path().join("subscriptions.toml")).unwrap();
     drop(root);
     let root = DataRoot::open(temporary.path()).unwrap();
-    for name in ["profiles.json", "config_slices.json"] {
+    for name in ["profiles.json", "rules.toml"] {
         assert_eq!(fs::read(root.path().join(name)).unwrap(), name.as_bytes());
     }
     assert_eq!(fs::read(root.path().join("app.toml")).unwrap(), app);
@@ -312,8 +313,8 @@ fn nested_links_and_hardlinked_regular_files_cannot_escape_isolation() {
         let temporary = tempfile::tempdir().unwrap();
         let root = DataRoot::open(temporary.path()).unwrap();
         drop(root);
-        fs::create_dir(temporary.path().join("cache/nested")).unwrap();
-        let linked = temporary.path().join("cache/nested/linked");
+        fs::create_dir(temporary.path().join(".cache/nested")).unwrap();
+        let linked = temporary.path().join(".cache/nested/linked");
         if hard_link {
             fs::hard_link(&external_file, linked).unwrap();
         } else {

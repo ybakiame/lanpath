@@ -11,16 +11,13 @@ fn quick_add_batch_failure_disable_and_reopen_use_real_storage() {
     app.submit("id:rules-target").unwrap();
     app.wait_for("规则已保存，下次启动或重启核心时应用。")
         .unwrap();
-    let store = lanpath_client::LocalOverrideStore::new(dir.path().to_path_buf());
-    assert!(
-        store
-            .load()
-            .unwrap()
-            .singbox
-            .rules
-            .iter()
-            .any(|r| r.target == "example.com")
-    );
+    let read_rules = || -> Vec<lanpath_client::LocalRule> {
+        lanpath_client::rules::load_rules(dir.path()).unwrap()
+    };
+    assert!(dir.path().join("rules.toml").is_file());
+    assert!(!dir.path().join("rules.json").exists());
+    assert!(read_rules().iter().any(|r| r.target == "example.com"));
+    assert!(!dir.path().join("local_override.json").exists());
     app.press("批量输入").unwrap();
     app.type_text(
         "id:rules-batch",
@@ -29,26 +26,14 @@ fn quick_add_batch_failure_disable_and_reopen_use_real_storage() {
     .unwrap();
     app.press("添加规则").unwrap();
     app.wait_for("text:/第 2 行/").unwrap();
-    assert!(
-        !store
-            .load()
-            .unwrap()
-            .singbox
-            .rules
-            .iter()
-            .any(|r| r.target == "batch.example.com")
-    );
+    assert!(!read_rules().iter().any(|r| r.target == "batch.example.com"));
     app.clear("id:rules-batch").unwrap();
     app.type_text("id:rules-batch", "domain batch.example.com -> direct")
         .unwrap();
     app.press("添加规则").unwrap();
     app.press("text:停用 >> nth=0").unwrap();
     assert!(
-        !store
-            .load()
-            .unwrap()
-            .singbox
-            .rules
+        !read_rules()
             .iter()
             .find(|r| r.target == "batch.example.com")
             .unwrap()

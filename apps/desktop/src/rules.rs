@@ -1,4 +1,5 @@
-//! 快速规则业务：复用本数据根的 LocalOverride；与订阅/备份共用业务锁。
+//! 快速规则业务：将用户规则持久化在 `<data_root>/rules.toml`（与订阅/备份共用业务锁），
+//! 仅保存自定义规则列表，不包含最终覆写切片；合成时分别注入 sing-box 与 Mihomo 配置。
 mod mihomo;
 pub(crate) mod syntax;
 mod trace;
@@ -8,9 +9,17 @@ pub(crate) use syntax::{parse_lines, rule_line};
 pub(crate) use trace::{RuleTrace, trace_rules};
 
 use crate::data_root::{DataRoot, open_root, resolve_data_location};
-use lanpath_client::{LocalOverrideService, LocalRule};
+#[cfg(test)]
+pub(crate) use lanpath_client::rules::RULES_FILE;
+use lanpath_client::rules::{LocalRule, load_rules, persist_rules};
 use lanpath_common::{LanpathError, LanpathResult};
+use serde_json::Value;
 use std::{path::Path, sync::Arc};
+
+/// 将启用规则按序注入 sing-box `route.rules`。
+pub(crate) fn apply_singbox_rules(config: &mut Value, rules: &[LocalRule]) {
+    lanpath_client::rules::apply_singbox_rules(config, rules);
+}
 
 #[derive(Clone)]
 pub(crate) struct Rules {
@@ -21,20 +30,26 @@ impl Rules {
     pub(crate) fn open() -> LanpathResult<Self> {
         Self::for_root(&resolve_data_location()?.path)
     }
+
     pub(crate) fn for_root(path: &Path) -> LanpathResult<Self> {
         Ok(Self {
             root: open_root(path)?,
         })
     }
-    fn service(&self) -> LocalOverrideService {
-        LocalOverrideService::new(self.root.path().to_path_buf())
+
+    fn read_unlocked(&self) -> LanpathResult<Vec<LocalRule>> {
+        load_rules(self.root.path())
     }
+
+    fn write_unlocked(&self, rules: &[LocalRule]) -> LanpathResult<()> {
+        persist_rules(self.root.path(), rules)
+    }
+
     pub(crate) fn load(&self) -> LanpathResult<Vec<LocalRule>> {
         let _guard = self.root.business_guard();
-        let mut rules = self.service().load()?.singbox.rules;
-        rules.sort_by_key(|r| r.sort_order);
-        Ok(rules)
+        self.read_unlocked()
     }
+
     pub(crate) fn add_lines(&self, source: &str, first: bool) -> LanpathResult<Vec<LocalRule>> {
         let incoming = parse_lines(source)?;
         self.mutate(move |rules| {
@@ -46,6 +61,7 @@ impl Rules {
             Ok(())
         })
     }
+
     pub(crate) fn edit(&self, id: &str, source: &str) -> LanpathResult<Vec<LocalRule>> {
         let mut parsed = parse_lines(source)?;
         if parsed.len() != 1 {
@@ -66,6 +82,7 @@ impl Rules {
             Ok(())
         })
     }
+
     pub(crate) fn toggle(&self, id: &str) -> LanpathResult<Vec<LocalRule>> {
         self.mutate(|rules| {
             let rule = find_rule(rules, id)?;
@@ -73,12 +90,14 @@ impl Rules {
             Ok(())
         })
     }
+
     pub(crate) fn remove(&self, id: &str) -> LanpathResult<Vec<LocalRule>> {
         self.mutate(|rules| {
             rules.retain(|r| r.id != id);
             Ok(())
         })
     }
+
     pub(crate) fn move_rule(&self, id: &str, delta: isize) -> LanpathResult<Vec<LocalRule>> {
         self.mutate(|rules| {
             let at = rules
@@ -92,22 +111,23 @@ impl Rules {
             Ok(())
         })
     }
+
     fn mutate(
         &self,
         change: impl FnOnce(&mut Vec<LocalRule>) -> LanpathResult<()>,
     ) -> LanpathResult<Vec<LocalRule>> {
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
-        let service = self.service();
-        let mut document = service.load()?;
-        document.singbox.rules.sort_by_key(|r| r.sort_order);
-        change(&mut document.singbox.rules)?;
-        for (index, rule) in document.singbox.rules.iter_mut().enumerate() {
+        let mut rules = self.read_unlocked()?;
+        change(&mut rules)?;
+        for (index, rule) in rules.iter_mut().enumerate() {
             rule.sort_order = index as i32;
         }
-        Ok(service.save(document)?.singbox.rules)
+        self.write_unlocked(&rules)?;
+        Ok(rules)
     }
 }
+
 fn find_rule<'a>(rules: &'a mut [LocalRule], id: &str) -> LanpathResult<&'a mut LocalRule> {
     rules
         .iter_mut()

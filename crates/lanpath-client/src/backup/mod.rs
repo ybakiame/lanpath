@@ -30,13 +30,12 @@ const MAX_FILES: usize = 1024;
 pub(super) const ROOTS: &[&str] = &[
     "app.toml",
     "subscriptions.toml",
-    "cache",
+    "rules.toml",
+    ".cache",
     "resources",
     "client.json",
     "subscriptions.json",
     "profiles.json",
-    "local_override.json",
-    "config_slices.json",
     "remotes.json",
     "subscription_cache",
     "profile_cache",
@@ -44,6 +43,7 @@ pub(super) const ROOTS: &[&str] = &[
     "remote_cache",
     "script_store",
     "rulesets",
+    "overwrite",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,7 +83,7 @@ pub(super) fn allowed(name: &str) -> bool {
         return false;
     }
     let parts: Vec<_> = name.split('/').collect();
-    if parts[0] == "cache"
+    if parts[0] == ".cache"
         && parts.len() > 1
         && !matches!(
             parts[1],
@@ -93,6 +93,16 @@ pub(super) fn allowed(name: &str) -> bool {
         return false;
     }
     if parts[0] == "resources" && parts.len() > 1 && parts[1] != "imports" {
+        return false;
+    }
+    if parts[0] == "overwrite"
+        && ((parts.len() == 2 && parts[1] != "sing-box")
+            || (parts.len() == 3
+                && (parts[1] != "sing-box"
+                    || crate::singbox_overwrite::SingboxSliceKind::from_file_name(parts[2])
+                        .is_none()))
+            || parts.len() > 3)
+    {
         return false;
     }
 
@@ -107,7 +117,7 @@ pub(super) fn allowed(name: &str) -> bool {
         && ROOTS.contains(&parts[0])
         && ((parts.len() == 1
             && (parts[0].ends_with(".json")
-                || matches!(parts[0], "app.toml" | "subscriptions.toml")))
+                || matches!(parts[0], "app.toml" | "subscriptions.toml" | "rules.toml")))
             || (parts.len() > 1 && !parts[0].ends_with(".json") && !parts[0].ends_with(".toml")))
 }
 

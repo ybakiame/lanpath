@@ -24,6 +24,7 @@ mod log_service;
 mod logs_view;
 mod memory_logs_view;
 mod overview_view;
+mod overwrite_view;
 mod preferences_storage;
 mod profiles;
 mod profiles_view;
@@ -31,6 +32,9 @@ mod request_settings;
 mod request_settings_view;
 mod rules;
 mod rules_view;
+mod rulesets;
+mod rulesets_view;
+mod singbox_overwrite;
 mod storage_init;
 mod subscriptions;
 mod subscriptions_view;
@@ -106,8 +110,10 @@ pub(crate) enum Page {
     RequestSettings,
     Profiles,
     Core,
+    Overwrite,
     Config,
     Rules,
+    RuleSets,
     Diagnostics,
     Logs,
     Backup,
@@ -123,8 +129,10 @@ impl Page {
             Page::RequestSettings => "nav.request_settings",
             Page::Profiles => "nav.profiles",
             Page::Core => "nav.core",
+            Page::Overwrite => "nav.overwrite",
             Page::Config => "nav.config",
             Page::Rules => "nav.rules",
+            Page::RuleSets => "nav.rulesets",
             Page::Diagnostics => "nav.diagnostics",
             Page::Logs => "nav.logs",
             Page::Backup => "nav.backup",
@@ -139,8 +147,10 @@ impl Page {
             Page::RequestSettings => "nav-request-settings",
             Page::Profiles => "nav-profiles",
             Page::Core => "nav-core",
+            Page::Overwrite => "nav-overwrite",
             Page::Config => "nav-config",
             Page::Rules => "nav-rules",
+            Page::RuleSets => "nav-rulesets",
             Page::Diagnostics => "nav-diagnostics",
             Page::Logs => "nav-logs",
             Page::Backup => "nav-backup",
@@ -150,9 +160,8 @@ impl Page {
 }
 
 /// The desktop shell: a sidebar with the app's pages and their content.
-/// Data stays in this app's own identity; nothing of Tauri/GPUI/`apps/nsh`
-/// is read or migrated. The core page starts/stops the selected inventory
-/// core in user mode only (loopback mixed listener + loopback Clash API,
+/// Data stays isolated inside this app's own data root. The core page starts/stops
+/// the selected inventory core in user mode only (loopback mixed listener + loopback Clash API,
 /// after a real binary config check); Windows system proxy is taken over
 /// and precisely restored through an independent ordinary-user guardian
 /// (never by writing the registry from the GUI); TUN/VPN stays refused.
@@ -230,8 +239,16 @@ pub fn App() -> impl IntoElement {
                                     ))
                                     .child(when(move || page.get() == Page::Core, core_page))
                                     .child(when(
+                                        move || page.get() == Page::Overwrite,
+                                        overwrite_view::overwrite_page,
+                                    ))
+                                    .child(when(
                                         move || page.get() == Page::Rules,
                                         move || rules_view::rules_page(rule_seed),
+                                    ))
+                                    .child(when(
+                                        move || page.get() == Page::RuleSets,
+                                        rulesets_view::rulesets_page,
                                     ))
                                     .child(when(
                                         move || page.get() == Page::Diagnostics,

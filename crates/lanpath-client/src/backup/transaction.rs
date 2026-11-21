@@ -22,7 +22,12 @@ fn legacy_roots() -> Vec<String> {
         .filter(|root| {
             !matches!(
                 **root,
-                "rulesets" | "cache" | "resources" | "subscriptions.toml"
+                "rulesets"
+                    | ".cache"
+                    | "resources"
+                    | "subscriptions.toml"
+                    | "overwrite"
+                    | "rules.toml"
             )
         })
         .map(|root| (*root).into())
@@ -125,7 +130,7 @@ fn apply_pending_impl(dir: &Path, validate: bool) -> LanpathResult<()> {
         .copied()
         .filter(|name| {
             crate::resource_storage::unified(dir)
-                || !matches!(*name, "cache" | "resources" | "subscriptions.toml")
+                || !matches!(*name, ".cache" | "resources" | "subscriptions.toml")
         })
         .collect();
     let summary: BackupSummary =

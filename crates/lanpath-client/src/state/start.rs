@@ -235,48 +235,47 @@ impl ClientState {
                     return Err(self.rollback_mitm_started(e).await);
                 }
             };
-            // 启动时补齐「被引用但尚未下载」的社区规则集（best-effort）：用户在市场/规则集
-            // 页添加 remote 规则集后可能从未点过「立即更新」，backing 文件缺失会导致引用它的
-            // 规则在物化阶段被剥离（静默失效）；启动时补下载一次，失败仅告警（规则仍被剥
-            // 离，核心照常启动）。
-            crate::local_override::download_missing_rule_sets_warn_only(
-                &self.config.data_dir,
-                &config_json,
-                progress,
-            )
-            .await;
-
-            // [ADR-0002] Inject local override after compose, before panel features.
-            crate::local_override::inject_local_override_warn_only(
-                &self.config.data_dir,
-                &mut config_json,
-            );
-            core_config::apply_panel_features(&mut config_json, &features);
-
-            // 内置 CN 规则集本地化物化（ruleset_manager）：App 侧按镜像回退下载（jsDelivr →
-            // GitHub raw → GitHub 代理前缀）并改写为 type:local；下载全部失败的 tag 连同引用
-            // 它的路由 / DNS 规则降级移除——优先保证核心可启动，缺失 tag 暴露到运行状态供
-            // 命令层后台重试与自动重载。
-            progress("准备内置分流规则集（缺失时联网下载）");
-            let available = crate::ruleset_manager::ensure_builtin_rule_sets(
-                &self.config.data_dir,
-                &self.config.github_proxy_prefix,
-            )
-            .await;
-            let report = crate::ruleset_manager::materialize_rule_sets(
-                &mut config_json,
-                &self.config.data_dir,
-                &available,
-            );
-            if !report.missing_tags.is_empty() {
-                tracing::warn!(
-                    missing = ?report.missing_tags,
-                    stripped_route_rules = report.stripped_route_rules,
-                    stripped_dns_rules = report.stripped_dns_rules,
-                    "内置规则集未全部就绪，降级启动（CN 分流由 route.final 兜底）"
-                );
+            // 注入自定义规则（rules.toml）并按引用补齐与物化受管规则集（rulesets/）。
+            if let Ok(local_rules) = crate::rules::load_rules(&self.config.data_dir) {
+                crate::rules::apply_singbox_rules(&mut config_json, &local_rules);
             }
-            self.missing_rule_sets = report.missing_tags;
+            let ruleset_store = crate::rulesets::RuleSetStore::new(self.config.data_dir.clone());
+            if let Ok(mut manifest) = ruleset_store.load_manifest()
+                && (!manifest.items.is_empty() || !manifest.groups.is_empty())
+            {
+                for warning in
+                    crate::rulesets::expand_rule_set_groups(&mut config_json, &manifest.groups)
+                {
+                    tracing::warn!(warning, "ruleset group expansion");
+                }
+                if let Ok(requests) = crate::RemoteFetchContext::stopped(self.config.clone()) {
+                    let (changed, warnings) = crate::rulesets::prepare_referenced_missing(
+                        &self.config.data_dir,
+                        &config_json,
+                        &mut manifest.items,
+                        &requests,
+                    )
+                    .await;
+                    for warning in warnings {
+                        tracing::warn!(warning, "managed ruleset preparation");
+                    }
+                    if changed {
+                        let _ = ruleset_store.save_manifest(&manifest);
+                    }
+                }
+                let missing = crate::rulesets::apply_managed_rule_sets(
+                    &self.config.data_dir,
+                    &mut config_json,
+                    &manifest.items,
+                );
+                if !missing.is_empty() {
+                    tracing::warn!(?missing, "referenced managed rule sets missing local files");
+                }
+                self.missing_rule_sets = missing;
+            } else {
+                self.missing_rule_sets.clear();
+            }
+            core_config::apply_panel_features(&mut config_json, &features);
             config_json
         };
 

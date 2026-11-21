@@ -1,14 +1,12 @@
-//! 核心页“运行”卡片渲染：真实 running/busy/结果/停止 kind/错误展示与
-//! “校验并启动”“停止”按钮。状态与命令来自 App 级 `app_state` 共享信号
-//! （与概览/全局状态栏同一来源，切页不重建、不互相矛盾）；所有文案由
-//! 语义状态在展示层按当前语言生成。
+//! 核心页“运行状态”只读摘要卡片：展示来自 App 级 `app_state` 的真实
+//! running/busy/结果/异常退出状态（与概览/全局状态栏同一来源）；启动与停止
+//! 统一在概览页操作，避免重复入口。
 
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-use crate::app_state::{self, AppState};
-use crate::ui::button::{ButtonSize, ButtonVariant, button};
-use crate::ui::icon::{Icon, Tone, icon};
+use crate::app_state;
+use crate::ui::icon::Icon;
 use crate::ui::layout::{AlertTone, SurfaceLevel, alert_banner, section_title, surface};
 
 pub(super) fn runtime_card() -> impl IntoElement {
@@ -35,7 +33,7 @@ pub(super) fn runtime_card() -> impl IntoElement {
                             crate::ui::badge_with_icon(
                                 crate::ui::BadgeVariant::Success,
                                 Some(Icon::Shield),
-                                || t!("runtime.status.running"),
+                                || t!("runtime.badge.running"),
                             )
                         },
                     )
@@ -63,15 +61,6 @@ pub(super) fn runtime_card() -> impl IntoElement {
             .text_size(px(13.5))
             .font_weight(FontWeight::MEDIUM)
             .selectable(true),
-        )
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap_3()
-                .child(start_button(shared.clone()))
-                .child(stop_button(shared)),
         )
         .child(when(
             move || status.get().exit_error.is_some(),
@@ -109,40 +98,4 @@ pub(super) fn runtime_card() -> impl IntoElement {
                 )
             },
         ))
-}
-
-/// “校验并启动”：运行中/在途/命令 busy 时禁用（共享命令单飞）。
-fn start_button(shared: AppState) -> AnyElement {
-    let status = shared.status;
-    let command = shared.command;
-    button(ButtonVariant::Primary)
-        .size(ButtonSize::Md)
-        .test_id("core-start")
-        .prefix(|| icon(Icon::Play, Tone::OnPrimary))
-        .label(|| t!("overview.runtime.start"))
-        .loading(move || command.get().busy && !status.get().running)
-        .disabled(move || {
-            let status = status.get();
-            status.running || status.operation.is_some() || command.get().busy
-        })
-        .on_press(move || app_state::spawn_start(&shared))
-        .into_element()
-}
-
-/// “停止”：仅在真实运行中可用；命令结果（含真实停止 kind）共享反馈。
-fn stop_button(shared: AppState) -> AnyElement {
-    let status = shared.status;
-    let command = shared.command;
-    button(ButtonVariant::Outline)
-        .size(ButtonSize::Md)
-        .test_id("core-stop")
-        .prefix(|| icon(Icon::Stop, Tone::Muted))
-        .label(|| t!("overview.runtime.stop"))
-        .loading(move || command.get().busy && status.get().running)
-        .disabled(move || {
-            let status = status.get();
-            !status.running || status.operation.is_some() || command.get().busy
-        })
-        .on_press(move || app_state::spawn_stop(&shared))
-        .into_element()
 }

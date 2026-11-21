@@ -234,7 +234,7 @@ fn starting_from_overview_shares_real_state_across_pages() {
         texts(&app)
     );
 
-    // 切到核心页：同一共享状态（不是页面私有轮询），停止在核心页完成。
+    // 切到核心页：同一共享状态（只读摘要，不含重复启停按钮），停止统一回概览页完成。
     common::navigate(&mut app, "核心");
     app.wait_for("id:core-check-remote").unwrap();
     app.wait_for_within(
@@ -242,15 +242,17 @@ fn starting_from_overview_shares_real_state_across_pages() {
         Duration::from_secs(30),
     )
     .unwrap();
-    app.press("id:core-stop").unwrap();
+    assert!(!app.screen().matches("id:core-stop").unwrap());
+
+    // 回概览停止：真实状态一致（未运行），且不再 busy。
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within(
         "已停止核心（强制终止并回收本次进程）",
         Duration::from_secs(30),
     )
     .unwrap();
-
-    // 回概览：真实状态一致（未运行），且不再 busy。
-    common::navigate(&mut app, "概览");
     app.wait_for_within("未运行", Duration::from_secs(30))
         .unwrap();
     let seen = texts(&app);
@@ -285,8 +287,10 @@ fn start_task_survives_leaving_the_overview_page() {
         Duration::from_secs(30),
     )
     .unwrap();
-    // 停止并确认状态归零（无半启动/永久 busy）。
-    app.press("id:core-stop").unwrap();
+    // 回概览停止并确认状态归零（无半启动/永久 busy）。
+    common::navigate(&mut app, "概览");
+    app.wait_for("id:overview-stop").unwrap();
+    app.press("id:overview-stop").unwrap();
     app.wait_for_within(
         "已停止核心（强制终止并回收本次进程）",
         Duration::from_secs(30),

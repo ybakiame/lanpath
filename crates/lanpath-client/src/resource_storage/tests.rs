@@ -37,7 +37,7 @@ fn gpui_sections_preserve_each_other_and_other_shells_keep_legacy_paths() {
     assert_eq!(
         subs.cache_file(sub.id),
         gpui.path()
-            .join(format!("cache/subscriptions/{}.json", sub.id))
+            .join(format!(".cache/subscriptions/{}.json", sub.id))
     );
     std::fs::write(gpui.path().join("app.toml"), "[resources\n").unwrap();
     assert!(manager.load().is_err());
@@ -57,8 +57,8 @@ fn local_imports_activate_after_download_cache_is_removed() {
     )
     .unwrap();
     manager.merge_imported(&imported).unwrap();
-    std::fs::create_dir_all(root.path().join("cache/remotes")).unwrap();
-    std::fs::remove_dir_all(root.path().join("cache")).unwrap();
+    std::fs::create_dir_all(root.path().join(".cache/remotes")).unwrap();
+    std::fs::remove_dir_all(root.path().join(".cache")).unwrap();
     assert_eq!(manager.load_cached().unwrap().rewrites.len(), 1);
     assert_eq!(
         manager.load_cached().unwrap().hostnames,

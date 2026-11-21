@@ -94,7 +94,7 @@ fn copied_native_process_uses_own_portable_root_and_preserves_it_after_move() {
     run(&initial, None);
     let identity = fs::read(initial.join("data/.lanpath-desktop-nsh-root-id")).unwrap();
     let marker = fs::read(initial.join("data/.lanpath-desktop-nsh")).unwrap();
-    let rules = fs::read(initial.join("data/local_override.json")).unwrap();
+    let rules = fs::read(initial.join("data/rules.toml")).unwrap();
     fs::rename(&initial, &moved).unwrap();
     run(&moved, None);
     assert_eq!(
@@ -105,10 +105,7 @@ fn copied_native_process_uses_own_portable_root_and_preserves_it_after_move() {
         fs::read(moved.join("data/.lanpath-desktop-nsh-root-id")).unwrap(),
         identity
     );
-    assert_eq!(
-        fs::read(moved.join("data/local_override.json")).unwrap(),
-        rules
-    );
+    assert_eq!(fs::read(moved.join("data/rules.toml")).unwrap(), rules);
     run(&moved, Some(&directory.path().join("explicit")));
     assert!(
         !directory.path().join("data").exists(),

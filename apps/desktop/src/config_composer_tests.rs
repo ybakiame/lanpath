@@ -354,25 +354,27 @@ async fn compose_mihomo_warns_but_does_not_apply_custom_slices() {
     edit_config(temporary.path(), |config| {
         config.request_proxy_mode = RequestProxyMode::Core;
     });
-    // 用户定制切片（非内置分组）：写入一个自定义 selector。
-    std::fs::write(
-        temporary.path().join("config_slices.json"),
-        serde_json::to_vec(&serde_json::json!({
-            "version": 2,
-            "outbounds": {
-                "items": [{
-                    "id": "11111111-1111-1111-1111-111111111111",
-                    "name": "custom-selector",
-                    "enabled": true,
-                    "type": "selector",
-                    "outbounds": ["slice-auto"],
-                    "default": "slice-auto"
-                }]
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    // 用户定制切片：在 overwrite/sing-box/outbounds.json 加入自定义 selector。
+    let overwrite_store = lanpath_client::singbox_overwrite::SingboxOverwriteStore::new(
+        temporary.path().to_path_buf(),
+    );
+    overwrite_store
+        .save_raw(
+            lanpath_client::singbox_overwrite::SingboxSliceKind::Outbounds,
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "outbounds": [
+                    {
+                        "type": "selector",
+                        "tag": "slice-custom-selector",
+                        "outbounds": ["direct", "$nodes"],
+                        "default": "direct"
+                    },
+                    { "type": "direct", "tag": "direct" }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
 
     let preview = composer.compose().await.expect("mihomo composes");
     assert!(
@@ -441,16 +443,10 @@ async fn compose_uses_cache_without_any_network() {
     assert!(tags.contains(&"节点乙"), "{tags:?}");
     // 入站端口取已保存配置的 mixed_port 快照。
     assert_eq!(value["inbounds"][0]["listen_port"], 17891);
-    // 规则集全部缺失（离线）时按共享降级回报 missing tags，不静默。
-    assert!(!preview.missing_tags().is_empty(), "{preview:?}");
-    assert!(
-        preview
-            .warnings()
-            .iter()
-            .any(|warning| warning.contains("内置规则集缺失")),
-        "{:?}",
-        preview.warnings()
-    );
+    // 不再内置任何规则集，纯离线缓存合成不会产生规则集缺失告警。
+    assert!(preview.missing_tags().is_empty(), "{preview:?}");
+    assert!(preview.warnings().is_empty(), "{:?}", preview.warnings());
+    assert_eq!(value["route"]["rule_set"], serde_json::json!([]));
 }
 
 #[tokio::test]
@@ -634,7 +630,11 @@ async fn compose_warns_and_falls_back_when_slices_are_corrupt() {
     edit_config(temporary.path(), |config| {
         config.request_proxy_mode = RequestProxyMode::Core;
     });
-    std::fs::write(temporary.path().join("config_slices.json"), "{not json").unwrap();
+    std::fs::write(
+        temporary.path().join("overwrite/sing-box/dns.json"),
+        "{not json",
+    )
+    .unwrap();
 
     let preview = composer
         .compose()
@@ -645,9 +645,152 @@ async fn compose_warns_and_falls_back_when_slices_are_corrupt() {
         preview
             .warnings()
             .iter()
-            .any(|warning| warning.contains("配置切片读取失败")),
+            .any(|warning| warning.contains("配置切片读取失败") && warning.contains("dns.json")),
         "{:?}",
         preview.warnings()
+    );
+}
+
+#[tokio::test]
+async fn compose_applies_singbox_overwrite_slices_and_expands_nodes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (subscriptions, _, composer) = services(temporary.path());
+    let id = add_active(&subscriptions, "切片合成订阅", "https://example.com/s.yaml");
+    seed_cache(temporary.path(), id);
+    edit_config(temporary.path(), |config| {
+        config.request_proxy_mode = RequestProxyMode::Core;
+    });
+    let overwrite_store = lanpath_client::singbox_overwrite::SingboxOverwriteStore::new(
+        temporary.path().to_path_buf(),
+    );
+    overwrite_store
+        .save_raw(
+            lanpath_client::singbox_overwrite::SingboxSliceKind::Log,
+            r#"{ "log": { "level": "debug", "timestamp": false } }"#,
+        )
+        .unwrap();
+
+    let preview = composer.compose().await.expect("sing-box composes");
+    let value: serde_json::Value = serde_json::from_str(preview.content()).unwrap();
+    assert_eq!(value["log"]["level"], "debug");
+    assert_eq!(value["log"]["timestamp"], false);
+    let proxy = value["outbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["tag"] == "proxy")
+        .expect("proxy group");
+    let members = proxy["outbounds"].as_array().unwrap();
+    assert!(members.iter().any(|m| m == "节点甲"), "{members:?}");
+    assert!(members.iter().any(|m| m == "节点乙"), "{members:?}");
+    assert!(!members.iter().any(|m| m == "$nodes"), "{members:?}");
+    assert!(
+        !temporary.path().join("local_override.json").exists(),
+        "sing-box composition must never create legacy local_override.json"
+    );
+    // 默认切片不再内置 geosite-private / geoip-private，完全开放给用户自选。
+    let route_sets = value["route"]["rule_set"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        route_sets.is_empty(),
+        "unexpected builtin rule sets: {route_sets:?}"
+    );
+}
+
+#[tokio::test]
+async fn compose_expands_ruleset_groups_across_rules_and_dns_and_injects_local_sets() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (subscriptions, _, composer) = services(temporary.path());
+    let id = add_active(&subscriptions, "分组展开订阅", "https://example.com/g.yaml");
+    seed_cache(temporary.path(), id);
+    edit_config(temporary.path(), |config| {
+        config.request_proxy_mode = RequestProxyMode::Core;
+    });
+
+    let rs_store = lanpath_client::rulesets::RuleSetStore::new(temporary.path().to_path_buf());
+    rs_store
+        .save_manifest(&lanpath_client::rulesets::RuleSetManifest {
+            version: lanpath_client::rulesets::MANIFEST_VERSION,
+            items: vec![
+                lanpath_client::rulesets::RuleSetEntry {
+                    id: "rs-a".into(),
+                    tag: "corp-a".into(),
+                    name: "Corp A".into(),
+                    category: "custom".into(),
+                    source: lanpath_client::rulesets::RuleSetSource::Manual {
+                        content: serde_json::json!({"version": 2, "rules": [{"domain_suffix": ["a.corp"]}]})
+                            .to_string(),
+                    },
+                    remote_state: Default::default(),
+                    created_at: 1_700_000_000,
+                },
+                lanpath_client::rulesets::RuleSetEntry {
+                    id: "rs-b".into(),
+                    tag: "corp-b".into(),
+                    name: "Corp B".into(),
+                    category: "custom".into(),
+                    source: lanpath_client::rulesets::RuleSetSource::Manual {
+                        content: serde_json::json!({"version": 2, "rules": [{"domain_suffix": ["b.corp"]}]})
+                            .to_string(),
+                    },
+                    remote_state: Default::default(),
+                    created_at: 1_700_000_000,
+                },
+            ],
+            groups: vec![lanpath_client::rulesets::RuleSetGroup {
+                id: "grp-corp".into(),
+                tag: "corp-all".into(),
+                name: "公司全部".into(),
+                description: String::new(),
+                member_tags: vec!["corp-a".into(), "corp-b".into()],
+                created_at: 1_700_000_000,
+            }],
+        })
+        .unwrap();
+
+    // 在 rules.toml 中引用 @corp-all 分组
+    crate::rules::Rules::for_root(temporary.path())
+        .unwrap()
+        .add_lines("ruleset @corp-all -> direct", true)
+        .unwrap();
+
+    // 在 dns.json 中引用 @corp-all 分组
+    let overwrite_store = lanpath_client::singbox_overwrite::SingboxOverwriteStore::new(
+        temporary.path().to_path_buf(),
+    );
+    let mut dns_val = overwrite_store
+        .load_value(lanpath_client::singbox_overwrite::SingboxSliceKind::Dns)
+        .unwrap();
+    dns_val["dns"]["rules"] = serde_json::json!([{ "rule_set": "@corp-all", "server": "local" }]);
+    overwrite_store
+        .save_raw(
+            lanpath_client::singbox_overwrite::SingboxSliceKind::Dns,
+            &serde_json::to_string_pretty(&dns_val).unwrap(),
+        )
+        .unwrap();
+
+    let preview = composer.compose().await.expect("compose succeeds");
+    let value: serde_json::Value = serde_json::from_str(preview.content()).unwrap();
+    assert_eq!(
+        value["dns"]["rules"][0]["rule_set"],
+        serde_json::json!(["corp-a", "corp-b"])
+    );
+    let route_rules = value["route"]["rules"].as_array().unwrap();
+    assert!(route_rules.iter().any(|r| {
+        r.get("rule_set") == Some(&serde_json::json!(["corp-a", "corp-b"]))
+            && r.get("outbound") == Some(&serde_json::json!("direct"))
+    }));
+    let sets = value["route"]["rule_set"].as_array().unwrap();
+    assert_eq!(sets.len(), 2);
+    assert!(
+        sets.iter()
+            .any(|s| s["tag"] == "corp-a" && s["path"] == "rulesets/files/rs-a.json")
+    );
+    assert!(
+        sets.iter()
+            .any(|s| s["tag"] == "corp-b" && s["path"] == "rulesets/files/rs-b.json")
     );
 }
 

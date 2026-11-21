@@ -14,10 +14,8 @@ use futures::FutureExt;
 use lanpath_client::{
     config::ClientConfig,
     core_config::{MitmChain, PanelFeatures, apply_panel_features, compose_singbox_config},
-    local_override::{
-        CoreLocalOverride, LocalRule, RuleAction, RuleMatchType, apply_local_override,
-    },
     mitm::{MitmBuildOptions, build_mitm_proxy},
+    rules::{LocalRule, RuleAction, RuleMatchType, apply_singbox_rules},
     runner::CoreRunner,
 };
 use lanpath_mitm::{MemoryRecorder, RewriteEngine, RewriteKind, RewriteRule};
@@ -167,22 +165,19 @@ async fn real_singbox_mitm_mock_skips_only_selected_main_in_resolution() {
         ],
         "route": {"final": "direct"}
     });
-    let local = CoreLocalOverride {
-        rules: vec![LocalRule {
-            id: "fixture-local-reject".into(),
-            name: String::new(),
-            enabled: true,
-            match_type: RuleMatchType::Domain,
-            target: "local.two.probe.invalid".into(),
-            action: RuleAction::Reject,
-            advanced: Default::default(),
-            note: String::new(),
-            created_at: 0,
-            sort_order: 0,
-            builtin: false,
-        }],
-        ..Default::default()
-    };
+    let local_rules = vec![LocalRule {
+        id: "fixture-local-reject".into(),
+        name: String::new(),
+        enabled: true,
+        match_type: RuleMatchType::Domain,
+        target: "local.two.probe.invalid".into(),
+        action: RuleAction::Reject,
+        advanced: Default::default(),
+        note: String::new(),
+        created_at: 0,
+        sort_order: 0,
+        builtin: false,
+    }];
     let runner =
         CoreRunner::create(lanpath_common::CoreType::SingBox, &binary, dir.path()).unwrap();
     drop((main_reservation, return_reservation, api_reservation));
@@ -207,7 +202,7 @@ async fn real_singbox_mitm_mock_skips_only_selected_main_in_resolution() {
                         "clash_mode": "rule", "domain": ["owned.invalid"], "outbound": "direct"
                     }));
             }
-            apply_local_override(&mut config, &local);
+            apply_singbox_rules(&mut config, &local_rules);
             let features = PanelFeatures {
                 tun_enabled: false,
                 tun_stack: "mixed".into(),

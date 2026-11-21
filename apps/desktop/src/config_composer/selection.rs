@@ -1,4 +1,4 @@
-//! Overview preview reads persisted source unless an associated script requires composition.
+//! Overview preview reads persisted source unless an associated script or customized sing-box slices require composition.
 use super::*;
 
 #[derive(Clone, PartialEq)]
@@ -13,7 +13,7 @@ pub(crate) struct SelectedPreview {
 impl ConfigComposer {
     pub(crate) async fn selected_preview(&self) -> LanpathResult<SelectedPreview> {
         let _activity = self.root.activity().read().await;
-        let (config, selected, source) = {
+        let (config, selected, source, slices_customized) = {
             let _guard = self.root.business_guard();
             let config = load_request_config(self.root.path())?;
             let selected = self
@@ -23,9 +23,12 @@ impl ConfigComposer {
                 .find(|s| Some(s.id) == config.active_subscription_id && s.enabled)
                 .ok_or_else(|| LanpathError::Validation("请先选择一个启用的订阅".into()))?;
             let source = self.store().load_source(selected.id)?;
-            (config, selected, source)
+            let bundle =
+                SingboxOverwriteStore::new(self.root.path().to_path_buf()).load_bundle_resilient();
+            let customized = config.core_type == CoreType::SingBox && bundle.is_customized();
+            (config, selected, source, customized)
         };
-        if selected.profile_id.is_none() {
+        if selected.profile_id.is_none() && !slices_customized {
             let source = source.ok_or_else(|| {
                 LanpathError::Validation("所选订阅尚无已保存原文，请先刷新订阅".into())
             })?;

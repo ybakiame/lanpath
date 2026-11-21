@@ -7,9 +7,8 @@
 //! CN destinations must resolve through the local (direct) resolver so they connect to real,
 //! reachable IPs.
 //!
-//! The CN split itself is owned by the baseline ([`super::cn_baseline_dns_rules`]): the
-//! `geosite-cn → local` rule already sends CN domains to the domestic resolver and the
-//! `clash_mode` rules already pin direct/global mode. FakeIP only adds two rules on top:
+//! Clash `direct` / `global` mode switching is owned by the baseline
+//! ([`super::clash_mode_dns_rules`]). FakeIP adds two rules on top:
 //!
 //! 1. `HTTPS` / `SVCB` (and `AAAA` when IPv6 is off) queries are answered `NOERROR` with no
 //!    records — they must never leak to a resolver (head rule). Since the drop rule is now
@@ -209,10 +208,9 @@ pub(super) fn apply_fakeip_mode(composed: &mut Value, features: &PanelFeatures) 
 /// sing-box 1.14 remote rule-set cache — in the client's persistent data directory across core
 /// restarts. Empty `data_dir` leaves the sing-box default untouched.
 ///
-/// The rule-set cache is the offline fallback for the synchronous startup download (see
-/// [`super::ensure_cn_rule_sets`]): once a remote rule set has been downloaded successfully,
-/// its content is restored from the cache on the next start instead of failing the whole core
-/// when the URL is unreachable.
+/// The rule-set cache is the offline fallback for synchronous startup downloads: once a remote
+/// rule set has been downloaded successfully, its content is restored from the cache on the next
+/// start instead of failing the whole core when the URL is unreachable.
 pub(super) fn ensure_cache_file(
     obj: &mut serde_json::Map<String, Value>,
     data_dir: &str,

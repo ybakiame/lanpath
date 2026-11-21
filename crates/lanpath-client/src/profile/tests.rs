@@ -181,7 +181,7 @@ fn singbox_template_builds_groups_and_route() {
             { "clash_mode": "direct", "action": "route", "server": "local" },
             { "clash_mode": "global", "action": "route", "server": "proxy" }
         ]),
-        "built-in baseline DNS rules (country lists are user opt-in)"
+        "Clash mode DNS routing rules"
     );
     assert_eq!(
         cfg["dns"]["final"], "proxy",
@@ -190,17 +190,10 @@ fn singbox_template_builds_groups_and_route() {
     assert_eq!(cfg["dns"]["reverse_mapping"], true);
     assert_eq!(cfg["dns"]["strategy"], "prefer_ipv4");
 
-    // Remote rule sets download through the direct-dial HTTP client (never via the proxy),
-    // resolved by the direct `local` DNS (see ensure_cn_rule_sets / ensure_rule_set_http_client).
+    // No built-in rule sets are shipped; user-added remote rule sets can download through
+    // the direct-dial HTTP client resolved by `local` DNS (see ensure_rule_set_http_client).
     let rule_sets = cfg["route"]["rule_set"].as_array().unwrap();
-    assert_eq!(rule_sets.len(), 2, "two built-in remote rule sets");
-    for rs in rule_sets {
-        assert_eq!(
-            rs["http_client"], "rule-set-direct",
-            "remote rule set {} must download via the direct HTTP client",
-            rs["tag"]
-        );
-    }
+    assert!(rule_sets.is_empty(), "template ships no built-in rule sets");
     assert_eq!(
         cfg["http_clients"],
         json!([{ "tag": "rule-set-direct", "domain_resolver": { "server": "local" } }]),

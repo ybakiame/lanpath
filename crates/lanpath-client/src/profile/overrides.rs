@@ -251,11 +251,12 @@ async fn fetch_remote_override(
 /// (missing uses default settings), does not affect functionality.
 async fn fetch_remote_text(cache_dir: &Path, url: &str) -> LanpathResult<String> {
     let parent = cache_dir.parent().unwrap_or(cache_dir);
-    let data_dir = if cache_dir.ends_with("cache/profiles") {
-        parent.parent().unwrap_or(parent)
-    } else {
-        parent
-    };
+    let data_dir =
+        if cache_dir.ends_with(".cache/profiles") || cache_dir.ends_with("cache/profiles") {
+            parent.parent().unwrap_or(parent)
+        } else {
+            parent
+        };
     crate::fetch_resource_text(data_dir, url, Duration::from_secs(30)).await
 }
 

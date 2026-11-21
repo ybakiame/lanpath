@@ -12,13 +12,7 @@ async fn quick_rules_and_typescript_pass_both_real_core_validators() {
     let rules=parse_lines("domain example.com -> direct\nsuffix example.org -> proxy\nkeyword ads -> reject\ncidr 10.0.0.0/8 -> direct\ncidr 2001:db8::/32 -> direct\nport 443 -> proxy\nport 8000-9000 -> reject\nprocess not-running-test.exe -> direct").unwrap();
     let js = crate::ts_override::compile("function main(config: any) { return config; }").unwrap();
     let mut sb = json!({"inbounds":[],"outbounds":[{"tag":"direct","type":"direct"},{"tag":"proxy","type":"direct"}],"route":{"rules":[],"final":"direct"}});
-    lanpath_client::apply_local_override(
-        &mut sb,
-        &lanpath_client::CoreLocalOverride {
-            rules: rules.clone(),
-            ..Default::default()
-        },
-    );
+    lanpath_client::apply_singbox_rules(&mut sb, &rules);
     normalize_singbox_ports(&mut sb);
     sb = lanpath_client::profile::apply_js_override(sb, &js)
         .await

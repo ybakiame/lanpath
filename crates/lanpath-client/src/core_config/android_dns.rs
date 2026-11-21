@@ -43,8 +43,8 @@ pub(crate) fn main_outbound_selector_tag(obj: &serde_json::Map<String, Value>) -
 ///   templates (`platforms/android/realip.json` / `fakeip.json` both use `type: https` for the
 ///   proxied resolver); when detour target is "empty direct outbound", omit `detour` field (see
 ///   [`is_empty_direct_outbound`]);
-/// - `rules` = [`super::cn_baseline_dns_rules`] (`clash_mode` direct/global → local/remote,
-///   `geosite-cn` → local), `final = remote`, `reverse_mapping = true`, `strategy = prefer_ipv4`.
+/// - `rules` = [`super::clash_mode_dns_rules`] (`clash_mode` direct/global → local/proxy),
+///   `final = proxy`, `reverse_mapping = true`, `strategy = prefer_ipv4`.
 ///   `reverse_mapping` lets sing-box map a hijacked-DNS-resolved IP back to its domain so the
 ///   Clash API `metadata.host` is populated for TUN connections whose payload cannot be sniffed
 ///   (otherwise the connection record domain stays blank).
@@ -53,9 +53,7 @@ pub(crate) fn main_outbound_selector_tag(obj: &serde_json::Map<String, Value>) -
 /// real `sing-box check` (1.13+, legacy `address` format needs
 /// `ENABLE_DEPRECATED_LEGACY_DNS_SERVERS`) passes without environment variable. After injection
 /// supplement `route.default_domain_resolver` (sing-box 1.12+ requires explicit declaration when
-/// `dns.servers` exists, otherwise `check` rejects, see [`ensure_domain_resolver`]) and the
-/// CN-split rule-set registry (the injected `geosite-cn` DNS rule must resolve, see
-/// [`super::ensure_cn_rule_sets`]).
+/// `dns.servers` exists, otherwise `check` rejects, see [`ensure_domain_resolver`]).
 ///
 /// Note: sing-box rejects DNS server detour to "empty direct outbound" at startup phase (error
 /// `detour to an empty direct outbound makes no sense`, empty = DialerOptions all default).
@@ -97,22 +95,12 @@ pub fn inject_android_dns(composed: &mut Value) {
                 { "tag": "local", "type": "https", "server": "223.5.5.5", "server_port": 443 },
                 Value::Object(remote)
             ],
-            "rules": super::cn_baseline_dns_rules(),
+            "rules": super::clash_mode_dns_rules(),
             "final": "proxy",
             "reverse_mapping": true,
             "strategy": "prefer_ipv4"
         }),
     );
-    // The injected `geosite-cn` DNS rule references a rule set; make sure the CN-split registry
-    // exists even when called on a config that did not come from `singbox_template` (idempotent).
-    let route = obj
-        .entry("route")
-        .or_insert_with(|| Value::Object(Default::default()));
-    if let Some(route_obj) = route.as_object_mut() {
-        super::ensure_cn_rule_sets(route_obj);
-    }
-    // Direct-dial HTTP client for the rule sets registered just above (never via the proxy).
-    super::ensure_rule_set_http_client(obj);
     super::ensure_domain_resolver(obj);
     // Proxy outbound server domain resolved via local direct, avoiding remote loop (see function docs).
     ensure_outbound_domain_resolvers(obj);

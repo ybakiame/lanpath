@@ -15,7 +15,7 @@ pub(super) fn capture_manifests(dir: &Path, files: &mut Files) -> LanpathResult<
             "subscriptions.json".into(),
             serde_json::to_vec(&resource_storage::load_subscriptions(dir)?)?,
         );
-        files.remove("cache/remotes/refresh.json"); // runtime age is not portable configuration
+        files.remove(".cache/remotes/refresh.json"); // runtime age is not portable configuration
     }
     Ok(())
 }
@@ -53,10 +53,10 @@ pub(super) fn restore(dir: &Path, files: &mut Files, document: String) -> Lanpat
 pub(super) fn restore_legacy(files: &mut Files) -> LanpathResult<()> {
     remap(files, |name| {
         for (current, legacy) in [
-            ("cache/remotes/", "remote_cache/"),
-            ("cache/subscriptions/", "subscription_cache/"),
-            ("cache/profiles/", "profile_cache/"),
-            ("cache/scripts/", "scripts/"),
+            (".cache/remotes/", "remote_cache/"),
+            (".cache/subscriptions/", "subscription_cache/"),
+            (".cache/profiles/", "profile_cache/"),
+            (".cache/scripts/", "scripts/"),
             ("resources/imports/", "remote_cache/"),
         ] {
             if let Some(suffix) = name.strip_prefix(current) {
@@ -114,10 +114,10 @@ mod tests {
             .add("fixture", "https://example.invalid", true, None)
             .unwrap();
         for (name, bytes) in [
-            ("cache/remotes/a.json", "remote"),
-            ("cache/remotes/refresh.json", "runtime"),
+            (".cache/remotes/a.json", "remote"),
+            (".cache/remotes/refresh.json", "runtime"),
             ("resources/imports/local/local.json", "local source"),
-            ("cache/icons/icon.png", "icon"),
+            (".cache/icons/icon.png", "icon"),
         ] {
             let path = source.path().join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -126,8 +126,8 @@ mod tests {
         let snapshot = crate::backup::capture(source.path(), None).unwrap();
         assert_eq!(snapshot.summary.version, 3);
         assert_eq!(snapshot.summary.subscriptions, 1);
-        assert!(!snapshot.files.contains_key("cache/remotes/refresh.json"));
-        assert!(!snapshot.files.contains_key("cache/icons/icon.png"));
+        assert!(!snapshot.files.contains_key(".cache/remotes/refresh.json"));
+        assert!(!snapshot.files.contains_key(".cache/icons/icon.png"));
         let encrypted = crate::backup::encode(&snapshot, "roundtrip-password").unwrap();
         let snapshot = crate::backup::decode(&encrypted, "roundtrip-password").unwrap();
         let target = configured();
@@ -155,7 +155,7 @@ mod tests {
                 .join("resources/imports/local/local.json")
                 .is_file()
         );
-        assert!(target.path().join("cache/remotes/a.json").is_file());
+        assert!(target.path().join(".cache/remotes/a.json").is_file());
         assert!(!target.path().join("remotes.json").exists());
         assert_eq!(
             crate::settings::load_app_section::<serde_json::Value>(target.path(), "appearance")
@@ -190,7 +190,7 @@ mod tests {
                 .files
                 .contains_key("resources/imports/local/id.json")
         );
-        assert!(snapshot.files.contains_key("cache/subscriptions/a.json"));
+        assert!(snapshot.files.contains_key(".cache/subscriptions/a.json"));
         assert!(!snapshot.files.contains_key("subscriptions.json"));
         super::super::snapshot::validate(&mut snapshot).unwrap();
         assert_eq!(snapshot.summary.subscriptions, 1);

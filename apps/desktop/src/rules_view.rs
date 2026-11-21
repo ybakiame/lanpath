@@ -3,6 +3,8 @@ mod editor;
 mod rows;
 
 use crate::rules::{Rules, rule_line};
+use crate::rulesets::{RuleSetRow, RuleSetsService};
+use crate::rulesets_view::{GroupSheetController, groups_sheet};
 use crate::ui::{
     BadgeVariant, badge,
     button::{ButtonVariant, button},
@@ -10,6 +12,7 @@ use crate::ui::{
     layout::{AlertTone, alert_banner, page_header, section_title},
 };
 use lanpath_client::LocalRule;
+use lanpath_client::rulesets::RuleSetGroup;
 use lanpath_common::LanpathResult;
 use nsh_base::theme;
 use nsh_core::prelude::*;
@@ -18,6 +21,9 @@ use nsh_core::prelude::*;
 pub(super) struct State {
     service: Option<Rules>,
     rules: Signal<Vec<LocalRule>>,
+    pub(super) ruleset_items: Signal<Vec<RuleSetRow>>,
+    pub(super) ruleset_groups: Signal<Vec<RuleSetGroup>>,
+    pub(super) group_sheet: GroupSheetController,
     mode: Signal<usize>,
     kind: Signal<String>,
     target: Signal<String>,
@@ -41,9 +47,19 @@ impl State {
             },
             Err(error) => (vec![], Some(error.to_string())),
         };
+        let rs_snapshot = RuleSetsService::open()
+            .ok()
+            .and_then(|s| s.list_snapshot().ok())
+            .unwrap_or_default();
+        let ruleset_items = signal(rs_snapshot.items);
+        let ruleset_groups = signal(rs_snapshot.groups);
+        let group_sheet = GroupSheetController::new(ruleset_items, ruleset_groups);
         Self {
             service: service.ok(),
             rules: signal(rules),
+            ruleset_items,
+            ruleset_groups,
+            group_sheet,
             mode: signal(0),
             kind: signal("suffix".into()),
             target: signal(seed),
@@ -116,7 +132,10 @@ pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
     seed.set(String::new());
     let draft = state.clone();
     crate::navigation::protect(move || {
-        if !draft.target.get().is_empty() || !draft.batch.get().is_empty() {
+        if !draft.target.get().is_empty()
+            || !draft.batch.get().is_empty()
+            || draft.group_sheet.is_dirty()
+        {
             crate::navigation::LeaveState::Dirty
         } else {
             crate::navigation::LeaveState::Clean
@@ -124,6 +143,7 @@ pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
     });
     let form_state = state.clone();
     let remove_state = state.clone();
+    let sheet_ctrl = state.group_sheet.clone();
     let pending = state.pending_remove;
     let error = state.error;
     let search = state.search;
@@ -188,6 +208,7 @@ pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
                 ),
         )
         .child(rows::rows(state, filtered))
+        .child(groups_sheet(sheet_ctrl))
         .child(
             crate::ui::confirm_dialog(move || pending.get().is_some())
                 .destructive()

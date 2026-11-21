@@ -4,10 +4,13 @@ use serde_json::Value;
 pub fn document_has_paths(name: &str) -> bool {
     matches!(
         name,
-        "client.json" | "local_override.json" | "config_slices.json"
+        "client.json"
+            | "overwrite/sing-box/experimental.json"
+            | "overwrite/sing-box/log.json"
+            | "overwrite/sing-box/route.json"
     ) || name
         .strip_prefix("subscription_cache/")
-        .or_else(|| name.strip_prefix("cache/subscriptions/"))
+        .or_else(|| name.strip_prefix(".cache/subscriptions/"))
         .is_some_and(|leaf| {
             !leaf.contains('/') && leaf.ends_with(".json") && !leaf.ends_with(".source.json")
         })
@@ -25,19 +28,22 @@ pub fn relocate_document_paths(name: &str, value: &mut Value, from: &str, to: &s
                 changed |= relocate_at(value, pointer, from, to);
             }
         }
-        "local_override.json" => {
-            if let Some(rules) = value
-                .pointer_mut("/singbox/rule_sets")
+        "overwrite/sing-box/experimental.json" => {
+            changed |= relocate_at(value, "/experimental/cache_file/path", from, to);
+        }
+        "overwrite/sing-box/log.json" => {
+            changed |= relocate_at(value, "/log/output", from, to);
+        }
+        "overwrite/sing-box/route.json" => {
+            if let Some(sets) = value
+                .pointer_mut("/route/rule_set")
                 .and_then(Value::as_array_mut)
             {
-                for rule in rules {
-                    changed |= relocate_at(rule, "/source/local/path", from, to);
-                    changed |= relocate_at(rule, "/source/bundled/name", from, to);
+                for set in sets {
+                    changed |= relocate_at(set, "/path", from, to);
+                    changed |= relocate_at(set, "/initial_path", from, to);
                 }
             }
-        }
-        "config_slices.json" => {
-            changed |= relocate_at(value, "/experimental/cache_file/path", from, to);
         }
         _ if document_has_paths(name) => {
             if let Some(nodes) = value.get_mut("singbox_nodes").and_then(Value::as_array_mut) {

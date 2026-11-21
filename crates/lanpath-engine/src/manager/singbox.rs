@@ -41,12 +41,16 @@ impl SingBoxProcessManager {
         })
     }
 
+    fn runtime_dir(&self) -> PathBuf {
+        self.config_dir.join("runtime").join("sing-box")
+    }
+
     fn config_path(&self) -> PathBuf {
-        self.config_dir.join("sing-box.json")
+        self.runtime_dir().join("config.json")
     }
 
     fn pid_path(&self) -> PathBuf {
-        self.config_dir.join("sing-box.pid")
+        self.runtime_dir().join("sing-box.pid")
     }
 
     /// Stop the owned child or recover its exact recorded identity.
@@ -100,6 +104,13 @@ impl CoreManager for SingBoxProcessManager {
         let mut proc = self.process.write().await;
         if proc.is_some() {
             return Err(LanpathError::Core("sing-box already running".into()));
+        }
+
+        let runtime_dir = self.runtime_dir();
+        if let Err(e) = tokio::fs::create_dir_all(&runtime_dir).await {
+            let msg = format!("failed to create sing-box runtime dir: {}", e);
+            *self.last_error.write().await = msg.clone();
+            return Err(LanpathError::Core(msg));
         }
 
         let config_path = self.config_path();

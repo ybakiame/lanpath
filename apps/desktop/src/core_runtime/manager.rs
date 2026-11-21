@@ -71,11 +71,10 @@ pub(super) fn read_pid_identity(
     struct PidRecord {
         identity: ProcessIdentity,
     }
-    let name = match core_type {
-        CoreType::SingBox => "sing-box.pid",
-        CoreType::Mihomo => "mihomo.pid",
+    let path = match core_type {
+        CoreType::SingBox => root.join("runtime").join("sing-box").join("sing-box.pid"),
+        CoreType::Mihomo => root.join("runtime").join("mihomo").join("mihomo.pid"),
     };
-    let path = root.join(name);
     let bytes = std::fs::read(&path).map_err(|error| {
         LanpathError::Core(format!("无法读取进程身份记录 {}:{error}", path.display()))
     })?;

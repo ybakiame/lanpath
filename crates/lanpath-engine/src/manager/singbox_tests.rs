@@ -25,6 +25,7 @@ impl Fixture {
     async fn install_child(&self) {
         let (child, pid) = fixture_child();
         *self.manager.process.write().await = Some(child);
+        std::fs::create_dir_all(self.manager.runtime_dir()).unwrap();
         lifecycle::write_pid_file(&self.manager.pid_path(), pid, &fixture_binary()).unwrap();
         *self.manager.start_time.write().await = Some(Instant::now());
     }

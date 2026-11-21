@@ -10,10 +10,10 @@ pub fn capture(dir: &Path, appearance: Option<Appearance>) -> LanpathResult<Snap
     for root in ROOTS {
         // The portable snapshot keeps its logical client.json representation;
         // app.toml is reconstructed at restore time to preserve local appearance.
-        if *root == "cache" {
+        if *root == ".cache" {
             if crate::resource_storage::unified(dir) {
                 for name in ["remotes", "subscriptions", "profiles", "scripts"] {
-                    collect(dir, &format!("cache/{name}"), &mut files)?;
+                    collect(dir, &format!(".cache/{name}"), &mut files)?;
                 }
             }
         } else if *root == "resources" {
@@ -193,11 +193,20 @@ pub(super) fn validate(snapshot: &mut Snapshot) -> LanpathResult<()> {
     {
         return Err(invalid("备份中的订阅或模板关联无效"));
     }
-    if let Some(bytes) = snapshot.files.get("config_slices.json") {
-        serde_json::from_slice::<crate::config_slices::ConfigSlices>(bytes)?.validate()?;
+    for kind in crate::singbox_overwrite::SingboxSliceKind::ALL {
+        let key = format!("overwrite/sing-box/{}", kind.file_name());
+        if let Some(bytes) = snapshot.files.get(&key) {
+            crate::singbox_overwrite::SingboxOverwriteStore::validate_backup_slice_bytes(
+                kind, bytes,
+            )?;
+        }
     }
-    if let Some(bytes) = snapshot.files.get("local_override.json") {
-        let _: crate::LocalOverride = serde_json::from_slice(bytes)?;
+    if let Some(bytes) = snapshot.files.get("rules.toml") {
+        let text = std::str::from_utf8(bytes).map_err(|error| invalid(&error.to_string()))?;
+        let _ = crate::rules::parse_rules_toml(text)?;
+    }
+    if let Some(bytes) = snapshot.files.get("rulesets/manifest.json") {
+        let _ = crate::rulesets::RuleSetStore::validate_manifest_bytes(bytes)?;
     }
     let _: Vec<crate::RemoteResource> = serde_json::from_value(read("remotes.json")?)?;
     if let Some(a) = &snapshot.summary.appearance

@@ -41,12 +41,16 @@ impl MihomoProcessManager {
         })
     }
 
+    fn runtime_dir(&self) -> PathBuf {
+        self.config_dir.join("runtime").join("mihomo")
+    }
+
     fn config_path(&self) -> PathBuf {
-        self.config_dir.join("mihomo.yaml")
+        self.runtime_dir().join("config.yaml")
     }
 
     fn pid_path(&self) -> PathBuf {
-        self.config_dir.join("mihomo.pid")
+        self.runtime_dir().join("mihomo.pid")
     }
 
     fn spawn_args(&self) -> [OsString; 4] {
@@ -59,6 +63,12 @@ impl MihomoProcessManager {
     }
 
     async fn write_config(&self, config: &Value) -> LanpathResult<PathBuf> {
+        let runtime_dir = self.runtime_dir();
+        if let Err(e) = tokio::fs::create_dir_all(&runtime_dir).await {
+            let msg = format!("failed to create mihomo runtime dir: {e}");
+            *self.last_error.write().await = msg.clone();
+            return Err(LanpathError::Core(msg));
+        }
         let config_path = self.config_path();
         let yaml = serde_yaml::to_string(config).map_err(|error| {
             LanpathError::Core(format!("failed to serialize mihomo config: {error}"))

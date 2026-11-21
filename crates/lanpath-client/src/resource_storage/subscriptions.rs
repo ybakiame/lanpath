@@ -1,4 +1,4 @@
-//! GPUI subscriptions have their own editable TOML document.
+//! 订阅清单独立 TOML 文档（`subscriptions.toml`）。
 use lanpath_common::{LanpathError, LanpathResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -21,7 +21,7 @@ pub fn load_subscriptions(root: &Path) -> LanpathResult<Vec<crate::Subscription>
                     .is_some_and(|section| section.get("subscriptions").is_some())
             {
                 return Err(LanpathError::Config(
-                    "旧订阅清单尚未迁移，请重启 GPUI 完成自动迁移".into(),
+                    "检测到不受支持的旧订阅清单布局，请使用新的数据目录".into(),
                 ));
             }
             Ok(Vec::new())

@@ -6,8 +6,8 @@ use crate::{
 };
 use lanpath_client::{
     ClientConfig,
-    config_slices::ConfigSlicesStore,
     diagnose::{DiagReport, DiagnoseInput, diagnose_connectivity},
+    singbox_overwrite::{SingboxOverwriteStore, extract_dns_servers},
 };
 use lanpath_common::{LanpathError, LanpathResult};
 use std::path::Path;
@@ -60,7 +60,7 @@ pub(crate) async fn run(target: String) -> LanpathResult<DiagReport> {
     Ok(report)
 }
 fn input(root: &Path, config: &ClientConfig, target: String) -> LanpathResult<DiagnoseInput> {
-    let slices = ConfigSlicesStore::new(root.to_path_buf()).load()?;
+    let bundle = SingboxOverwriteStore::new(root.to_path_buf()).load_bundle_resilient();
     Ok(DiagnoseInput {
         domain: target,
         mixed_port: config.mixed_port,
@@ -68,7 +68,7 @@ fn input(root: &Path, config: &ClientConfig, target: String) -> LanpathResult<Di
         missing_rule_sets: vec![],
         rule_mode: "unknown".into(),
         clash_api: None,
-        dns_servers: lanpath_client::diagnose::effective_dns_servers(&slices, config.ipv6_enabled),
+        dns_servers: extract_dns_servers(&bundle, config.ipv6_enabled),
     })
 }
 #[cfg(test)]

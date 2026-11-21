@@ -1,5 +1,5 @@
 use super::*;
-use lanpath_client::{LocalOverrideStore, RuleAction};
+use lanpath_client::RuleAction;
 use serde_json::json;
 
 #[test]
@@ -54,11 +54,7 @@ fn add_edit_disable_reorder_and_remove_persist() {
 fn rules_reach_both_core_configs_in_the_same_order() {
     let rules = parse_lines("suffix example.com -> proxy\ncidr 10.0.0.0/8 -> direct\nport 8000-9000 -> reject\nprocess test.exe -> direct").unwrap();
     let mut singbox = json!({"route":{"rules":[]},"outbounds":[]});
-    let core = lanpath_client::CoreLocalOverride {
-        rules: rules.clone(),
-        ..Default::default()
-    };
-    lanpath_client::apply_local_override(&mut singbox, &core);
+    lanpath_client::apply_singbox_rules(&mut singbox, &rules);
     normalize_singbox_ports(&mut singbox);
     assert_eq!(
         singbox["route"]["rules"][0]["domain_suffix"],
@@ -111,14 +107,7 @@ fn rules_share_the_existing_backup_document() {
     rules
         .add_lines("domain example.com -> direct", true)
         .unwrap();
-    let document = LocalOverrideStore::new(dir.path().to_path_buf())
-        .load()
-        .unwrap();
-    assert!(
-        document
-            .singbox
-            .rules
-            .iter()
-            .any(|r| r.target == "example.com")
-    );
+    let raw = std::fs::read_to_string(dir.path().join(RULES_FILE)).unwrap();
+    let document = lanpath_client::rules::parse_rules_toml(&raw).unwrap();
+    assert!(document.iter().any(|r| r.target == "example.com"));
 }

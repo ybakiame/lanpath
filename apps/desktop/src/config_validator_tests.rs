@@ -17,11 +17,12 @@ fn bindings() -> ValidatorBindings {
     }
 }
 
-/// 带 logs/ 与 cache/ 子目录的数据根（写路径收敛的正例需要父目录存在）。
+/// 带 logs/、runtime/sing-box 与 .cache/ 子目录的数据根（写路径收敛的正例需要父目录存在）。
 fn root_with_dirs() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("logs")).unwrap();
-    std::fs::create_dir_all(dir.path().join("cache")).unwrap();
+    std::fs::create_dir_all(dir.path().join("runtime/sing-box")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".cache")).unwrap();
     dir
 }
 
@@ -170,7 +171,7 @@ fn singbox_resource_paths_are_confined_to_root() {
     expect_denied(check_singbox(root, &config, &bindings()), "log.output");
     // log.output 必须在 logs/ 内（不是根内任意位置）
     let mut config = valid_singbox();
-    config["log"] = json!({"output": "cache/evil.log"});
+    config["log"] = json!({"output": ".cache/evil.log"});
     expect_denied(check_singbox(root, &config, &bindings()), "log.output");
     // logs/ 内通过（文件尚不存在允许——核心自行创建）
     let mut config = valid_singbox();
@@ -185,8 +186,12 @@ fn singbox_resource_paths_are_confined_to_root() {
     config["experimental"]["cache_file"] = json!({"enabled": true, "path": "logs/cache.db"});
     expect_denied(check_singbox(root, &config, &bindings()), "cache_file.path");
     let mut config = valid_singbox();
-    config["experimental"]["cache_file"] = json!({"enabled": true, "path": "cache/core.db"});
-    check_singbox(root, &config, &bindings()).expect("cache path passes");
+    config["experimental"]["cache_file"] =
+        json!({"enabled": true, "path": "runtime/sing-box/cache.db"});
+    check_singbox(root, &config, &bindings()).expect("runtime cache path passes");
+    let mut config = valid_singbox();
+    config["experimental"]["cache_file"] = json!({"enabled": true, "path": ".cache/core.db"});
+    check_singbox(root, &config, &bindings()).expect("dot-cache path passes");
     // 本地 rule_set 越界与 `..`
     let mut config = valid_singbox();
     config["route"] = json!({"rule_set": [{"type": "local", "tag": "t", "format": "source", "path": "/etc/hosts"}]});
@@ -201,8 +206,8 @@ fn singbox_resource_paths_are_confined_to_root() {
         "rule_set[0].path",
     );
     let mut config = valid_singbox();
-    config["route"] = json!({"rule_set": [{"type": "local", "tag": "t", "format": "source", "path": "cache/rules/t.srs"}]});
-    std::fs::create_dir_all(root.join("cache/rules")).unwrap();
+    config["route"] = json!({"rule_set": [{"type": "local", "tag": "t", "format": "source", "path": "rulesets/files/t.srs"}]});
+    std::fs::create_dir_all(root.join("rulesets/files")).unwrap();
     check_singbox(root, &config, &bindings()).expect("confined rule_set passes");
     // certificate_path 越界
     let mut config = valid_singbox();

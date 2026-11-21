@@ -1,40 +1,8 @@
-//! CN-split baseline rule-set registration tests for the sing-box template.
+//! Rule-set HTTP client and template baseline tests for sing-box.
 
 use serde_json::json;
 
-use crate::core_config::ensure_cn_rule_sets;
 use crate::profile::singbox_template;
-
-/// The template registers the two built-in rule sets (private domain / private IP) with the
-/// MetaCubeX jsDelivr URLs; country lists are user opt-in from the market.
-#[test]
-fn singbox_template_registers_cn_rule_sets() {
-    let cfg = singbox_template(&[]);
-    let rule_sets = cfg["route"]["rule_set"].as_array().unwrap();
-    assert_eq!(rule_sets.len(), 2);
-    for (tag, url) in [
-        (
-            "geosite-private",
-            "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs",
-        ),
-        (
-            "geoip-private",
-            "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/private.srs",
-        ),
-    ] {
-        let entry = rule_sets
-            .iter()
-            .find(|rs| rs["tag"] == tag)
-            .unwrap_or_else(|| panic!("missing rule_set {tag}"));
-        assert_eq!(entry["type"], "remote");
-        assert_eq!(entry["format"], "binary");
-        assert_eq!(entry["url"], url);
-        assert_eq!(
-            entry["http_client"], "rule-set-direct",
-            "rule set {tag} must download via the direct-dial HTTP client"
-        );
-    }
-}
 
 /// The direct-dial HTTP client is registered at top level and resolves download URLs through
 /// the direct `local` DNS — downloads never route through `route.final` (the proxy), so a cold
@@ -161,29 +129,10 @@ fn singbox_template_empty_nodes_falls_back_to_direct() {
     assert_eq!(auto["outbounds"], json!(["direct"]));
 }
 
-/// The CN-split rule-set registry is idempotent by tag: re-running the ensure helper neither
-/// duplicates nor overwrites entries.
+/// 默认 sing-box 模板不再预置任何内置规则集，完全由用户在「规则集」页自行添加。
 #[test]
-fn cn_rule_set_registration_is_idempotent() {
+fn singbox_template_ships_no_builtin_rule_sets() {
     let cfg = singbox_template(&[]);
-    let mut route = cfg["route"].as_object().unwrap().clone();
-    let before = route["rule_set"].clone();
-    ensure_cn_rule_sets(&mut route);
-    assert_eq!(
-        route["rule_set"], before,
-        "second registration must be a no-op"
-    );
-
-    // A user/override supplied same-tag entry is respected, not overwritten.
-    route["rule_set"].as_array_mut().unwrap()[0] = json!({
-        "type": "local",
-        "tag": "geosite-private",
-        "format": "source",
-        "path": "/tmp/user.json"
-    });
-    ensure_cn_rule_sets(&mut route);
-    let arr = route["rule_set"].as_array().unwrap();
-    assert_eq!(arr.len(), 2, "same-tag entry must not be duplicated");
-    assert_eq!(arr[0]["type"], "local");
-    assert_eq!(arr[0]["path"], "/tmp/user.json");
+    let arr = cfg["route"]["rule_set"].as_array().unwrap();
+    assert!(arr.is_empty(), "unexpected builtin rule sets: {arr:?}");
 }

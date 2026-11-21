@@ -135,12 +135,22 @@ pub(crate) fn confined(root: &Path, text: &str, location: &str) -> LanpathResult
     Ok(path)
 }
 
-/// 写路径额外要求父目录位于根的指定子目录（如 `logs/`、`cache/`）内。
+/// 写路径额外要求父目录位于根的指定子目录（如 `logs/`、`runtime/`、`.cache/`）内。
 pub(crate) fn write_confined(
     root: &Path,
     text: &str,
     location: &str,
     directory: &str,
+) -> LanpathResult<PathBuf> {
+    write_confined_any(root, text, location, &[directory])
+}
+
+/// 写路径额外要求父目录位于根的允许子目录集合内。
+pub(crate) fn write_confined_any(
+    root: &Path,
+    text: &str,
+    location: &str,
+    directories: &[&str],
 ) -> LanpathResult<PathBuf> {
     let path = confined(root, text, location)?;
     let canonical_root = std::fs::canonicalize(root)?;
@@ -149,11 +159,16 @@ pub(crate) fn write_confined(
         .map_err(|_| denied(location, "输出路径越出数据根"))?;
     if relative
         .parent()
-        .is_none_or(|parent| !parent.starts_with(directory))
+        .is_none_or(|parent| !directories.iter().any(|dir| parent.starts_with(dir)))
     {
+        let joined = directories
+            .iter()
+            .map(|dir| format!("{dir}/"))
+            .collect::<Vec<_>>()
+            .join(" 或 ");
         return Err(denied(
             location,
-            &format!("输出必须位于根内 {directory}/ 目录（先创建该目录）"),
+            &format!("输出必须位于根内 {joined} 目录（先创建该目录）"),
         ));
     }
     Ok(path)
