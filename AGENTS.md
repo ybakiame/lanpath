@@ -17,7 +17,7 @@ Windows CI 使用锁定版本的原生 MSVC/Rust/Bun，Linux/Android CI 继续 N
 ## 编译与验证
 
 根 Rust workspace 按需执行 `cargo build --workspace` 或 `bash scripts/check-rust-gates.sh`。
-根门禁不覆盖独立的 `apps/gpui`、`apps/desktop`；按改动执行对应 fmt/clippy/test/build 和 Windows 原生验证。
+根门禁不覆盖独立的 `apps/desktop`；按改动执行对应 fmt/clippy/test/build 和 Windows 原生验证。
 Android 原生库改动构建 `mobile/android`；Go 绑定改动先重新构建 `lanpathcore.aar`，再编译 Kotlin/资源。
 库构建通过不代表移动端宿主或 VPN 真机接入通过，不据此新增强制 CI 门禁。
 
@@ -28,15 +28,10 @@ Android 原生库改动构建 `mobile/android`；Go 绑定改动先重新构建 
 移动端暂未接入新的应用宿主/页面，不提供 APK；本次拆分不代表 NSH 已接入 VPN。
 旧 Tauri client、前端 packages 和 Tauri 命令适配层已移除，不恢复其构建入口或发布流程。
 
-apps/gpui 为 GPUI 实验性目标，支持 sing-box 与 Mihomo(仅运行) ，保持独立 Cargo 项目与独立应用身份；复用已有 Rust 核心基础。
-实验阶段仅支持便携安装模式，方便数据隔离与测试。
-
-apps/nsh 为 Rust NSH 实验性目标，支持 sing-box 与 Mihomo(仅运行) ，保持独立 Cargo 项目与独立应用身份；复用已有 Rust 核心基础。
-实验阶段仅支持便携安装模式，方便数据隔离与测试。
 Android 后续仍复用 Kotlin VpnService 与 Go/libbox。
 
-apps/desktop(nsh) 为 `nsh-validation` 分支上的 NSH Windows 迁移目标：纯 Rust NSH 0.6.0、独立 Cargo
-项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移 Tauri/GPUI/apps/nsh 数据；
+`apps/desktop` 为 `nsh` 分支上的正式 NSH 桌面目标：纯 Rust NSH 0.6.0、独立 Cargo
+项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移旧版客户端数据；
 核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback）。Windows 系统代理经本任务授权的
 独立普通权限同映像守护精确接管/恢复（owner 为本数据根 UUID，GUI 侧绝不直写注册表；接管失败
 保留核心与恢复证据，停止先守护恢复再停核心）；不接管 TUN/VPN，不安装服务/启动项，不经 TUN
