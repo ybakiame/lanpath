@@ -35,7 +35,7 @@ pub fn motion_duration(token: f32, reduced: bool) -> f32 {
 }
 
 /// 连续等待反馈只在前台窗口运行；静态状态文字始终保留。
-pub(super) fn window_active() -> bool {
+pub(crate) fn window_active() -> bool {
     #[cfg(target_os = "windows")]
     {
         nsh_core::element::desktop::main_window()

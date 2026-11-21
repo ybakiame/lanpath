@@ -15,17 +15,10 @@ pub(super) fn summary_problems(state: AppState, page: Signal<Page>) -> impl Into
                     .flex_col()
                     .gap_2()
                     .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(icon(Icon::Warning, Tone::Danger))
-                            .child(
-                                text(|| t!("overview.summary.problem_title"))
-                                    .text_size(px(13.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(move || theme().destructive),
-                            ),
+                        text(|| t!("overview.summary.problem_title"))
+                            .text_size(px(13.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(move || theme().destructive),
                     )
                     .child(when(
                         move || subscription_error.get().is_some(),

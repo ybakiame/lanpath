@@ -101,6 +101,44 @@ pub(crate) struct CoreSelection {
     pub(crate) version: String,
 }
 
+/// 单秒流量速率采样点（字节/秒）。
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) struct TrafficPoint {
+    pub(crate) up_bps: f64,
+    pub(crate) down_bps: f64,
+}
+
+/// App 级共享流量与统计快照（供概览图表与连接页复用，切页不丢曲线）。
+#[derive(Clone, PartialEq)]
+pub(crate) struct TrafficSnapshot {
+    pub(crate) up_bps: u64,
+    pub(crate) down_bps: u64,
+    pub(crate) active_count: usize,
+    pub(crate) active_upload_total: u64,
+    pub(crate) active_download_total: u64,
+    pub(crate) history: Vec<TrafficPoint>,
+    pub(crate) today: lanpath_client::TodaySummary,
+    pub(crate) recent_days: Vec<lanpath_client::DailyTotalRow>,
+}
+
+/// 实时速率图默认保留的采样点数（约 30 秒滚动窗口）。
+pub(crate) const TRAFFIC_HISTORY_LEN: usize = 30;
+
+impl Default for TrafficSnapshot {
+    fn default() -> Self {
+        Self {
+            up_bps: 0,
+            down_bps: 0,
+            active_count: 0,
+            active_upload_total: 0,
+            active_download_total: 0,
+            history: vec![TrafficPoint::default(); TRAFFIC_HISTORY_LEN],
+            today: lanpath_client::TodaySummary::default(),
+            recent_days: Vec::new(),
+        }
+    }
+}
+
 /// App 级共享状态（`global` 单例，每个引擎一份）。
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -116,6 +154,8 @@ pub(crate) struct AppState {
     pub(crate) core_error: Signal<Option<String>>,
     /// 已保存的系统代理偏好（最近一次成功读取/保存的值）。
     pub(crate) proxy_preference: Signal<Option<bool>>,
+    /// 实时速率、滚动历史曲线与本地 SQLite 统计汇总。
+    pub(crate) traffic: Signal<TrafficSnapshot>,
     pub(crate) owner: Option<Owner>,
     /// 轮询/命令任务的存活句柄（替换即释放旧任务）。
     pub(crate) tasks: Rc<RefCell<Vec<Spawned<()>>>>,
@@ -134,6 +174,7 @@ impl Default for AppState {
             subscription_error: signal(None),
             core_error: signal(None),
             proxy_preference: signal(None),
+            traffic: signal(TrafficSnapshot::default()),
             owner: None,
             tasks: Rc::new(RefCell::new(Vec::new())),
         }

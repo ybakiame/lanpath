@@ -23,6 +23,7 @@ pub(super) struct State {
     rules: Signal<Vec<LocalRule>>,
     pub(super) ruleset_items: Signal<Vec<RuleSetRow>>,
     pub(super) ruleset_groups: Signal<Vec<RuleSetGroup>>,
+    pub(super) outbound_tags: Vec<String>,
     pub(super) group_sheet: GroupSheetController,
     mode: Signal<usize>,
     kind: Signal<String>,
@@ -51,6 +52,9 @@ impl State {
             .ok()
             .and_then(|s| s.list_snapshot().ok())
             .unwrap_or_default();
+        let outbound_tags = crate::singbox_overwrite::SingboxOverwriteService::open()
+            .map(|s| s.load_outbound_tags())
+            .unwrap_or_default();
         let ruleset_items = signal(rs_snapshot.items);
         let ruleset_groups = signal(rs_snapshot.groups);
         let group_sheet = GroupSheetController::new(ruleset_items, ruleset_groups);
@@ -59,6 +63,7 @@ impl State {
             rules: signal(rules),
             ruleset_items,
             ruleset_groups,
+            outbound_tags,
             group_sheet,
             mode: signal(0),
             kind: signal("suffix".into()),

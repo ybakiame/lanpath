@@ -89,3 +89,29 @@ fn rule_select_trigger_centers_text_vertically() {
     app.press("精确域名").unwrap();
     assert!(!app.screen().matches("role:option[精确域名]").unwrap());
 }
+
+#[test]
+fn toast_floats_bottom_right_without_shifting_workspace_layout() {
+    let (_dir, entries) = common::data_root();
+    let mut app = common::start_app_desktop(entries).0;
+    common::wait_ready(&mut app);
+    common::navigate(&mut app, "策略与节点");
+    app.wait_for("id:proxies-mode-direct").unwrap();
+
+    let sidebar_before = by_id(&app.screen().layout_nodes(), "app-sidebar").bounds;
+    app.press("id:proxies-mode-direct >> text:直连模式")
+        .unwrap();
+    app.wait_for("运行模式已切换为 直连模式。").unwrap();
+
+    let nodes = app.screen().layout_nodes();
+    let sidebar_after = by_id(&nodes, "app-sidebar").bounds;
+    let overlay = by_id(&nodes, "toast-overlay").bounds;
+    assert!(
+        (sidebar_before.origin.y.0 - sidebar_after.origin.y.0).abs() < 0.5,
+        "Toast 必须绝对浮层定位，不得推动侧栏下移：before={sidebar_before:?}, after={sidebar_after:?}"
+    );
+    assert!(
+        overlay.origin.x.0 > 600.0 && overlay.origin.y.0 > 400.0,
+        "Toast 应停靠在右下角浮层区域，实际 bounds={overlay:?}"
+    );
+}

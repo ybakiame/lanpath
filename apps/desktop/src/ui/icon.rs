@@ -38,6 +38,8 @@ pub enum Icon {
     Layers,
     Download,
     Close,
+    Proxies,
+    Connections,
 }
 
 impl Icon {
@@ -76,6 +78,8 @@ impl Icon {
         (Icon::Layers, "Layers"),
         (Icon::Download, "Download"),
         (Icon::Close, "Close"),
+        (Icon::Proxies, "Proxies"),
+        (Icon::Connections, "Connections"),
     ];
 }
 
@@ -156,6 +160,10 @@ fn geometry(icon: Icon) -> &'static str {
             "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3'/>"
         }
         Icon::Close => "<path d='M18 6 6 18M6 6l12 12'/>",
+        Icon::Proxies => {
+            "<circle cx='12' cy='12' r='9'/><path d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18'/>"
+        }
+        Icon::Connections => "<path d='M7 17 17 7M7 7h10v10'/><path d='M4 13v7h7' opacity='0.65'/>",
     }
 }
 

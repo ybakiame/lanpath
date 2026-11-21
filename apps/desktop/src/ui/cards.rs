@@ -8,7 +8,7 @@ pub fn selection_card(
     selected: impl Fn() -> bool + 'static,
 ) -> View {
     let enabled = Rc::new(enabled);
-    let foreground = enabled.clone();
+    let border_enabled = enabled.clone();
     let selected = Rc::new(selected);
     let a11y = selected.clone();
     super::surface(super::SurfaceLevel::Card)
@@ -23,23 +23,20 @@ pub fn selection_card(
         .flex_col()
         .gap_2()
         .p_3()
+        .rounded(px(12.0))
         .bg(move || {
             if enabled() {
-                theme().accent
+                theme().primary.opacity(0.09)
             } else {
                 theme().card
             }
         })
-        .text_color(move || {
-            if foreground() {
-                theme().accent_foreground
-            } else {
-                theme().card_foreground
-            }
-        })
+        .text_color(move || theme().card_foreground)
         .border_color(move || {
             if selected() {
-                theme().primary
+                theme().primary.opacity(0.8)
+            } else if border_enabled() {
+                theme().primary.opacity(0.35)
             } else {
                 theme().border
             }

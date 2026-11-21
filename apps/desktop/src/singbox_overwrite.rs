@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lanpath_client::singbox_overwrite::{
-    SingboxOverwriteStore, SingboxSliceKind, default_slice_value, format_json,
-    parse_and_validate_slice,
+    SingboxOverwriteStore, SingboxSliceKind, default_slice_value, extract_outbound_tags,
+    format_json, parse_and_validate_slice,
 };
 use lanpath_common::{CoreType, LanpathError, LanpathResult};
 use serde_json::Value;
@@ -143,6 +143,36 @@ impl SingboxOverwriteService {
             raw,
             customized: false,
         })
+    }
+
+    /// 读取 `outbounds.json` 中定义的全部出站 / 策略组 tag（供「规则」页与 `route.json` 目标出站选择）。
+    pub(crate) fn load_outbound_tags(&self) -> Vec<String> {
+        let _guard = self.root.business_guard();
+        let val = self
+            .store()
+            .load_value(SingboxSliceKind::Outbounds)
+            .unwrap_or_else(|_| default_slice_value(SingboxSliceKind::Outbounds));
+        extract_outbound_tags(&val)
+    }
+
+    /// 离线读取当前生效订阅已缓存的 sing-box 节点 tag 列表（用于分组 `_filter` 实时匹配计数预览）。
+    pub(crate) fn load_active_subscription_node_tags(&self) -> Vec<String> {
+        let _guard = self.root.business_guard();
+        let Ok(config) = load_request_config(self.root.path()) else {
+            return Vec::new();
+        };
+        let Some(active_id) = config.active_subscription_id else {
+            return Vec::new();
+        };
+        let store = lanpath_client::SubscriptionStore::new(self.root.path().to_path_buf());
+        let Some(cached) = store.load_cached_content(active_id) else {
+            return Vec::new();
+        };
+        let wrapper = serde_json::json!({ "outbounds": cached.singbox_nodes });
+        lanpath_client::extract_nodes_singbox(&wrapper)
+            .into_iter()
+            .filter_map(|node| node.get("tag").and_then(Value::as_str).map(str::to_owned))
+            .collect()
     }
 
     /// 本地静态校验（JSON 语法 + 切片结构 + 安全红线）。

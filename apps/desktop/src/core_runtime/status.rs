@@ -60,6 +60,7 @@ impl CoreRuntime {
             if let Ok(mut active) = self.active.lock() {
                 *active = None;
             }
+            self.stop_tracker().await;
         }
         let session = self.session_snapshot();
         CoreStatus {

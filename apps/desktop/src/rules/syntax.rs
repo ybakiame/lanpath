@@ -63,10 +63,18 @@ fn parse_line(line: &str) -> Result<LocalRule, String> {
         target.to_owned()
     };
     let action = match action.trim() {
+        "" => return Err("缺少出口目标（如 proxy / direct / reject 或自定义策略组名）".into()),
         "proxy" => RuleAction::Proxy,
         "direct" => RuleAction::Direct,
         "reject" => RuleAction::Reject,
-        _ => return Err("出口：proxy / direct / reject".into()),
+        custom => {
+            if custom.contains(char::is_whitespace) || custom.contains("->") {
+                return Err("出口名称不能包含空白或 ->".into());
+            }
+            RuleAction::Outbound {
+                tag: custom.to_owned(),
+            }
+        }
     };
     Ok(LocalRule {
         id: uuid::Uuid::new_v4().to_string(),
@@ -160,5 +168,4 @@ pub(crate) fn editable(rule: &LocalRule) -> bool {
                 | RuleMatchType::Port
                 | RuleMatchType::RuleSet
         )
-        && !matches!(rule.action, RuleAction::Outbound { .. })
 }

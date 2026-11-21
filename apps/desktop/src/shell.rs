@@ -110,6 +110,8 @@ pub(crate) fn startup_failure(error: Signal<Option<String>>) -> impl IntoElement
 fn page_icon(page: Page) -> Icon {
     match page {
         Page::Overview => Icon::Overview,
+        Page::Proxies => Icon::Proxies,
+        Page::Connections => Icon::Connections,
         Page::Subscription => Icon::Subscription,
         Page::Core => Icon::Core,
         Page::Overwrite => Icon::Layers,
@@ -226,6 +228,8 @@ fn expanded_sidebar(active: Signal<Page>, requested: Signal<Page>) -> AnyElement
                     ))
                     .child(group("nav.group.workspace", true))
                     .child(nav_item(active, requested, positions, Page::Overview))
+                    .child(nav_item(active, requested, positions, Page::Proxies))
+                    .child(nav_item(active, requested, positions, Page::Connections))
                     .child(group("nav.group.core_config", false))
                     .child(nav_item(active, requested, positions, Page::Core))
                     .child(nav_item(active, requested, positions, Page::Overwrite))

@@ -71,11 +71,16 @@ pub(super) fn editor(state: State) -> impl IntoElement {
                     ("port", "rules.port"),
                     ("ruleset", "rules.ruleset"),
                 ];
-                let action_items = [
-                    ("proxy", "rules.proxy"),
-                    ("direct", "rules.direct"),
-                    ("reject", "rules.reject"),
+                let mut action_items: Vec<SelectItem> = vec![
+                    SelectItem::new("proxy", t!("rules.proxy")),
+                    SelectItem::new("direct", t!("rules.direct")),
+                    SelectItem::new("reject", t!("rules.reject")),
                 ];
+                for tag in &enter.outbound_tags {
+                    if !matches!(tag.as_str(), "proxy" | "direct" | "reject" | "block") {
+                        action_items.push(SelectItem::new(tag.clone(), tag.clone()));
+                    }
+                }
                 view()
                     .flex_col()
                     .gap_3()
@@ -116,10 +121,7 @@ pub(super) fn editor(state: State) -> impl IntoElement {
                                 ),
                             )
                             .child(field().label(|| t!("rules.action")).control(select(
-                                action_items
-                                    .iter()
-                                    .map(|(id, key)| SelectItem::new(*id, t!(*key)))
-                                    .collect(),
+                                action_items,
                                 move || Some(action.get().into()),
                                 move |v| {
                                     if let Some(v) = v {

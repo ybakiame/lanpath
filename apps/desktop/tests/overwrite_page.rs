@@ -85,4 +85,41 @@ fn overwrite_page_initializes_slices_edits_form_and_json_and_saves_bindings() {
     let dns_after =
         std::fs::read_to_string(dir.path().join("overwrite/sing-box/dns.json")).unwrap();
     assert!(!dns_after.contains("\"1.1.1.1\""), "{dns_after}");
+
+    // 5. 切到出站切片：一键添加 HK 地区分组、自定义带正则筛选的 AI 策略组并保存。
+    app.press("id:overwrite-slice-outbounds >> text:出站")
+        .unwrap();
+    app.wait_for("id:overwrite-outbound-preset-HK").unwrap();
+    app.press("id:overwrite-outbound-preset-HK").unwrap();
+    app.press("id:overwrite-outbound-open-add").unwrap();
+    app.wait_for("id:overwrite-outbound-draft-tag").unwrap();
+    app.type_text("id:overwrite-outbound-draft-tag", "AI")
+        .unwrap();
+    app.type_text("id:overwrite-outbound-filter-include", "US|JP")
+        .unwrap();
+    app.press("id:overwrite-outbound-member-HK").unwrap();
+    app.press("id:overwrite-outbound-editor-save").unwrap();
+    app.press("id:overwrite-save").unwrap();
+    app.wait_for("已保存 outbounds.json，下次启动或重启核心时应用。")
+        .unwrap();
+    let out_text =
+        std::fs::read_to_string(dir.path().join("overwrite/sing-box/outbounds.json")).unwrap();
+    assert!(out_text.contains("\"tag\": \"HK\""), "{out_text}");
+    assert!(out_text.contains("\"tag\": \"AI\""), "{out_text}");
+    assert!(out_text.contains("\"_filter\""), "{out_text}");
+
+    // 6. 前往「规则」页支持直接指向自定义出站策略组 AI。
+    common::navigate(&mut app, "规则");
+    app.wait_for("批量输入").unwrap();
+    app.press("批量输入").unwrap();
+    app.type_text("id:rules-batch", "suffix openai.com -> AI")
+        .unwrap();
+    app.press("id:rules-save").unwrap();
+    app.wait_for("规则已保存，下次启动或重启核心时应用。")
+        .unwrap();
+    let saved_rules = lanpath_client::rules::load_rules(dir.path()).unwrap();
+    assert!(saved_rules.iter().any(|r| {
+        r.target == "openai.com"
+            && r.action == lanpath_client::RuleAction::Outbound { tag: "AI".into() }
+    }));
 }

@@ -48,6 +48,7 @@ pub fn Gallery() -> impl IntoElement {
 pub fn gallery_view() -> impl IntoElement {
     let active = signal(GallerySection::All);
     view()
+        .relative()
         .flex_1()
         .flex_col()
         .bg(prefs::window_bg)

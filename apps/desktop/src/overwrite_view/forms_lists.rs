@@ -1,7 +1,6 @@
-//! sing-box 列表型切片 GUI 表单：`route.json`（路由策略 + 规则集分流）与
-//! `outbounds.json`（动态 `$nodes` 分组列表）。
+//! sing-box 列表型切片 GUI 表单：`route.json`（路由策略 + 规则集分流）。
 
-use lanpath_client::singbox_overwrite::{NODES_PLACEHOLDER, SingboxSliceKind};
+use lanpath_client::singbox_overwrite::SingboxSliceKind;
 use nsh_base::{SelectItem, theme};
 use nsh_core::prelude::*;
 use serde_json::{Value, json};
@@ -9,6 +8,7 @@ use serde_json::{Value, json};
 use super::forms::{mutate_section, parse_active_json, read_bool, read_str, toggle_row};
 use super::state::OverwriteState;
 use crate::rulesets::RuleSetsService;
+use crate::singbox_overwrite::SingboxOverwriteService;
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::ui::icon::{Icon, Tone, icon_sized};
 use crate::ui::input::{field, input};
@@ -69,6 +69,18 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
             .unwrap_or_default(),
     );
     let selected_out = signal("direct".to_owned());
+    let mut outbound_options: Vec<SelectItem> = vec![
+        SelectItem::new("direct", t!("rules.direct")),
+        SelectItem::new("proxy", t!("rules.proxy")),
+        SelectItem::new("reject", t!("rules.reject")),
+    ];
+    if let Ok(svc) = SingboxOverwriteService::open() {
+        for tag in svc.load_outbound_tags() {
+            if !matches!(tag.as_str(), "direct" | "proxy" | "reject" | "block") {
+                outbound_options.push(SelectItem::new(tag.clone(), tag));
+            }
+        }
+    }
     let route_rules_memo = computed(move || {
         parse_active_json(&rules_list_state)
             .and_then(|v| v.pointer("/route/rules").and_then(Value::as_array).cloned())
@@ -218,11 +230,7 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
                                 }),
                         )
                         .child(select(
-                            vec![
-                                SelectItem::new("direct", t!("rules.direct")),
-                                SelectItem::new("proxy", t!("rules.proxy")),
-                                SelectItem::new("reject", t!("rules.reject")),
-                            ],
+                            outbound_options,
                             move || Some(selected_out.get().into()),
                             move |v| {
                                 if let Some(v) = v {
@@ -314,183 +322,4 @@ fn format_route_rule_summary(rule: &Value) -> String {
         .or_else(|| rule.get("action").and_then(Value::as_str))
         .unwrap_or("—");
     format!("{target}  →  {dest}")
-}
-
-pub(super) fn outbounds_form(state: OverwriteState) -> impl IntoElement {
-    let list_state = state.clone();
-    let items_memo = computed(move || {
-        parse_active_json(&list_state)
-            .and_then(|v| v.get("outbounds").and_then(Value::as_array).cloned())
-            .unwrap_or_default()
-    });
-    let new_tag = signal(String::new());
-    let new_kind = signal("selector".to_owned());
-    let row_state = state.clone();
-    let add_state = state;
-
-    view()
-        .flex_col()
-        .gap_3()
-        .child(alert_banner(
-            AlertTone::Info,
-            text(|| t!("overwrite.outbounds.placeholder_hint"))
-                .text_size(px(12.5))
-                .text_color(move || theme().foreground),
-        ))
-        .child(each(
-            items_memo,
-            |item: &Value| {
-                item.get("tag")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned()
-            },
-            move |item, index| outbound_row(row_state.clone(), item, index),
-        ))
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .child(
-                    view().w(px(180.0)).child(
-                        input(new_tag)
-                            .test_id("overwrite-outbound-new-tag")
-                            .placeholder(|| t!("overwrite.outbounds.new_tag"))
-                            .accessible_name(|| t!("overwrite.outbounds.new_tag"))
-                            .on_change(move |v| new_tag.set(v)),
-                    ),
-                )
-                .child(select(
-                    ["selector", "urltest"]
-                        .iter()
-                        .map(|k| SelectItem::new(*k, *k))
-                        .collect(),
-                    move || Some(new_kind.get().into()),
-                    move |v| {
-                        if let Some(v) = v {
-                            new_kind.set(v.to_string());
-                        }
-                    },
-                ))
-                .child(
-                    button(ButtonVariant::Outline)
-                        .size(ButtonSize::Md)
-                        .test_id("overwrite-outbound-add")
-                        .prefix(|| icon_sized(Icon::Plus, Tone::Muted, 14.0))
-                        .label(|| t!("overwrite.outbounds.add_group"))
-                        .on_press(move || {
-                            let tag = new_tag.get().trim().to_owned();
-                            if tag.is_empty() {
-                                return;
-                            }
-                            let kind = new_kind.get();
-                            let entry = if kind == "urltest" {
-                                json!({
-                                    "type": "urltest",
-                                    "tag": tag,
-                                    "outbounds": [NODES_PLACEHOLDER],
-                                    "url": "https://www.gstatic.com/generate_204",
-                                    "interval": "5m",
-                                    "tolerance": 150
-                                })
-                            } else {
-                                json!({
-                                    "type": "selector",
-                                    "tag": tag,
-                                    "outbounds": [NODES_PLACEHOLDER, "direct"]
-                                })
-                            };
-                            mutate_section(&add_state, SingboxSliceKind::Outbounds, |s| {
-                                if let Some(arr) = s.as_array_mut() {
-                                    arr.push(entry);
-                                }
-                            });
-                            new_tag.set(String::new());
-                        }),
-                ),
-        )
-}
-
-fn outbound_row(
-    state: OverwriteState,
-    item: ReadSignal<Value>,
-    index: ReadSignal<usize>,
-) -> impl IntoElement {
-    let obj = item.get();
-    let tag = obj
-        .get("tag")
-        .and_then(Value::as_str)
-        .unwrap_or("—")
-        .to_owned();
-    let kind = obj
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown")
-        .to_owned();
-    let has_nodes = obj
-        .get("outbounds")
-        .and_then(Value::as_array)
-        .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(NODES_PLACEHOLDER)));
-    let members_count = obj
-        .get("outbounds")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    view()
-        .flex_row()
-        .flex_wrap()
-        .items_center()
-        .justify_between()
-        .gap_2()
-        .px_3()
-        .py_2()
-        .rounded(move || theme().radius)
-        .bg(move || theme().muted.opacity(0.4))
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .child(crate::ui::badge(
-                    crate::ui::BadgeVariant::Default,
-                    move || kind.clone(),
-                ))
-                .child(
-                    text(move || tag.clone())
-                        .text_size(px(13.5))
-                        .font_weight(FontWeight::MEDIUM),
-                )
-                .child(when(
-                    move || has_nodes,
-                    || crate::ui::badge(crate::ui::BadgeVariant::Success, || "$nodes".to_owned()),
-                ))
-                .child(when(
-                    move || members_count > 0,
-                    move || {
-                        text(move || format!("{members_count} 项"))
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground)
-                    },
-                )),
-        )
-        .child(
-            button(ButtonVariant::Ghost)
-                .size(ButtonSize::Sm)
-                .label(|| t!("rules.delete"))
-                .on_press(move || {
-                    mutate_section(&state, SingboxSliceKind::Outbounds, |s| {
-                        let idx = index.get();
-                        if let Some(arr) = s.as_array_mut()
-                            && idx < arr.len()
-                        {
-                            arr.remove(idx);
-                        }
-                    });
-                }),
-        )
 }

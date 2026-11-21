@@ -95,10 +95,17 @@ fn invalid_ports_networks_and_domains_are_rejected() {
         "port 100-2 -> direct",
         "cidr ::/129 -> proxy",
         "suffix https://example.com -> direct",
-        "suffix example.com -> typo",
+        "suffix example.com -> ",
+        "suffix example.com -> bad target",
     ] {
         assert!(parse_lines(line).is_err(), "{line}");
     }
+    let custom = parse_lines("suffix openai.com -> AI").unwrap();
+    assert_eq!(custom.len(), 1);
+    assert_eq!(
+        custom[0].action,
+        lanpath_client::RuleAction::Outbound { tag: "AI".into() }
+    );
 }
 #[test]
 fn rules_share_the_existing_backup_document() {

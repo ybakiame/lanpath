@@ -7,7 +7,8 @@ use nsh_core::prelude::*;
 use serde_json::{Map, Value};
 
 use super::dns_form::dns_form;
-use super::forms_lists::{outbounds_form, route_form};
+use super::forms_lists::route_form;
+use super::outbounds_form::outbounds_form;
 use super::state::{EditMode, OverwriteState};
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::ui::input::{field, input};

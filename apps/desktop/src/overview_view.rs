@@ -1,7 +1,10 @@
 //! 循径概览：配置依赖、运行会话、代理归属分别呈现，共用唯一 AppState。
 mod alerts;
+mod analytics;
 mod runtime;
 mod setup;
+mod shortcuts;
+mod visuals;
 
 use crate::{
     Page,
@@ -106,15 +109,17 @@ fn configured(state: &AppState) -> bool {
 }
 
 fn workspace(state: AppState, page: Signal<Page>) -> AnyElement {
-    let details = state.clone();
     let runtime = state.clone();
+    let status = state.status;
     view()
         .flex_col()
         .gap_5()
         .child(
             surface(SurfaceLevel::Card)
+                .relative()
                 .overflow_hidden()
                 .flex_col()
+                .child(visuals::hero_aura_shader(move || status.get().running))
                 .child(
                     view()
                         .p_5()
@@ -126,88 +131,7 @@ fn workspace(state: AppState, page: Signal<Page>) -> AnyElement {
                 )
                 .child(session_facts(state.clone())),
         )
-        .child(
-            view()
-                .gap_5()
-                .style_with(move |s| {
-                    if window().width.0 < 1040.0 || font_scale() > 1.3 {
-                        s.flex_col()
-                    } else {
-                        s.flex_row()
-                    }
-                })
-                .child(
-                    surface(SurfaceLevel::Card)
-                        .p_5()
-                        .flex_col()
-                        .gap_3()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(section_title(|| t!("overview.configuration")))
-                        .child(
-                            text(|| t!("overview.configuration_hint"))
-                                .text_size(px(12.5))
-                                .text_color(move || theme().muted_foreground),
-                        )
-                        .child(ui::separator())
-                        .child(property(
-                            || t!("overview.subscription.title"),
-                            move || {
-                                details
-                                    .active_subscription
-                                    .get()
-                                    .map(|s| s.name)
-                                    .unwrap_or_else(|| t!("status.none"))
-                            },
-                        ))
-                        .child(property(
-                            || t!("overview.core.title"),
-                            move || {
-                                details
-                                    .active_core
-                                    .get()
-                                    .map(|c| {
-                                        format!(
-                                            "{} {}",
-                                            c.core_type,
-                                            app_state::core_tag(&c.version)
-                                        )
-                                    })
-                                    .unwrap_or_else(|| t!("status.none"))
-                            },
-                        )),
-                )
-                .child(
-                    surface(SurfaceLevel::Card)
-                        .p_5()
-                        .flex_col()
-                        .gap_3()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(section_title(|| t!("overview.next")))
-                        .child(task(
-                            Icon::Activity,
-                            "overview.task.diagnose",
-                            "overview.task.diagnose_hint",
-                            Page::Diagnostics,
-                            page,
-                        ))
-                        .child(task(
-                            Icon::Rules,
-                            "overview.task.rules",
-                            "overview.task.rules_hint",
-                            Page::Rules,
-                            page,
-                        ))
-                        .child(task(
-                            Icon::Logs,
-                            "overview.task.logs",
-                            "overview.task.logs_hint",
-                            Page::Logs,
-                            page,
-                        )),
-                ),
-        )
+        .child(analytics::dashboard(state, page))
         .into_element()
 }
 
@@ -399,81 +323,6 @@ fn fact_pair(
                 .text_size(px(12.5))
                 .font_weight(FontWeight::MEDIUM)
                 .selectable(true),
-        )
-        .into_element()
-}
-
-fn property(
-    label: impl Fn() -> String + 'static,
-    value: impl Fn() -> String + 'static,
-) -> AnyElement {
-    view()
-        .flex_row()
-        .flex_wrap()
-        .justify_between()
-        .items_center()
-        .gap_3()
-        .py_1()
-        .child(
-            text(label)
-                .text_size(px(13.5))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(
-            text(value)
-                .text_size(px(13.5))
-                .font_weight(FontWeight::MEDIUM)
-                .selectable(true),
-        )
-        .into_element()
-}
-
-fn task(
-    kind: Icon,
-    title: &'static str,
-    hint: &'static str,
-    target: Page,
-    page: Signal<Page>,
-) -> AnyElement {
-    view()
-        .flex_row()
-        .items_center()
-        .justify_between()
-        .gap_3()
-        .p_2()
-        .rounded(move || theme().radius)
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .bg(move || theme().muted.opacity(0.35))
-        .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex_col()
-                .gap_1()
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(icon(kind, Tone::Primary))
-                        .child(
-                            text(move || t!(title))
-                                .text_size(px(13.5))
-                                .font_weight(FontWeight::MEDIUM),
-                        ),
-                )
-                .child(
-                    text(move || t!(hint))
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground),
-                ),
-        )
-        .child(
-            button(ButtonVariant::Ghost)
-                .size(ButtonSize::Sm)
-                .label(move || t!(title))
-                .on_press(move || page.set(target)),
         )
         .into_element()
 }

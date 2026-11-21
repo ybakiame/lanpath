@@ -147,11 +147,35 @@ pub(crate) fn refresh_proxy_preference(state: &AppState) {
     }
 }
 
+/// 主动刷新一次本地 SQLite 流量统计（清空记录等操作后即时反馈到概览与连接页）。
+pub(crate) fn refresh_traffic_stats(state: &AppState) {
+    let (Some(runtime), Some(owner)) = (state.runtime.clone(), state.owner) else {
+        return;
+    };
+    let traffic = state.traffic;
+    let tasks = state.tasks.clone();
+    owner.run(move || {
+        let handle = spawn(async move {
+            if let Ok(store) = runtime.stats_store().await {
+                let today_key = lanpath_client::stats::today();
+                let today = store.today_summary(&today_key).await.unwrap_or_default();
+                let recent_days = store.recent_daily_totals(7).await.unwrap_or_default();
+                traffic.update(|snap| {
+                    snap.today = today;
+                    snap.recent_days = recent_days;
+                });
+            }
+        });
+        tasks.borrow_mut().push(handle);
+    });
+}
+
 fn spawn_status_poll(state: &AppState) {
     let (Some(runtime), Some(owner)) = (state.runtime.clone(), state.owner) else {
         return;
     };
     let status = state.status;
+    let traffic = state.traffic;
     let tasks = state.tasks.clone();
     let poll_state = state.clone();
     let inventory = state.inventory.clone();
@@ -166,8 +190,82 @@ fn spawn_status_poll(state: &AppState) {
         .unwrap_or(0);
     owner.run(move || {
         let handle = spawn(async move {
+            let mut tick: u64 = 0;
+            let mut prev_running = false;
+            let mut prev_by_id: std::collections::HashMap<String, (u64, u64)> =
+                std::collections::HashMap::new();
             loop {
-                status.set(RuntimeView::from_status(&runtime.status().await));
+                let live_status = RuntimeView::from_status(&runtime.status().await);
+                let is_running = live_status.running;
+                status.set(live_status);
+
+                // 每 2 拍（约 1 秒）采样一次实时连接速率与滚动曲线。
+                if tick.is_multiple_of(2) {
+                    if is_running {
+                        if let Some(active) = runtime.active_connections().await {
+                            let mut up_delta = 0u64;
+                            let mut down_delta = 0u64;
+                            let mut next_map =
+                                std::collections::HashMap::with_capacity(active.connections.len());
+                            for conn in &active.connections {
+                                if let Some((prev_up, prev_down)) = prev_by_id.get(&conn.id) {
+                                    up_delta = up_delta
+                                        .saturating_add(conn.upload.saturating_sub(*prev_up));
+                                    down_delta = down_delta
+                                        .saturating_add(conn.download.saturating_sub(*prev_down));
+                                }
+                                next_map.insert(conn.id.clone(), (conn.upload, conn.download));
+                            }
+                            prev_by_id = next_map;
+                            let active_count = active.connections.len();
+                            let up_total = active.upload_total;
+                            let down_total = active.download_total;
+                            traffic.update(|snap| {
+                                snap.up_bps = up_delta;
+                                snap.down_bps = down_delta;
+                                snap.active_count = active_count;
+                                snap.active_upload_total = up_total;
+                                snap.active_download_total = down_total;
+                                if snap.history.len() >= TRAFFIC_HISTORY_LEN {
+                                    snap.history.remove(0);
+                                }
+                                snap.history.push(TrafficPoint {
+                                    up_bps: up_delta as f64,
+                                    down_bps: down_delta as f64,
+                                });
+                            });
+                        }
+                    } else {
+                        prev_by_id.clear();
+                        traffic.update(|snap| {
+                            snap.up_bps = 0;
+                            snap.down_bps = 0;
+                            snap.active_count = 0;
+                            snap.active_upload_total = 0;
+                            snap.active_download_total = 0;
+                            if snap.history.len() >= TRAFFIC_HISTORY_LEN {
+                                snap.history.remove(0);
+                            }
+                            snap.history.push(TrafficPoint::default());
+                        });
+                    }
+                }
+
+                // 首拍、运行态切换或每 10 拍（约 5 秒）刷新 SQLite 统计汇总与 7 日数据。
+                if (tick == 0 || is_running != prev_running || tick.is_multiple_of(10))
+                    && let Ok(store) = runtime.stats_store().await
+                {
+                    let today_key = lanpath_client::stats::today();
+                    let today = store.today_summary(&today_key).await.unwrap_or_default();
+                    let recent_days = store.recent_daily_totals(7).await.unwrap_or_default();
+                    traffic.update(|snap| {
+                        snap.today = today;
+                        snap.recent_days = recent_days;
+                    });
+                }
+                prev_running = is_running;
+                tick = tick.wrapping_add(1);
+
                 // 业务层在离页 worker 真正完成时推进活动版本；只有变化才
                 // 重读磁盘摘要，不用频繁轮询掩盖生命周期问题。
                 if let Some(inventory) = inventory.as_ref() {

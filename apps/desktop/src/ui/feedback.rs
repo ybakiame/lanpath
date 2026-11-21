@@ -300,36 +300,59 @@ pub fn toast_host() -> AnyElement {
     when(
         move || !shown.get().is_empty(),
         move || {
-            toast_stack()
-                .placement(Anchor::BottomRight)
-                .state(state)
-                .w(px(320.0))
-                .child(each(
-                    shown,
-                    |(id, _, _)| *id,
-                    move |item, _| {
-                        let id = move || item.get().0;
-                        toast()
-                            .transition_status(move || item.get().2)
-                            .accessibility_label(move || Some(item.get().1))
-                            .on_dismiss_request(move || {
-                                with_bus(|bus| {
-                                    if let Some(manager) = bus.manager.as_mut() {
-                                        manager.dismiss(&id(), now());
-                                    }
-                                });
-                            })
-                            .rounded(move || theme().radius)
-                            .px(px(16.0))
-                            .py(px(12.0))
-                            .bg(move || theme().popover)
-                            .text_color(move || theme().popover_foreground)
-                            .border(px(1.0))
-                            .border_color(move || theme().border)
-                            .shadow_lg()
-                            .child(text(move || item.get().1).text_size(px(13.0)))
-                    },
-                ))
+            view()
+                .test_id("toast-overlay")
+                .absolute()
+                .right(px(20.0))
+                .bottom(px(44.0))
+                .z_index(1000)
+                .child(
+                    toast_stack()
+                        .placement(Anchor::BottomRight)
+                        .state(state)
+                        .w(px(320.0))
+                        .child(each(
+                            shown,
+                            |(id, _, _)| *id,
+                            move |item, _| {
+                                let id = move || item.get().0;
+                                toast()
+                                    .transition_status(move || item.get().2)
+                                    .accessibility_label(move || Some(item.get().1))
+                                    .on_dismiss_request(move || {
+                                        with_bus(|bus| {
+                                            if let Some(manager) = bus.manager.as_mut() {
+                                                manager.dismiss(&id(), now());
+                                            }
+                                        });
+                                    })
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_2()
+                                    .rounded(move || theme().radius)
+                                    .px(px(14.0))
+                                    .py(px(11.0))
+                                    .bg(move || theme().popover)
+                                    .text_color(move || theme().popover_foreground)
+                                    .border(px(1.0))
+                                    .border_color(move || theme().border)
+                                    .shadow_lg()
+                                    .child(
+                                        view()
+                                            .size(px(7.0))
+                                            .flex_none()
+                                            .rounded_full()
+                                            .bg(move || theme().primary),
+                                    )
+                                    .child(
+                                        text(move || item.get().1)
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .text_size(px(13.0)),
+                                    )
+                            },
+                        )),
+                )
         },
     )
     .into_element()

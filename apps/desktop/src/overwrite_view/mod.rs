@@ -8,6 +8,8 @@ mod editor;
 mod forms;
 mod forms_lists;
 mod managed_card;
+mod outbounds_editor;
+mod outbounds_form;
 mod state;
 
 use lanpath_client::singbox_overwrite::SingboxSliceKind;

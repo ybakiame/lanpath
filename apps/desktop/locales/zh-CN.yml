@@ -552,9 +552,57 @@ overwrite.route.auto_detect: "自动检测默认网卡"
 overwrite.route.rulesets_title: "路由规则集分流（route.rules）"
 overwrite.route.add_rule: "添加路由"
 overwrite.route.summary: "当前 route.json 包含 %{rules} 条静态规则与 %{rule_sets} 个规则集。常用分流规则推荐在「规则」页管理，复杂路由字段可切到「JSON 源码」直接编辑。"
-overwrite.outbounds.placeholder_hint: "在 selector / urltest 分组的 outbounds 数组中使用 \"$nodes\"，运行时会自动展开为当前订阅的全部节点（自动去重并避免与自定义 tag 冲突）。"
-overwrite.outbounds.new_tag: "新分组名称"
-overwrite.outbounds.add_group: "添加分组"
+overwrite.outbounds.placeholder_hint: "在 selector / urltest 分组的 outbounds 中使用 \"$nodes\" 展开订阅节点，并可通过 _filter（include / exclude 正则）按地区或关键词自动分组；合成最终配置时会自动剥离 _filter。"
+overwrite.outbounds.presets_title: "一键地区自动分组"
+overwrite.outbounds.presets_hint: "点击下方地区预设将自动创建带正则筛选的 urltest 分组，并将其加入 proxy 选择组。"
+overwrite.outbounds.groups_title: "已配置出站与策略组"
+overwrite.outbounds.new_tag: "分组名称 (tag)"
+overwrite.outbounds.add_group: "新建策略组"
+overwrite.outbounds.add_title: "新建出站策略组"
+overwrite.outbounds.edit_title: "编辑出站策略组"
+overwrite.outbounds.save_group: "保存策略组"
+overwrite.outbounds.type: "策略类型"
+overwrite.outbounds.default: "默认成员（可选）"
+overwrite.outbounds.default_placeholder: "例如 auto 或 HK"
+overwrite.outbounds.test_url: "测速 URL"
+overwrite.outbounds.interval: "测速间隔"
+overwrite.outbounds.tolerance: "容差 (ms)"
+overwrite.outbounds.include_nodes: "包含订阅节点 ($nodes)"
+overwrite.outbounds.filter_include: "包含正则 (include，可选)"
+overwrite.outbounds.filter_exclude: "排除正则 (exclude，可选)"
+overwrite.outbounds.filter_preview: "当前订阅缓存命中 %{matched} / %{total} 个节点"
+overwrite.outbounds.filter_no_cache: "正则语法合法（尚无已缓存的订阅节点用于预览）"
+overwrite.outbounds.members_label: "引用其他出站 / 策略组（可多选）"
+overwrite.outbounds.error_empty_tag: "分组名称不能为空"
+overwrite.outbounds.error_empty_members: "请至少勾选一个成员出站，或启用「包含订阅节点 ($nodes)」"
+overwrite.outbounds.error_dup_tag: "已存在同名出站：%{tag}"
+nav.proxies: "策略与节点"
+proxies.title: "策略与节点"
+proxies.subtitle: "查看运行中核心的策略组与代理节点，支持实时切换、延迟测速与运行模式切换。"
+proxies.mode.rule: "规则模式"
+proxies.mode.global: "全局模式"
+proxies.mode.direct: "直连模式"
+proxies.configure_groups: "配置分组"
+proxies.refresh: "刷新"
+proxies.refreshing: "刷新中…"
+proxies.empty_stopped: "核心当前未运行。请先在「概览」页启动核心，随后可在此实时切换节点与测速。"
+proxies.empty_api_disabled: "Clash 控制 API 当前已关闭。请在「配置切片」页启用控制 API 并重启核心。"
+proxies.empty_loading: "正在连接核心控制 API 并拉取策略组…"
+proxies.go_overview: "前往概览启动"
+proxies.current_now: "当前：%{name}"
+proxies.search_placeholder: "搜索节点或分组…"
+proxies.sort_delay: "按延迟排序"
+proxies.test_group: "组内测速"
+proxies.testing: "测速中…"
+proxies.test_one: "测速"
+proxies.timeout: "超时"
+proxies.use_node: "选择"
+proxies.selected: "已选中"
+proxies.group_ref: "策略组"
+proxies.auto_group_hint: "当前为自动测速组（URLTest），由核心自动择优；可点击「组内测速」刷新延迟。"
+proxies.switched: "已将 %{group} 切换为 %{member}（已记住下次启动回放）。"
+proxies.group_tested: "%{group} 测速完成：%{ok} / %{total} 项可用。"
+proxies.mode_updated: "运行模式已切换为 %{mode}。"
 overwrite.experimental.clash_api_hint: "experimental.clash_api 由上方「本地入口与控制 API」卡片统一托管，请勿在 experimental.json 中重复定义。"
 overwrite.experimental.cache_enabled: "启用持久化缓存文件 (cache_file)"
 overwrite.experimental.cache_path: "缓存文件路径"
@@ -639,3 +687,62 @@ rulesets.field.category: "分类"
 rulesets.field.url: "规则集地址 (URL)"
 rulesets.field.format: "文件格式"
 rulesets.field.manual_hint: "输入合法的 sing-box 规则集源 JSON 对象（version + rules），保存后自动写入 rulesets/files/。"
+
+common.open: 打开
+nav.connections: 连接
+
+overview.task.proxies_hint: 实时切换策略组节点、测速与运行模式。
+overview.task.connections_hint: 查看实时连接、命中规则与一键分流。
+overview.analytics.traffic_title: 实时流量速率
+overview.analytics.traffic_live: "下载 %{down} · 上行 %{up}"
+overview.analytics.view_connections: 查看连接
+overview.analytics.download: 下载
+overview.analytics.upload: 上行
+overview.analytics.active_conns_count: "活跃连接：%{count}"
+overview.analytics.ratio_title: 今日代理与直连比例
+overview.analytics.today: 今日
+overview.analytics.proxied: 已代理
+overview.analytics.proxied_short: 代理占比
+overview.analytics.direct: 直连 / 拦截
+overview.analytics.today_conns: 今日连接
+overview.analytics.today_targets: 访问目标
+overview.analytics.daily_title: 近 7 日流量统计
+overview.analytics.daily_total: "累计 %{size}"
+
+connections.title: 连接
+connections.subtitle: 监控实时与历史连接流量、排查命中规则并一键写入分流规则。
+connections.pause: 暂停刷新
+connections.resume: 恢复刷新
+connections.close_all: 全部断开
+connections.close_one: 断开
+connections.clear_history: 清空记录
+connections.kpi.active: 活跃连接
+connections.kpi.today_conns: "今日累计 %{count} 次"
+connections.kpi.speed: 实时速率
+connections.kpi.session_traffic: 当前会话流量
+connections.kpi.proxy_ratio: 今日代理占比
+connections.kpi.today_total: "今日总计 %{size}"
+connections.tab.active: "活跃 (%{count})"
+connections.tab.closed: "已关闭 (%{count})"
+connections.sort.time: 按时间
+connections.sort.total: 按总流量
+connections.sort.download: 按下载
+connections.sort.upload: 按上行
+connections.search_placeholder: 搜索域名、IP、命中规则、出站或进程…
+connections.outbound_all: 全部出站
+connections.unknown_host: 未知目标
+connections.no_rule: 未匹配规则
+connections.quick_rule: 添加到规则：
+connections.add_direct: 直连
+connections.add_proxy: 代理
+connections.add_block: 拦截
+connections.add_custom: 自定义…
+connections.empty_stopped_title: 核心未运行
+connections.empty_stopped_hint: 启动核心并开启 Clash API 后，这里将实时显示经过核心的连接与命中规则。
+connections.empty_title: 暂无匹配连接
+connections.empty_hint: 当前筛选条件下没有连接记录，可调整搜索词或切换「已关闭」查看历史明细。
+connections.closed_one: 已断开指定连接。
+connections.closed_all: 已断开全部活跃连接。
+connections.cleared: 已清空本地流量统计与历史连接记录。
+connections.rule_added: "已添加规则：%{rule}"
+connections.rule_exists: "规则已存在：%{rule}"

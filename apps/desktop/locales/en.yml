@@ -552,9 +552,57 @@ overwrite.route.auto_detect: "Auto-detect interface"
 overwrite.route.rulesets_title: "Route Rule Set Rules (route.rules)"
 overwrite.route.add_rule: "Add Rule"
 overwrite.route.summary: "route.json currently defines %{rules} static rules and %{rule_sets} rule sets. Manage common rules on the Rules page, or edit advanced routing in JSON Source."
-overwrite.outbounds.placeholder_hint: "Use \"$nodes\" inside selector / urltest outbounds arrays to expand all subscription nodes at runtime (deduplicated with zero tag collisions)."
-overwrite.outbounds.new_tag: "New group tag"
-overwrite.outbounds.add_group: "Add group"
+overwrite.outbounds.placeholder_hint: "Use \"$nodes\" in selector / urltest groups to expand subscription nodes, with optional _filter (include / exclude regex) for region or keyword grouping; _filter is stripped cleanly during composition."
+overwrite.outbounds.presets_title: "One-Click Region Auto Groups"
+overwrite.outbounds.presets_hint: "Click a region preset to create a regex-filtered urltest group and attach it to the proxy selector."
+overwrite.outbounds.groups_title: "Configured Outbounds & Strategy Groups"
+overwrite.outbounds.new_tag: "Group tag"
+overwrite.outbounds.add_group: "New Group"
+overwrite.outbounds.add_title: "New Outbound Strategy Group"
+overwrite.outbounds.edit_title: "Edit Outbound Strategy Group"
+overwrite.outbounds.save_group: "Save Group"
+overwrite.outbounds.type: "Type"
+overwrite.outbounds.default: "Default member (optional)"
+overwrite.outbounds.default_placeholder: "e.g. auto or HK"
+overwrite.outbounds.test_url: "Test URL"
+overwrite.outbounds.interval: "Interval"
+overwrite.outbounds.tolerance: "Tolerance (ms)"
+overwrite.outbounds.include_nodes: "Include subscription nodes ($nodes)"
+overwrite.outbounds.filter_include: "Include regex (optional)"
+overwrite.outbounds.filter_exclude: "Exclude regex (optional)"
+overwrite.outbounds.filter_preview: "Matches %{matched} / %{total} cached subscription nodes"
+overwrite.outbounds.filter_no_cache: "Regex is valid (no cached subscription nodes to preview yet)"
+overwrite.outbounds.members_label: "Reference other outbounds / groups"
+overwrite.outbounds.error_empty_tag: "Group tag cannot be empty"
+overwrite.outbounds.error_empty_members: "Select at least one member outbound or enable subscription nodes ($nodes)"
+overwrite.outbounds.error_dup_tag: "Duplicate outbound tag: %{tag}"
+nav.proxies: "Proxies"
+proxies.title: "Proxies & Nodes"
+proxies.subtitle: "Inspect running strategy groups and nodes with live switching, latency tests, and mode control."
+proxies.mode.rule: "Rule"
+proxies.mode.global: "Global"
+proxies.mode.direct: "Direct"
+proxies.configure_groups: "Configure Groups"
+proxies.refresh: "Refresh"
+proxies.refreshing: "Refreshing…"
+proxies.empty_stopped: "Core is not running. Start the core from Overview to switch nodes and test latency live."
+proxies.empty_api_disabled: "Clash control API is disabled. Enable it in Config Slices and restart the core."
+proxies.empty_loading: "Connecting to Clash API and loading proxy groups…"
+proxies.go_overview: "Go to Overview"
+proxies.current_now: "Active: %{name}"
+proxies.search_placeholder: "Filter nodes or groups…"
+proxies.sort_delay: "Sort by latency"
+proxies.test_group: "Test Group"
+proxies.testing: "Testing…"
+proxies.test_one: "Test"
+proxies.timeout: "Timeout"
+proxies.use_node: "Select"
+proxies.selected: "Selected"
+proxies.group_ref: "Group"
+proxies.auto_group_hint: "URLTest group selects the fastest node automatically. Click Test Group to refresh latency."
+proxies.switched: "Switched %{group} to %{member} (saved for next startup)."
+proxies.group_tested: "Tested %{group}: %{ok} / %{total} reachable."
+proxies.mode_updated: "Rule mode switched to %{mode}."
 overwrite.experimental.clash_api_hint: "experimental.clash_api is managed by the Local Inbound & Control API card above; do not define it in experimental.json."
 overwrite.experimental.cache_enabled: "Enable persistent cache file (cache_file)"
 overwrite.experimental.cache_path: "Cache file path"
@@ -639,3 +687,62 @@ rulesets.field.category: "Category"
 rulesets.field.url: "Rule Set URL"
 rulesets.field.format: "Format"
 rulesets.field.manual_hint: "Provide a valid sing-box rule-set source JSON object (version + rules); saved automatically into rulesets/files/."
+
+common.open: Open
+nav.connections: Connections
+
+overview.task.proxies_hint: Switch outbound groups, test node latency, and change mode.
+overview.task.connections_hint: Inspect live connections, matched rules, and add quick rules.
+overview.analytics.traffic_title: Live Traffic Speed
+overview.analytics.traffic_live: "Down %{down} · Up %{up}"
+overview.analytics.view_connections: Connections
+overview.analytics.download: Download
+overview.analytics.upload: Upload
+overview.analytics.active_conns_count: "Active connections: %{count}"
+overview.analytics.ratio_title: Today's Proxy vs Direct Ratio
+overview.analytics.today: Today
+overview.analytics.proxied: Proxied
+overview.analytics.proxied_short: Proxied
+overview.analytics.direct: Direct / Blocked
+overview.analytics.today_conns: Today's connections
+overview.analytics.today_targets: Unique targets
+overview.analytics.daily_title: 7-Day Traffic Usage
+overview.analytics.daily_total: "Total %{size}"
+
+connections.title: Connections
+connections.subtitle: Monitor active and closed connections, inspect matched rules, and add routing rules in one click.
+connections.pause: Pause
+connections.resume: Resume
+connections.close_all: Close All
+connections.close_one: Close
+connections.clear_history: Clear History
+connections.kpi.active: Active Connections
+connections.kpi.today_conns: "%{count} today"
+connections.kpi.speed: Live Speed
+connections.kpi.session_traffic: Active Session Traffic
+connections.kpi.proxy_ratio: Today's Proxy Ratio
+connections.kpi.today_total: "Today total %{size}"
+connections.tab.active: "Active (%{count})"
+connections.tab.closed: "Closed (%{count})"
+connections.sort.time: Time
+connections.sort.total: Total
+connections.sort.download: Download
+connections.sort.upload: Upload
+connections.search_placeholder: Search host, IP, matched rule, outbound, or process…
+connections.outbound_all: All Outbounds
+connections.unknown_host: Unknown target
+connections.no_rule: Unmatched
+connections.quick_rule: "Add to rule:"
+connections.add_direct: Direct
+connections.add_proxy: Proxy
+connections.add_block: Block
+connections.add_custom: Custom…
+connections.empty_stopped_title: Core is stopped
+connections.empty_stopped_hint: Start the core with Clash API enabled to monitor live connections and matched rules.
+connections.empty_title: No matching connections
+connections.empty_hint: No connections match the current filter. Adjust the query or switch to Closed for history.
+connections.closed_one: Connection closed.
+connections.closed_all: All active connections closed.
+connections.cleared: Cleared local traffic statistics and connection history.
+connections.rule_added: "Rule added: %{rule}"
+connections.rule_exists: "Rule already exists: %{rule}"

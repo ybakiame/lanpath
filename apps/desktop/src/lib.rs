@@ -7,6 +7,8 @@ mod backup_view;
 mod config_composer;
 mod config_validator;
 mod config_view;
+mod connections;
+mod connections_view;
 #[cfg(test)]
 mod core_fixture;
 mod core_inventory;
@@ -28,6 +30,8 @@ mod overwrite_view;
 mod preferences_storage;
 mod profiles;
 mod profiles_view;
+mod proxies;
+mod proxies_view;
 mod request_settings;
 mod request_settings_view;
 mod rules;
@@ -106,6 +110,8 @@ pub fn gallery_root() -> Root {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Page {
     Overview,
+    Proxies,
+    Connections,
     Subscription,
     RequestSettings,
     Profiles,
@@ -125,6 +131,8 @@ impl Page {
     fn label_key(self) -> &'static str {
         match self {
             Page::Overview => "nav.overview",
+            Page::Proxies => "nav.proxies",
+            Page::Connections => "nav.connections",
             Page::Subscription => "nav.subscriptions",
             Page::RequestSettings => "nav.request_settings",
             Page::Profiles => "nav.profiles",
@@ -143,6 +151,8 @@ impl Page {
     fn test_id(self) -> &'static str {
         match self {
             Page::Overview => "nav-overview",
+            Page::Proxies => "nav-proxies",
+            Page::Connections => "nav-connections",
             Page::Subscription => "nav-subscriptions",
             Page::RequestSettings => "nav-request-settings",
             Page::Profiles => "nav-profiles",
@@ -193,6 +203,7 @@ pub fn App() -> impl IntoElement {
     let (page, requested, navigation_dialog) = navigation::install();
     let rule_seed = signal(String::new());
     view()
+        .relative()
         .flex_1()
         .flex_col()
         .bg(ui::prefs::window_bg)
@@ -200,7 +211,6 @@ pub fn App() -> impl IntoElement {
         .child(ui::title_bar::workspace_title_bar(move || {
             t!(page.get().label_key())
         }))
-        .child(ui::feedback::toast_host())
         .child(when(
             move || failure_state.get().is_some(),
             move || shell::startup_failure(failure_state),
@@ -232,6 +242,16 @@ pub fn App() -> impl IntoElement {
                                     .child(when(
                                         move || page.get() == Page::Overview,
                                         move || overview_view::overview_page(requested),
+                                    ))
+                                    .child(when(
+                                        move || page.get() == Page::Proxies,
+                                        move || proxies_view::proxies_page(requested),
+                                    ))
+                                    .child(when(
+                                        move || page.get() == Page::Connections,
+                                        move || {
+                                            connections_view::connections_page(requested, rule_seed)
+                                        },
                                     ))
                                     .child(when(
                                         move || page.get() == Page::RequestSettings,
@@ -271,4 +291,5 @@ pub fn App() -> impl IntoElement {
         ))
         .child(workspace_panels::host())
         .child(navigation_dialog)
+        .child(ui::feedback::toast_host())
 }

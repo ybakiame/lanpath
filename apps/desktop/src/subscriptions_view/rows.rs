@@ -1,15 +1,11 @@
-//! 订阅列表（阶段 1 语义组件迁移）：清晰列表行——启用开关、名称、当前
-//! 生效标记、节点数/格式、行内刷新状态；常用动作“刷新/编辑/原文/设为
-//! 生效”直接可见，删除收进“更多”菜单并必须确认（同时说明本地缓存移除）。
-//! CRUD、绑定、草稿、刷新全局单飞与缓存语义不变（见 `super`）。展示与
-//! 操作文案全部经 `t!`（zh-CN/en），共享业务错误原文作为参数原样保留。
+//! 订阅列表：参考 Quick settings 卡片层级（顶部联动图标 + 开关、主体名称/摘要、
+//! 底部紧凑操作栏），保留 CRUD、绑定、草稿、刷新单飞与确认删除语义。
 
 use lanpath_client::Subscription;
 use nsh_base::{menu, menu_item, theme};
 use nsh_core::prelude::*;
 use uuid::Uuid;
 
-use crate::ui::button::{ButtonSize, ButtonVariant, button};
 use crate::ui::overlay::confirm_dialog;
 
 use super::{SubscriptionPageState, spawn_refresh};
@@ -98,7 +94,7 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
         )
         .child(crate::ui::cards::card_grid(
             filtered,
-            228.0,
+            184.0,
             None,
             |subscription: &Subscription| subscription.id.to_string(),
             move |item| subscription_row(row_state.clone(), item).into_element(),
@@ -121,6 +117,7 @@ fn subscription_row(
     let more_state = state;
     let enabled = item;
     let selected = active_state.active;
+    let icon_active = active_state.active;
     crate::ui::cards::selection_card(
         move || enabled.get().enabled,
         move || selected.get() == Some(id),
@@ -128,54 +125,150 @@ fn subscription_row(
     .test_id(&row_test_id)
     .optional_label(move || Some(item.get().name.into()))
     .flex_col()
-    .gap_1()
-    .p_3()
+    .justify_between()
+    .gap_2()
+    .p(px(12.0))
     .child(
+        // Quick settings 顶部行：左侧状态联动圆形图标徽章，右侧原生开关。
         view()
             .flex_row()
-            .flex_wrap()
             .items_center()
-            .gap_3()
-            .child(enabled_switch(switch_state, item))
+            .justify_between()
+            .gap_2()
             .child(
-                text(move || item.get().name.clone())
-                    .text_size(px(15.0))
-                    .flex_1()
-                    .truncate()
-                    .min_w(px(0.0)),
+                view()
+                    .size(px(32.0))
+                    .flex_none()
+                    .rounded_full()
+                    .items_center()
+                    .justify_center()
+                    .bg(move || {
+                        if item.get().enabled {
+                            theme().primary
+                        } else {
+                            theme().muted
+                        }
+                    })
+                    .text_color(move || {
+                        if item.get().enabled {
+                            theme().primary_foreground
+                        } else {
+                            theme().muted_foreground
+                        }
+                    })
+                    .child(when(
+                        move || item.get().enabled,
+                        move || {
+                            let is_active = icon_active.get() == Some(id);
+                            crate::ui::icon::icon_sized(
+                                if is_active {
+                                    crate::ui::icon::Icon::Check
+                                } else {
+                                    crate::ui::icon::Icon::Subscription
+                                },
+                                crate::ui::icon::Tone::OnPrimary,
+                                15.0,
+                            )
+                        },
+                    ))
+                    .child(when(
+                        move || !item.get().enabled,
+                        || {
+                            crate::ui::icon::icon_sized(
+                                crate::ui::icon::Icon::Subscription,
+                                crate::ui::icon::Tone::Muted,
+                                15.0,
+                            )
+                        },
+                    )),
             )
+            .child(enabled_switch(switch_state, item)),
+    )
+    .child(
+        // Quick settings 主体信息：名称 + 当前生效/刷新标记 + 节点与格式摘要。
+        view()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        text(move || item.get().name.clone())
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .flex_1()
+                            .truncate()
+                            .min_w(px(0.0)),
+                    )
+                    .child(when(
+                        move || refresh_status_state.refreshing.get().contains(&id),
+                        || {
+                            text(move || t!("subscription.refreshing"))
+                                .text_size(px(11.0))
+                                .text_color(move || theme().muted_foreground)
+                        },
+                    ))
+                    .child(when(
+                        move || {
+                            active_state.active.get() == Some(id)
+                                && !refresh_status_state.refreshing.get().contains(&id)
+                        },
+                        || {
+                            text(|| t!("subscription.active_mark"))
+                                .text_size(px(11.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(move || theme().primary)
+                        },
+                    )),
+            )
+            .child(
+                text(move || {
+                    let subscription = item.get();
+                    let mut summary = if subscription.node_count > 0 {
+                        t!("subscription.nodes", count = subscription.node_count)
+                    } else {
+                        t!("subscription.nodes_unknown")
+                    };
+                    if let Some(format) = subscription.format {
+                        summary.push_str(&format!(
+                            " · {}",
+                            t!("subscription.format", format = format!("{format:?}"))
+                        ));
+                    }
+                    summary
+                })
+                .text_size(px(11.5))
+                .text_color(move || theme().muted_foreground)
+                .truncate(),
+            )
+            .child(binding_summary(more_state.clone(), item))
             .child(when(
-                move || refresh_status_state.refreshing.get().contains(&id),
-                || {
-                    text(move || t!("subscription.refreshing"))
-                        .text_size(px(12.0))
-                        .text_color(move || theme().muted_foreground)
+                move || item.get().error.is_some(),
+                move || {
+                    text(t!(
+                        "subscription.error_prefix",
+                        error = item.get().error.clone().unwrap_or_default()
+                    ))
+                    .text_size(px(11.0))
+                    .text_color(move || theme().destructive)
+                    .truncate()
                 },
             )),
     )
-    .child(when(
-        move || active_state.active.get() == Some(id),
-        || {
-            view()
-                .flex_row()
-                .items_center()
-                .gap_1()
-                .child(crate::ui::icon::icon(
-                    crate::ui::icon::Icon::Check,
-                    crate::ui::icon::Tone::Primary,
-                ))
-                .child(
-                    text(|| t!("subscription.active_mark"))
-                        .text_size(px(12.0))
-                        .text_color(move || theme().primary),
-                )
-        },
-    ))
     .child(
+        // 底部紧凑操作栏：单行收纳常用操作与更多菜单。
         view()
+            .pt(px(6.0))
+            .border_t(px(1.0))
+            .border_color(move || theme().border.opacity(0.45))
             .flex_row()
             .flex_wrap()
-            .gap_1()
+            .items_center()
+            .gap(px(2.0))
             .child(row_button(
                 refresh_button,
                 item,
@@ -213,43 +306,11 @@ fn subscription_row(
                     )
                 },
             ))
-            .child(more_menu(more_state.clone(), item)),
+            .child(more_menu(more_state, item)),
     )
-    .child(
-        text(move || {
-            let subscription = item.get();
-            let mut summary = if subscription.node_count > 0 {
-                t!("subscription.nodes", count = subscription.node_count)
-            } else {
-                t!("subscription.nodes_unknown")
-            };
-            if let Some(format) = subscription.format {
-                summary.push_str(&format!(
-                    " · {}",
-                    t!("subscription.format", format = format!("{format:?}"))
-                ));
-            }
-            summary
-        })
-        .text_size(px(12.0))
-        .text_color(move || theme().muted_foreground),
-    )
-    .child(binding_summary(more_state.clone(), item))
-    .child(when(
-        move || item.get().error.is_some(),
-        move || {
-            text(t!(
-                "subscription.error_prefix",
-                error = item.get().error.clone().unwrap_or_default()
-            ))
-            .text_size(px(12.0))
-            .text_color(move || theme().destructive)
-        },
-    ))
 }
 
-/// 行内覆写模板绑定：已绑定显示模板名；模板被外部删除或清单损坏导致
-/// 引用失效时显示真实错误提示，不静默改绑。
+/// 行内覆写模板绑定：已绑定显示模板名；引用失效时显示真实错误。
 fn binding_summary(
     state: SubscriptionPageState,
     item: ReadSignal<Subscription>,
@@ -272,11 +333,7 @@ fn binding_summary(
     )
 }
 
-/// 启用开关：NSH 原生 Switch 语义（role=switch、可访问名称、checked 状态、
-/// 键盘焦点与 Enter/Space 激活由组件原生提供），样式用 host token 类
-/// （与 `proxy_card` 同一套）。实测行内 `track_style` 闭包会使该子树不进
-/// NSH 测试镜像，故 track/thumb 用类字符串。按压走 `on_change` 真实业务
-/// 切换；自动化经 `id:<row> >> role:switch` 或 test_id 包裹锚点触达。
+/// 启用开关（原生 Switch 语义，走 `on_change` 持久化并刷新摘要）。
 fn enabled_switch(
     state: SubscriptionPageState,
     item: ReadSignal<Subscription>,
@@ -313,12 +370,14 @@ fn enabled_switch(
         ))
 }
 
-/// “更多”菜单：低频/危险动作进入菜单；删除选中后弹确认框（确认才删除）。
 fn more_menu(state: SubscriptionPageState, item: ReadSignal<Subscription>) -> AnyElement {
     let menu_state = state;
-    let trigger = button(ButtonVariant::Ghost)
-        .size(ButtonSize::Sm)
-        .label(|| t!("subscription.more"));
+    let trigger = compact_action(|| t!("subscription.more"));
+    let danger_bg = || {
+        theme()
+            .color("danger-surface")
+            .unwrap_or_else(|| theme().accent)
+    };
     menu()
         .offset(px(4.0))
         .popup_style(|s| crate::ui::select::popup_surface(s).min_w(px(160.0)))
@@ -326,66 +385,63 @@ fn more_menu(state: SubscriptionPageState, item: ReadSignal<Subscription>) -> An
         .popup_ending_style(crate::ui::select::popup_ending)
         .trigger(trigger)
         .child(
-            // test_id 挂在菜单项内部锚点上（同 Button：外层 wrapper 不在
-            // 按压/选择的祖先链上，自动化按 id 找不到目标）。
             menu_item()
                 .px_3()
                 .py_2()
                 .cursor(Cursor::Default)
                 .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
-                .hover(|s| {
-                    s.bg(move || {
-                        theme()
-                            .color("danger-surface")
-                            .unwrap_or_else(|| theme().accent)
-                    })
-                })
-                .focus(|s| {
-                    s.bg(move || {
-                        theme()
-                            .color("danger-surface")
-                            .unwrap_or_else(|| theme().accent)
-                    })
-                })
+                .hover(move |s| s.bg(danger_bg))
+                .focus(move |s| s.bg(danger_bg))
                 .text_color(move || theme().destructive)
                 .child(
                     view()
                         .test_id("subscription-delete")
                         .child(text(|| t!("subscription.action.delete")).text_size(px(13.0))),
                 )
-                .on_select(move || {
-                    menu_state.pending_remove.set(Some(item.get()));
-                }),
+                .on_select(move || menu_state.pending_remove.set(Some(item.get()))),
         )
         .into_element()
 }
 
-/// 行操作按钮（语义 Button，Ghost 变体）：同步操作（启停/生效/删除/编辑
-/// 保存）经业务层互斥排队，忙碌时也可触发；异步刷新由 `begin_refresh`
-/// 全局单飞防并发提交。
+/// 行内紧凑操作按钮：贴合 Quick settings 卡片底部栏，避免窄卡下按钮溢出换行。
+fn compact_action(label: impl Fn() -> String + 'static) -> nsh_base::ButtonElement {
+    nsh_base::button()
+        .px(px(6.0))
+        .py(px(3.0))
+        .min_h(px(24.0))
+        .rounded(px(6.0))
+        .cursor(Cursor::Default)
+        .text_color(move || theme().muted_foreground)
+        .hover(|s| {
+            s.bg(move || theme().muted.opacity(0.8))
+                .text_color(move || theme().foreground)
+        })
+        .active(|s| s.bg(move || theme().accent))
+        .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
+        .child(
+            text(label)
+                .text_size(px(11.5))
+                .font_weight(FontWeight::MEDIUM),
+        )
+}
+
+/// 行操作按钮：同步操作经业务层互斥排队，异步刷新由 `begin_refresh` 单飞防重。
 fn row_button(
     state: SubscriptionPageState,
     item: ReadSignal<Subscription>,
     label: impl Fn() -> String + 'static,
     action: impl Fn(&SubscriptionPageState, &Subscription) + 'static,
 ) -> impl IntoElement {
-    button(ButtonVariant::Ghost)
-        .size(ButtonSize::Sm)
-        .label(label)
-        .on_press(move || action(&state, &item.get()))
+    compact_action(label).on_press(move || action(&state, &item.get()))
 }
 
-/// 手动刷新：使用已保存的 URL/UA，联网在后台线程执行；
-/// 全局单飞——有刷新在途时不启动，完成后可再刷新。
 fn run_refresh(state: &SubscriptionPageState, id: Uuid) {
     let _ = spawn_refresh(state.clone(), id);
 }
 
-/// 设置当前生效订阅；拒绝不存在或已停用项时显示共享层真实错误。
 fn run_activate(state: &SubscriptionPageState, id: Uuid) {
     state.bump_serial();
-    let result = state.service.as_ref().map(|service| service.set_active(id));
-    match result {
+    match state.service.as_ref().map(|service| service.set_active(id)) {
         Some(Ok(())) => {
             state.reload();
             state.post_notice(t!("subscription.activate_done"));
@@ -401,9 +457,7 @@ fn run_activate(state: &SubscriptionPageState, id: Uuid) {
     }
 }
 
-/// 删除确认（语义 ConfirmDialog，危险变体）：取消只关弹窗；确认才删除
-/// 并刷新列表（同时同步 App 级共享摘要）；文案明确本地缓存一并移除、
-/// 不影响其他应用数据。
+/// 删除确认弹窗（危险变体，确认后移除记录与本地节点缓存）。
 fn delete_confirm(state: SubscriptionPageState) -> AnyElement {
     let target = state.pending_remove;
     let service = state.service.clone();
