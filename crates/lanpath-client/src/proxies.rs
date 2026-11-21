@@ -244,9 +244,10 @@ pub async fn clash_select_proxy(
     name: &str,
 ) -> LanpathResult<()> {
     let client = build_clash_client(5000)?;
+    let encoded_group = urlencoding::encode(group);
     let request = auth_request(
         client
-            .put(format!("http://127.0.0.1:{port}/proxies/{group}"))
+            .put(format!("http://127.0.0.1:{port}/proxies/{encoded_group}"))
             .json(&serde_json::json!({ "name": name })),
         secret,
     );
@@ -286,9 +287,10 @@ pub async fn clash_test_delay(
 ) -> LanpathResult<Option<u16>> {
     let test_url = url.unwrap_or(DEFAULT_DELAY_TEST_URL);
     let client = build_clash_client(timeout_ms + 1000)?;
+    let encoded_name = urlencoding::encode(name);
     let request = auth_request(
         client.get(format!(
-            "http://127.0.0.1:{port}/proxies/{name}/delay?url={}&timeout={}",
+            "http://127.0.0.1:{port}/proxies/{encoded_name}/delay?url={}&timeout={}",
             urlencoding::encode(test_url),
             timeout_ms
         )),
@@ -367,10 +369,43 @@ pub async fn clash_test_group(
 // Selection persistence helpers
 // ---------------------------------------------------------------------------
 
-/// Persist a group selection to [`ClientConfig::group_selections`] and save
-/// `client.json`.
-///
-/// Called by the Tauri command layer after a successful [`clash_select_proxy`].
+/// Fetch current rule mode (`rule` / `global` / `direct`) via Clash API `GET /configs`.
+pub async fn clash_get_mode(port: u16, secret: &str) -> LanpathResult<String> {
+    let client = build_clash_client(5000)?;
+    let request = auth_request(
+        client.get(format!("http://127.0.0.1:{port}/configs")),
+        secret,
+    );
+    let resp = match request.send().await {
+        Ok(r) => r,
+        Err(e) if e.is_connect() || e.is_timeout() || is_connection_refused(&e) => {
+            return Err(LanpathError::Client(format!("core not running: {e}")));
+        }
+        Err(e) => {
+            return Err(LanpathError::Client(format!(
+                "Clash API /configs request failed: {e}"
+            )));
+        }
+    };
+    if !resp.status().is_success() {
+        return Err(LanpathError::Client(format!(
+            "Clash API /configs returned HTTP {}",
+            resp.status()
+        )));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| LanpathError::Client(format!("Clash API /configs invalid JSON: {e}")))?;
+    let mode = body
+        .get("mode")
+        .and_then(|m| m.as_str())
+        .unwrap_or("rule")
+        .to_ascii_lowercase();
+    Ok(mode)
+}
+
+/// Persist a group selection to [`ClientConfig::group_selections`] and save config.
 pub fn persist_group_selection(
     data_dir: &std::path::Path,
     group: &str,

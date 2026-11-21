@@ -9,7 +9,7 @@ mod clash;
 mod tracker;
 mod ws;
 
-pub use clash::{clash_close_connection, clash_get_connections};
+pub use clash::{clash_close_all_connections, clash_close_connection, clash_get_connections};
 pub use tracker::{ConnectionTrackerHandle, TrackerBatch, start_connection_tracker};
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,9 @@ pub struct ConnectionView {
     pub outbound: String,
     /// Network protocol, e.g. `tcp` / `udp`.
     pub network: String,
+    /// Process name (`metadata.process` or basename of `metadata.processPath`, empty when unknown).
+    #[serde(default)]
+    pub process: String,
     /// Proxy chain as a human-readable string (`chains` reversed, joined by ` → `).
     pub chain: String,
     /// Matched rule name.
@@ -67,6 +70,7 @@ mod tests {
             destination_ip: String::new(),
             outbound: "Proxy".into(),
             network: "tcp".into(),
+            process: String::new(),
             chain: "Proxy".into(),
             rule: "DOMAIN".into(),
             rule_payload: host.into(),
@@ -394,5 +398,53 @@ mod tests {
             captured.lock().unwrap().as_ref().unwrap(),
             "Bearer mysecret"
         );
+    }
+
+    #[test]
+    fn parse_connections_response_extracts_process_name() {
+        let json = serde_json::json!({
+            "connections": [
+                {
+                    "id": "p-1",
+                    "metadata": {
+                        "host": "a.example",
+                        "network": "tcp",
+                        "process": "curl"
+                    }
+                },
+                {
+                    "id": "p-2",
+                    "metadata": {
+                        "host": "b.example",
+                        "network": "tcp",
+                        "processPath": "C:\\Program Files\\Browser\\chrome.exe"
+                    }
+                }
+            ]
+        });
+        let conns = parse_connections_response(&json).unwrap();
+        assert_eq!(conns[0].process, "curl");
+        assert_eq!(conns[1].process, "chrome.exe");
+    }
+
+    #[tokio::test]
+    async fn clash_close_all_connections_deletes_collection() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hit_ref = std::sync::Arc::clone(&hit);
+        let app = axum::Router::new().route(
+            "/connections",
+            axum::routing::delete(move || async move {
+                hit_ref.store(true, std::sync::atomic::Ordering::SeqCst);
+                axum::http::StatusCode::NO_CONTENT
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        clash_close_all_connections(addr.port(), "").await.unwrap();
+        assert!(hit.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

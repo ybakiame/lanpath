@@ -30,6 +30,7 @@ fn closed_conn(
         destination_ip: "1.2.3.4".to_string(),
         outbound: outbound.to_string(),
         network: "tcp".to_string(),
+        process: String::new(),
         chain: format!("Proxy → {outbound}"),
         rule: "DOMAIN-SUFFIX".to_string(),
         rule_payload: "example.com".to_string(),
@@ -202,4 +203,43 @@ async fn apply_batch_skips_empty_deltas() {
     let summary = store.today_summary("2026-01-04").await.unwrap();
     assert_eq!(summary.connection_count, 0);
     assert_eq!(summary.target_count, 0);
+}
+
+#[tokio::test]
+async fn daily_totals_ending_on_pads_missing_days_and_splits_ratio() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = StatsStore::open(dir.path()).await.unwrap();
+    store
+        .apply_batch(
+            "2026-01-05",
+            &[
+                delta("a.com", "HK-01", 100, 400, true),
+                delta("b.com", "direct", 50, 150, true),
+            ],
+            &[],
+        )
+        .await
+        .unwrap();
+    store
+        .apply_batch("2026-01-07", &[delta("c.com", "JP-01", 20, 80, true)], &[])
+        .await
+        .unwrap();
+
+    let end = chrono::NaiveDate::from_ymd_opt(2026, 1, 7).unwrap();
+    let series = store.daily_totals_ending_on(end, 3).await.unwrap();
+    assert_eq!(series.len(), 3);
+    assert_eq!(series[0].date, "2026-01-05");
+    assert_eq!(series[0].upload_bytes, 150);
+    assert_eq!(series[0].download_bytes, 550);
+    assert_eq!(series[0].proxied_bytes, 500);
+    assert_eq!(series[0].direct_bytes, 200);
+    assert_eq!(series[0].connection_count, 2);
+
+    assert_eq!(series[1].date, "2026-01-06");
+    assert_eq!(series[1].upload_bytes, 0);
+    assert_eq!(series[1].download_bytes, 0);
+
+    assert_eq!(series[2].date, "2026-01-07");
+    assert_eq!(series[2].proxied_bytes, 100);
+    assert_eq!(series[2].direct_bytes, 0);
 }

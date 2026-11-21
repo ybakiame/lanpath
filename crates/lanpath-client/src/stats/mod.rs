@@ -129,6 +129,23 @@ pub struct TodaySummary {
     pub target_count: i64,
 }
 
+/// 每日总流量汇总（图表数据源，按本地日期 `YYYY-MM-DD` 聚合）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyTotalRow {
+    /// 本地日期 `YYYY-MM-DD`。
+    pub date: String,
+    /// 当日总上行字节。
+    pub upload_bytes: i64,
+    /// 当日总下行字节。
+    pub download_bytes: i64,
+    /// 当日已代理总字节（上行 + 下行）。
+    pub proxied_bytes: i64,
+    /// 当日未代理总字节（直连/拦截，上行 + 下行）。
+    pub direct_bytes: i64,
+    /// 当日连接数。
+    pub connection_count: i64,
+}
+
 /// 日聚合查询排序字段。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

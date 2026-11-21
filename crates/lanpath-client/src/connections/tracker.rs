@@ -189,6 +189,11 @@ impl ConnectionTrackerHandle {
         self.handle.abort();
         let _ = self.handle.await;
     }
+
+    /// Synchronously abort the background tracking task (e.g. inside `Drop`).
+    pub fn abort(&self) {
+        self.handle.abort();
+    }
 }
 
 /// Start the background connection tracker.

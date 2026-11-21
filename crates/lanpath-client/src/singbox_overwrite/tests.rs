@@ -148,3 +148,78 @@ fn defaults_do_not_inject_builtin_private_rulesets_and_presets_are_valid() {
         assert_eq!(entry["server"], preset.server);
     }
 }
+
+#[test]
+fn compose_applies_outbound_node_filter_strips_metadata_and_handles_empty_match() {
+    let mut bundle = SingboxOverwriteBundle::default();
+    let hk_preset = recommended_region_presets()
+        .iter()
+        .find(|p| p.tag == "HK")
+        .unwrap();
+    let jp_preset = recommended_region_presets()
+        .iter()
+        .find(|p| p.tag == "JP")
+        .unwrap();
+    let mut hk = hk_preset.to_outbound_json("urltest");
+    hk["_filter"]["exclude"] = json!("倍率|过期");
+    let jp = jp_preset.to_outbound_json("selector");
+
+    bundle.outbounds = json!({
+        "outbounds": [
+            {
+                "type": "selector",
+                "tag": "proxy",
+                "outbounds": ["HK", "JP", "$nodes"],
+                "default": "HK"
+            },
+            hk,
+            jp,
+            { "type": "direct", "tag": "direct" }
+        ]
+    });
+    validate_slice(SingboxSliceKind::Outbounds, &bundle.outbounds).unwrap();
+    assert_eq!(
+        extract_outbound_tags(&bundle.outbounds),
+        vec!["proxy", "HK", "JP", "direct"]
+    );
+
+    let sub_nodes = vec![
+        json!({ "type": "shadowsocks", "tag": "🇭🇰 香港 01", "server": "192.0.2.1", "server_port": 8388 }),
+        json!({ "type": "shadowsocks", "tag": "HK 02 高倍率", "server": "192.0.2.2", "server_port": 8388 }),
+        json!({ "type": "shadowsocks", "tag": "🇺🇸 美国 01", "server": "192.0.2.3", "server_port": 8388 }),
+    ];
+
+    let composed = compose_from_overwrite(&sub_nodes, &bundle).unwrap();
+    let outbounds = composed["outbounds"].as_array().unwrap();
+
+    // `_filter` 必须完全从最终 sing-box 产物中剥离。
+    for item in outbounds {
+        assert!(
+            item.get(OUTBOUND_FILTER_KEY).is_none(),
+            "leaked _filter in {item}"
+        );
+    }
+
+    // HK 命中「🇭🇰 香港 01」，排除「HK 02 高倍率」与美国节点。
+    let hk_out = outbounds.iter().find(|o| o["tag"] == "HK").unwrap();
+    assert_eq!(hk_out["outbounds"], json!(["🇭🇰 香港 01"]));
+
+    // JP 无匹配节点时安全回退 direct，保证 sing-box schema 合法。
+    let jp_out = outbounds.iter().find(|o| o["tag"] == "JP").unwrap();
+    assert_eq!(jp_out["outbounds"], json!(["direct"]));
+}
+
+#[test]
+fn validate_rejects_invalid_outbound_filter_regex() {
+    let bad = r#"{
+        "outbounds": [
+            {
+                "type": "urltest",
+                "tag": "bad-re",
+                "outbounds": ["$nodes"],
+                "_filter": { "include": "[unclosed" }
+            }
+        ]
+    }"#;
+    assert!(parse_and_validate_slice(SingboxSliceKind::Outbounds, bad).is_err());
+}

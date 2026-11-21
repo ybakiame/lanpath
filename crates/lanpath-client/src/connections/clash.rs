@@ -89,6 +89,22 @@ pub(crate) fn parse_connections_response(
             .unwrap_or("")
             .to_string();
 
+        let process = metadata
+            .and_then(|m| {
+                m.get("process")
+                    .and_then(|p| p.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        m.get("processPath")
+                            .and_then(|p| p.as_str())
+                            .and_then(|path| path.rsplit(['/', '\\']).next())
+                            .filter(|s| !s.trim().is_empty())
+                            .map(str::to_owned)
+                    })
+            })
+            .unwrap_or_default();
+
         // 叶子出站 = chains[0]（Clash API chains 从最终出站往入口排列）。
         let outbound = obj
             .get("chains")
@@ -142,6 +158,7 @@ pub(crate) fn parse_connections_response(
             destination_ip,
             outbound,
             network,
+            process,
             chain,
             rule,
             rule_payload,
@@ -192,14 +209,28 @@ pub async fn clash_get_connections(port: u16, secret: &str) -> LanpathResult<Vec
     parse_connections_response(&body)
 }
 
+fn encode_path_segment(segment: &str) -> String {
+    let mut encoded = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
 /// Close a single connection via Clash API `DELETE /connections/{id}`.
 ///
 /// Returns [`LanpathError::Client`] with "core not running" semantics when the
 /// connection is refused / unreachable.
 pub async fn clash_close_connection(port: u16, secret: &str, id: &str) -> LanpathResult<()> {
     let client = build_clash_client(5000)?;
+    let encoded_id = encode_path_segment(id);
     let request = auth_request(
-        client.delete(format!("http://127.0.0.1:{port}/connections/{id}")),
+        client.delete(format!("http://127.0.0.1:{port}/connections/{encoded_id}")),
         secret,
     );
 
@@ -218,6 +249,38 @@ pub async fn clash_close_connection(port: u16, secret: &str, id: &str) -> Lanpat
     if !resp.status().is_success() {
         return Err(LanpathError::Client(format!(
             "Clash API DELETE /connections/{id} returned HTTP {}",
+            resp.status()
+        )));
+    }
+    Ok(())
+}
+
+/// Close all active connections via Clash API `DELETE /connections`.
+///
+/// Returns [`LanpathError::Client`] with "core not running" semantics when the
+/// connection is refused / unreachable.
+pub async fn clash_close_all_connections(port: u16, secret: &str) -> LanpathResult<()> {
+    let client = build_clash_client(5000)?;
+    let request = auth_request(
+        client.delete(format!("http://127.0.0.1:{port}/connections")),
+        secret,
+    );
+
+    let resp = match request.send().await {
+        Ok(r) => r,
+        Err(e) if e.is_connect() || e.is_timeout() || is_connection_refused(&e) => {
+            return Err(LanpathError::Client(format!("core not running: {e}")));
+        }
+        Err(e) => {
+            return Err(LanpathError::Client(format!(
+                "Clash API request failed: {e}"
+            )));
+        }
+    };
+
+    if !resp.status().is_success() {
+        return Err(LanpathError::Client(format!(
+            "Clash API DELETE /connections returned HTTP {}",
             resp.status()
         )));
     }

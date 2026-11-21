@@ -12,11 +12,11 @@ use std::collections::HashSet;
 use lanpath_common::LanpathResult;
 use serde_json::{Map, Value, json};
 
-use super::{NODES_PLACEHOLDER, SingboxOverwriteBundle};
+use super::{NODES_PLACEHOLDER, NodeFilterSpec, OUTBOUND_FILTER_KEY, SingboxOverwriteBundle};
 use crate::config_slices::{DnsServer, DnsServerType};
 use crate::core_config::{
-    OUTBOUND_KIND_URLTEST, OUTBOUND_TAG_DIRECT, RULE_SET_HTTP_CLIENT_TAG, ensure_domain_resolver,
-    ensure_rule_set_http_client,
+    OUTBOUND_KIND_SELECTOR, OUTBOUND_KIND_URLTEST, OUTBOUND_TAG_DIRECT, RULE_SET_HTTP_CLIENT_TAG,
+    ensure_domain_resolver, ensure_rule_set_http_client,
 };
 use crate::profile::{
     EffectiveOverrides, apply_js_override, apply_yaml_override, compose_js_chain,
@@ -194,7 +194,19 @@ fn expand_nodes_placeholder(outbound: &mut Value, node_tags: &[String]) {
     let Some(obj) = outbound.as_object_mut() else {
         return;
     };
-    let is_urltest = obj.get("type").and_then(Value::as_str) == Some(OUTBOUND_KIND_URLTEST);
+    // `_filter` 仅用于配置切片展开阶段，最终产物始终剥离以输出纯原生 sing-box Schema。
+    let compiled_filter = NodeFilterSpec::from_outbound_map(obj)
+        .ok()
+        .flatten()
+        .and_then(|spec| spec.compile().ok());
+    obj.remove(OUTBOUND_FILTER_KEY);
+
+    let kind = obj
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let is_group = kind == OUTBOUND_KIND_URLTEST || kind == OUTBOUND_KIND_SELECTOR;
     let Some(members) = obj.get_mut("outbounds").and_then(Value::as_array_mut) else {
         return;
     };
@@ -209,7 +221,10 @@ fn expand_nodes_placeholder(outbound: &mut Value, node_tags: &[String]) {
     for entry in members.drain(..) {
         if entry.as_str() == Some(NODES_PLACEHOLDER) {
             for tag in node_tags {
-                if seen.insert(tag.clone()) {
+                let matched = compiled_filter
+                    .as_ref()
+                    .is_none_or(|filter| filter.matches(tag));
+                if matched && seen.insert(tag.clone()) {
                     expanded.push(Value::String(tag.clone()));
                 }
             }
@@ -221,11 +236,28 @@ fn expand_nodes_placeholder(outbound: &mut Value, node_tags: &[String]) {
             expanded.push(entry);
         }
     }
-    // urltest / selector 展开后若无任何成员，兜底回退 direct，保持合法 sing-box schema。
-    if expanded.is_empty() && is_urltest {
+    // selector / urltest 展开后若无任何成员（例如地区筛选无匹配节点），回退 direct 保持合法 schema。
+    if expanded.is_empty() && is_group {
         expanded.push(Value::String(OUTBOUND_TAG_DIRECT.to_owned()));
     }
+    let first_tag = expanded.first().and_then(Value::as_str).map(str::to_owned);
+    let expanded_tags: HashSet<String> = expanded
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
     *members = expanded;
+
+    // 若 selector 声明了 default，但该成员不在展开结果内，则回正到首成员避免 sing-box 校验失败。
+    if kind == OUTBOUND_KIND_SELECTOR
+        && let Some(default_tag) = obj.get("default").and_then(Value::as_str)
+        && !expanded_tags.contains(default_tag)
+    {
+        if let Some(first) = first_tag {
+            obj.insert("default".to_owned(), Value::String(first));
+        } else {
+            obj.remove("default");
+        }
+    }
 }
 
 /// 从 `overwrite/sing-box/dns.json` 提取可探测的 DNS 上游服务器列表（供诊断页复用）。

@@ -10,7 +10,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 use crate::connections::ConnectionView;
 use crate::stats::{
     ConnRecordRow, DAILY_RETENTION_DAYS, DEFAULT_QUERY_LIMIT, DailyQuery, DailySort, DailyStatRow,
-    MAX_QUERY_LIMIT, RECORDS_RETENTION_DAYS, RecordSort, RecordsQuery, StatDelta, TodaySummary,
+    DailyTotalRow, MAX_QUERY_LIMIT, RECORDS_RETENTION_DAYS, RecordSort, RecordsQuery, StatDelta,
+    TodaySummary,
 };
 
 /// 统计存储数据库文件名（位于客户端数据目录下）。
@@ -230,6 +231,79 @@ impl StatsStore {
             connection_count: row.get("conn_count"),
             target_count: row.get("target_count"),
         })
+    }
+
+    /// 最近 `days` 天的每日总流量序列（按本地日期升序，无数据日期补 0）。
+    pub async fn recent_daily_totals(&self, days: i64) -> LanpathResult<Vec<DailyTotalRow>> {
+        let end = chrono::Local::now().date_naive();
+        self.daily_totals_ending_on(end, days).await
+    }
+
+    /// 指定结束日期 `end` 往前 `days` 天的每日总流量序列（按日期升序，缺日补 0）。
+    pub async fn daily_totals_ending_on(
+        &self,
+        end: chrono::NaiveDate,
+        days: i64,
+    ) -> LanpathResult<Vec<DailyTotalRow>> {
+        let count = days.clamp(1, DAILY_RETENTION_DAYS);
+        let start = end - chrono::Duration::days(count - 1);
+        let start_str = start.format("%Y-%m-%d").to_string();
+        let end_str = end.format("%Y-%m-%d").to_string();
+        let sql = format!(
+            "SELECT
+                date,
+                COALESCE(SUM(upload_bytes), 0)   AS upload_bytes,
+                COALESCE(SUM(download_bytes), 0) AS download_bytes,
+                COALESCE(SUM(CASE WHEN LOWER(outbound) NOT IN ({DIRECT_TAG_SQL_LIST})
+                                  THEN upload_bytes + download_bytes ELSE 0 END), 0) AS proxied_bytes,
+                COALESCE(SUM(conn_count), 0)     AS conn_count
+             FROM daily_stats
+             WHERE date >= ? AND date <= ?
+             GROUP BY date
+             ORDER BY date ASC"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(&start_str)
+            .bind(&end_str)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| LanpathError::Client(format!("查询每日流量汇总失败: {e}")))?;
+
+        let mut by_date: std::collections::HashMap<String, DailyTotalRow> =
+            std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let date: String = row.get("date");
+            let upload_bytes: i64 = row.get("upload_bytes");
+            let download_bytes: i64 = row.get("download_bytes");
+            let proxied_bytes: i64 = row.get("proxied_bytes");
+            let total = upload_bytes.saturating_add(download_bytes);
+            let direct_bytes = total.saturating_sub(proxied_bytes);
+            let connection_count: i64 = row.get("conn_count");
+            by_date.insert(
+                date.clone(),
+                DailyTotalRow {
+                    date,
+                    upload_bytes,
+                    download_bytes,
+                    proxied_bytes,
+                    direct_bytes,
+                    connection_count,
+                },
+            );
+        }
+
+        let mut series = Vec::with_capacity(count as usize);
+        for offset in 0..count {
+            let date = (start + chrono::Duration::days(offset))
+                .format("%Y-%m-%d")
+                .to_string();
+            let entry = by_date.remove(&date).unwrap_or(DailyTotalRow {
+                date,
+                ..Default::default()
+            });
+            series.push(entry);
+        }
+        Ok(series)
     }
 
     /// 日聚合查询（排序 + 模糊搜索）。

@@ -8,6 +8,7 @@
 mod compose;
 mod defaults;
 mod dns_presets;
+mod outbound_presets;
 #[cfg(test)]
 mod tests;
 
@@ -20,6 +21,10 @@ use serde_json::Value;
 pub use compose::{build_core_config_from_overwrite, compose_from_overwrite, extract_dns_servers};
 pub use defaults::{default_slice_pretty, default_slice_value};
 pub use dns_presets::{DnsPresetRegion, DnsPresetSpec, recommended_dns_presets};
+pub use outbound_presets::{
+    CompiledNodeFilter, NodeFilterSpec, OUTBOUND_FILTER_KEY, RegionGroupPreset,
+    extract_outbound_tags, recommended_region_presets,
+};
 
 /// 数据根下的 sing-box 切片相对目录。
 pub const OVERWRITE_SUBDIR: &str = "overwrite/sing-box";
@@ -401,6 +406,9 @@ fn validate_slice_impl(
                     return Err(LanpathError::Validation(format!(
                         "outbounds 中存在重复 tag：{tag}"
                     )));
+                }
+                if let Some(filter) = NodeFilterSpec::from_outbound_map(map)? {
+                    filter.compile()?;
                 }
             }
         }
