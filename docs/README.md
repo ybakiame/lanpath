@@ -1,7 +1,12 @@
-# Lanpath 文档
+# Lanpath 文档索引
 
-- [品牌](brand.md)
-- [首次发版说明](releases/0.1.1-beta.1.md)
+- [项目总览](../README.md)
+- [NSH 桌面说明](../apps/desktop/README.md)
+- [版本约定](../VERSIONING.md)
+- [更新日志](../CHANGELOG.md)
+- [品牌规范](brand.md)
+- [开发环境指南](../devenv.md)
+- [循径设计系统](../apps/DESIGN.md)
+- [移动端原生库说明](../mobile/README.md)
 
-使用与构建入口见[项目 README](../README.md)和[环境指南](../devenv.md)。
-开发方案、设计稿和测试记录统一放在本地 `.work/`。
+历史版本发布说明保留在 `releases/` 目录。本地临时设计稿、分析与验收记录放在仓库 `.tmp/work/`（不入库）。

@@ -1,49 +1,52 @@
 # 岚径 · Lanpath
 
-跨平台代理客户端：订阅、代理策略、DNS/规则、流量与日志诊断。
+跨平台代理客户端，提供订阅管理、核心启停、配置切片、DNS 测速、规则集与分流规则、网络诊断、日志排查与加密备份。
 
-当前桌面开发目标是 `apps/desktop`（Rust / NSH 0.6.0）；`apps/gpui` 保留为独立对照目标。共享业务位于 `crates/lanpath-*`，公共图标与规则目录位于 `assets/`。
+当前桌面版采用纯 Rust 原生框架 **NSH 0.6.0**（位于 `apps/desktop`，首个候选版本 `0.2.1-rc.1`），不依赖 WebView；共享 Rust 核心业务位于 `crates/lanpath-*`，公共图标与资源位于 `assets/`。
 
-## 开发
+## 桌面端主要能力
 
-Linux 本地构建统一使用本仓 standalone devenv（底层为 Nix）。安装固定版本的方式见 [环境指南](devenv.md)。Windows 桌面使用原生 Rust/MSVC/CMake 工具链。
+- **概览与工作流**：首次准备引导、订阅管理（右侧抽屉）、配置预览、核心（sing-box / Mihomo）下载校验与启停，以及 Windows 普通权限系统代理接管/恢复。
+- **sing-box 配置切片**：按 `log` / `dns` / `route` / `outbounds` / `experimental` 分段管理，支持可视化表单与 JSON 源码双模式编辑、国内外推荐 DNS 一键添加/替换与实时连通性延迟探测，以及 `$nodes` 订阅节点展开。
+- **规则集与分组**：受管规则集清单与社区市场（含按需自选的 `geosite-private` / `geoip-private` 等）、条件 HTTP 更新、按引用本地注入；支持在「规则集」与「规则」页通过共用右侧抽屉管理 `@分组`。
+- **规则、脚本与诊断**：支持域名/后缀/关键词/CIDR/进程/端口/`ruleset` 规则编辑与排序、本地 TypeScript 覆写编辑器、系统与上游 DNS/端口诊断及本地规则预估。
+- **外观、日志与备份**：内置多套配色主题（含 Mint）、深浅色/跟随系统、Windows 11 Acrylic / Mica 窗口材质与透明度调节、内存与磁盘只读日志查看，以及 age 加密备份导出与事务恢复。
+
+桌面版使用与便携模式说明见 [NSH 桌面说明](apps/desktop/README.md)。
+
+## 便携模式
+
+在程序同级放置空文件 `lanpath.portable`，所有配置、订阅、规则、规则集、核心运行文件、日志与界面偏好均保存在同级 `data/` 目录中，退出后可整体移动目录，不依赖终端或快捷方式工作目录。
+
+## 本地构建
+
+Linux 统一通过仓库固定版本 standalone devenv（Nix）构建，环境配置见 [环境指南](devenv.md)；Windows 桌面版使用原生 Rust / MSVC / CMake 工具链。
 
 ```bash
-devenv shell -- cargo run --manifest-path apps/desktop/Cargo.toml
+# Linux
+devenv shell -- cargo run --locked --manifest-path apps/desktop/Cargo.toml
+
+# Windows (PowerShell)
+cargo build --locked --manifest-path apps/desktop/Cargo.toml
+.\apps\desktop\target\debug\lanpath-desktop-nsh.exe
 ```
 
-根 Bun 工具依赖只用于 GPUI 打包工具和提交检查，使用 `devenv shell -- bun install --frozen-lockfile` 安装。
+提交检查脚本工具依赖位于仓库根目录，使用 `devenv shell -- bun install --frozen-lockfile` 安装。
 
-## 移动端
+## 移动端基础库
 
-可复用的 Android 原生库和 Go/libbox 绑定位于 [mobile/](mobile/README.md)，已脱离旧客户端。当前不提供可安装 APK，后续移动端宿主与 VPN 接线尚未完成。
+可复用的 Android 原生库与 Go/libbox 绑定位于 [mobile/](mobile/README.md)。当前仅提供原生库与构建入口，暂未提供可安装 APK。
 
 ```bash
 devenv shell -- lanpath-build-aar
 devenv shell -- lanpath-build-android-debug
 ```
 
-## Windows GPUI 实验版
+## 文档与版本
 
-`apps/gpui` 是独立 GPUI 应用，程序为 `lanpath-gpui.exe`，不依赖 WebView。
-仅分发签名 ZIP，默认便携：完整解压后保留旁边的空文件 `lanpath-gpui.portable`，
-数据写入程序目录下的 `data/`，不受终端或快捷方式工作目录影响。
-需要独立标准目录 `%LOCALAPPDATA%\LanpathGPUI` 时，正常退出后移除便携标记再重开；
-不自动搬迁数据，也不读取或覆盖 Tauri 的原目录。
-
-## Windows NSH 桌面实验版
-
-`apps/desktop` 为当前 NSH 桌面目标。程序旁放置空文件 `lanpath.portable`，
-业务数据及界面偏好使用同级 `data/`。不同验证目录可各放一份程序与标记文件。
-使用方式见 [NSH 桌面说明](apps/desktop/README.md)。
-
-本仓可独立构建，不需要 ProxyPanel 检出，不作为其 submodule。
-[文档索引](docs/README.md) · [代理指南](AGENTS.md)。
+- [NSH 桌面说明](apps/desktop/README.md) · [文档索引](docs/README.md) · [更新日志](CHANGELOG.md)
+- 版本规范见 [版本约定](VERSIONING.md)，使用根 `VERSION` 与 `scripts/version.py` 统一同步桌面应用与共享 Rust crates。
 
 ## 许可与来源
 
-AGPL-3.0-or-later，保留 ProxyPanel 与 Lanpath 贡献者归属。源码由 ProxyPanel 客户端整理而来；
-服务端历史保留于原仓。
-sing-box、wintun 等第三方组件的许可资产继续随分发保留。
-
-版本管理见 [版本约定](VERSIONING.md)，使用 `VERSION` 和 `scripts/version.py` 同步 NSH 桌面及共享 Rust crates。
+AGPL-3.0-or-later，保留 ProxyPanel 与 Lanpath 贡献者归属。sing-box、wintun 等第三方组件许可随分发保留。
