@@ -25,7 +25,7 @@ def synchronized(version):
     document = json.loads(path.read_text())
     document["version"] = version
     changes[path] = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
-    for path in [ROOT / "Cargo.lock", ROOT / "apps/desktop/Cargo.lock", ROOT / "apps/gpui/Cargo.lock"]:
+    for path in [ROOT / "Cargo.lock", ROOT / "apps/desktop/Cargo.lock"]:
         content = path.read_text()
         for package in PACKAGES:
             pattern = rf'(\[\[package\]\]\nname = "{re.escape(package)}"\nversion = )"[^"]+"'

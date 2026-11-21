@@ -19,12 +19,12 @@ class VersionTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SOURCE / "scripts/version.py"), "--check"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_sync_preserves_third_party_versions_and_gpui_identity(self):
+    def test_sync_preserves_third_party_versions(self):
         original = version.ROOT
         try:
             with tempfile.TemporaryDirectory() as directory:
                 version.ROOT = Path(directory)
-                for name in ["Cargo.toml", "Cargo.lock", "apps/desktop/Cargo.toml", "apps/desktop/Cargo.lock", "apps/desktop/nsh.json", "apps/gpui/Cargo.lock"]:
+                for name in ["Cargo.toml", "Cargo.lock", "apps/desktop/Cargo.toml", "apps/desktop/Cargo.lock", "apps/desktop/nsh.json"]:
                     target = version.ROOT / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes((SOURCE / name).read_bytes())
