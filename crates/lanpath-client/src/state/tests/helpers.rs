@@ -53,43 +53,99 @@ pub fn test_config(dir: &TempDir, hub_url: String) -> ClientConfig {
     cfg
 }
 
+fn find_rlibs(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".rlib"))
+        })
+        .collect()
+}
+
+fn collect_split_cache_deps(executable: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    const DEP_CRATES: &[&str] = &[
+        "serde_json",
+        "serde",
+        "serde_core",
+        "itoa",
+        "ryu",
+        "memchr",
+        "zmij",
+    ];
+    let profile = if executable.components().any(|c| c.as_os_str() == "release") {
+        "release"
+    } else {
+        "debug"
+    };
+    let Some(shared_build) = executable
+        .ancestors()
+        .map(|ancestor| ancestor.join("shared-deps").join(profile).join("build"))
+        .find(|candidate| candidate.is_dir())
+    else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut candidates = Vec::new();
+    let mut search_dirs = Vec::new();
+    for crate_name in DEP_CRATES {
+        let Ok(hashes) = std::fs::read_dir(shared_build.join(crate_name)) else {
+            continue;
+        };
+        for hash_entry in hashes.flatten() {
+            let out_dir = hash_entry.path().join("out");
+            if !out_dir.is_dir() {
+                continue;
+            }
+            if *crate_name == "serde_json" {
+                candidates.extend(find_rlibs(&out_dir, "libserde_json-"));
+            }
+            search_dirs.push(out_dir);
+        }
+    }
+    (candidates, search_dirs)
+}
+
 fn compiled_core_fixture() -> &'static Path {
     static COMPILED: std::sync::LazyLock<(TempDir, PathBuf)> = std::sync::LazyLock::new(|| {
         let directory = tempfile::tempdir().unwrap();
         let executable = std::env::current_exe().unwrap();
-        let dependencies = executable.parent().unwrap();
-        let serde_json = std::fs::read_dir(dependencies)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| {
-                        name.starts_with("libserde_json-") && name.ends_with(".rlib")
-                    })
-            })
-            .expect("Cargo-built serde_json library");
-        let output = std::process::Command::new("rustc")
-            .args(["--edition=2024", "--crate-name=lanpath_lifecycle_fixture"])
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/lifecycle_core.rs"
-            ))
-            .arg("--extern")
-            .arg(format!("serde_json={}", serde_json.display()))
-            .arg("-L")
-            .arg(format!("dependency={}", dependencies.display()))
-            .arg("-o")
-            .arg(directory.path().join("core"))
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "native fixture compile failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let dependencies = executable.parent().unwrap().to_path_buf();
+        let mut candidates = find_rlibs(&dependencies, "libserde_json-");
+        let mut search_dirs = vec![dependencies];
+        if candidates.is_empty() {
+            let (split_candidates, split_dirs) = collect_split_cache_deps(&executable);
+            candidates.extend(split_candidates);
+            search_dirs.extend(split_dirs);
+        }
+        candidates
+            .sort_by_key(|path| std::cmp::Reverse(path.metadata().and_then(|m| m.modified()).ok()));
+        assert!(!candidates.is_empty(), "Cargo-built serde_json library");
         let binary = directory.path().join("core");
-        (directory, binary)
+        let mut errors = String::new();
+        for serde_json in candidates {
+            let mut cmd = std::process::Command::new("rustc");
+            cmd.args(["--edition=2024", "--crate-name=lanpath_lifecycle_fixture"])
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/lifecycle_core.rs"
+                ))
+                .arg("--extern")
+                .arg(format!("serde_json={}", serde_json.display()));
+            for dir in &search_dirs {
+                cmd.arg("-L").arg(format!("dependency={}", dir.display()));
+            }
+            let output = cmd.arg("-o").arg(&binary).output().unwrap();
+            if output.status.success() {
+                return (directory, binary);
+            }
+            errors.push_str(&String::from_utf8_lossy(&output.stderr));
+        }
+        panic!("native fixture compile failed: {errors}");
     });
     &COMPILED.1
 }
