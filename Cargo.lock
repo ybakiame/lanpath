@@ -1965,7 +1965,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-client"
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 dependencies = [
  "age",
  "async-trait",
@@ -2007,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-common"
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 dependencies = [
  "libc",
  "serde",
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-engine"
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-mitm"
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 dependencies = [
  "async-trait",
  "brotli",
@@ -2077,7 +2077,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-script"
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 dependencies = [
  "async-trait",
  "base64",

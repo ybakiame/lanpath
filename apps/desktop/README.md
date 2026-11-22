@@ -1,10 +1,10 @@
 # Lanpath NSH Desktop
 
-`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，首个候选版本 `0.2.1-rc.1`），程序名为 `lanpath-desktop-nsh.exe`，应用标识为 `com.ybakiame.lanpath.desktop.nsh`。使用全新独立数据目录，不读取或迁移旧版客户端数据。
+`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，当前候选版本 `0.2.1-rc.2`），程序名为 `lanpath-desktop-nsh.exe`，应用标识为 `com.ybakiame.lanpath.desktop.nsh`。使用全新独立数据目录，不读取或迁移旧版客户端数据。
 
-Lanpath 帮助你将可信订阅转化为可用的本地代理：准备订阅与核心，经校验后启动，并独立查看核心运行状态与系统代理接管状态；排查问题时可结合规则、配置切片、诊断与日志快速定位。
+Lanpath 帮助你将可信订阅转化为可用的本地代理：准备订阅与核心，经校验后启动，并独立查看核心运行状态与系统代理接管状态；排查问题时可结合策略、连接监控、规则、配置切片、诊断与日志快速定位。
 
-产品与界面规范见 [循径设计系统](../DESIGN.md)。新数据根默认使用 Ocean 主题，明暗模式与语言默认跟随系统。
+产品与界面规范见 [循径设计系统](../DESIGN.md)。新数据根默认使用 `lanpath` 主题，明暗模式与语言默认跟随系统。
 
 ## 运行
 
@@ -51,9 +51,9 @@ $env:LANPATH_DESKTOP_DATA_DIR = 'D:\LanpathData'
 
 ## 功能概览
 
-- **窗口与外观**：Windows 自定义标题栏与内嵌图标，默认 `1180 × 800 pt`、最小 `960 × 640 pt`；侧栏可收起与展开并保留页面草稿；提供多套主题（含 Mint）、深浅色/跟随系统、减少动效，以及 Windows 11 Acrylic / Mica / 不透明窗口材质与透明度滑块。
-- **概览、订阅与核心**：首次准备引导，区分配置状态与实时运行状态；概览页提供右侧订阅抽屉（支持 Enter 添加与筛选）、配置预览抽屉与覆写脚本抽屉；核心页支持 sing-box / Mihomo 下载、版本管理与校验，核心启停统一在概览页操作。
-- **配置切片（sing-box）**：覆盖 `log`、`dns`、`route`、`outbounds`、`experimental` 五段切片，支持可视化表单与 JSON 源码双模式编辑、实时校验、格式化与单切片重置；DNS 切片内置国内外推荐 DNS 预设（可一键添加或替换包括内置 `local`/`proxy` 在内的上游）与实时 UDP/DoT/DoH 测速；出站分组支持 `$nodes` 自动展开订阅节点。
+- **窗口与外观**：Windows 自定义标题栏与内嵌图标，默认 `1180 × 800 pt`、最小 `960 × 640 pt`；侧栏可收起与展开并保留页面草稿；采用 OKLCH 配色体系（`lanpath` 品牌默认、`ocean`、`teal` 与 4 色板自定义 `ColorPicker`）、深浅色/跟随系统、减少动效，以及 Windows 11 Acrylic / Mica / 不透明窗口材质与透明度滑块。
+- **概览、策略、连接与核心**：首次准备引导与原生 Shader/Plot/Canvas 实时流量和 7 日统计可视化；概览页提供右侧订阅抽屉、配置预览抽屉与覆写脚本抽屉；支持运行态策略组/节点测速热切换与实时连接追踪（支持一键加规则）；核心页支持 sing-box / Mihomo 下载、版本管理与校验。
+- **配置切片（sing-box）**：覆盖 `log`、`dns`、`route`、`outbounds`、`experimental` 五段切片，支持可视化表单与 JSON 源码双模式编辑、实时校验、格式化与单切片重置；DNS 切片内置国内外推荐 DNS 预设与实时测速；出站分组支持地区快捷预设与 `$nodes` 正则筛选展开；路由与 DNS 规则集选择均使用 Popover 弹窗（Tab 分离、检索、已配置去重）。
 - **规则集与分组**：受管规则集支持远程 URL（ETag / SHA-256 条件更新）与手动 JSON 规则集，并提供精选社区市场（含按需自选的 `geosite-private` / `geoip-private` 等，不强制内置）；支持将多个规则集聚合成应用内 `@分组`，可从「规则集」页与「规则」页随时呼出共用右侧抽屉进行管理，并在配置合成时自动展开、按引用注入本地规则集。
 - **规则与诊断**：支持 `domain`、`suffix`、`keyword`、`cidr`、`process`、`port`、`ruleset` 七类匹配，提供快速表单（含 `@分组`/规则集快捷点选）、批量简写、筛选、启停与排序；诊断页支持系统 DNS、直连 TCP、已保存 DNS 上游、本地端口探测与本地规则预估。
 - **覆写脚本**：本地 TypeScript 编辑器，带语法高亮、行号、撤销、括号缩进与常用字段补全，新建以 `function main(config) { return config; }` 起步。
@@ -68,5 +68,5 @@ $env:LANPATH_DESKTOP_DATA_DIR = 'D:\LanpathData'
 
 ## 版本与开发调试
 
-- 产品版本统一由仓库根 `VERSION` 控制，详见 [版本约定](../../VERSIONING.md)；当前处于 `0.2.x-rc.N` 候选阶段（`0.2.1-rc.1`），不提供旧数据兼容或迁移。
+- 产品版本统一由仓库根 `VERSION` 控制，详见 [版本约定](../../VERSIONING.md)；当前处于 `0.2.x-rc.N` 候选阶段（`0.2.1-rc.2`），不提供旧数据兼容或迁移。
 - 开发者可通过 `--ui-gallery` 参数启动组件画廊：`cargo run --locked --manifest-path apps/desktop/Cargo.toml -- --ui-gallery`（普通导航不暴露该入口）。

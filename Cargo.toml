@@ -4,7 +4,7 @@ members = ["crates/lanpath-client","crates/lanpath-common","crates/lanpath-engin
 exclude = ["vendor/hudsucker"]
 
 [workspace.package]
-version = "0.2.1-rc.1"
+version = "0.2.1-rc.2"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 authors = ["Lanpath and ProxyPanel Contributors"]
