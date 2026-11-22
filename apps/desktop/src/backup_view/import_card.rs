@@ -138,6 +138,7 @@ fn inspect_button(state: BackupPageState) -> impl IntoElement {
     let loading = state.clone();
     crate::ui::button(crate::ui::ButtonVariant::Primary)
         .size(crate::ui::ButtonSize::Md)
+        .prefix(|| icon_sized(Icon::Shield, Tone::OnPrimary, 14.0))
         .loading(move || loading.importing.get())
         .on_press(move || request_inspect(state.clone()))
         .test_id("backup-inspect")

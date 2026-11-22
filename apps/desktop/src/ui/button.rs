@@ -354,8 +354,10 @@ impl IntoElement for Button {
         }
 
         let loading_for_content = loading.clone();
+        let loading_for_slot = loading.clone();
         let prefix = self.prefix;
-        let has_leading = prefix.is_some() || loading.is_some();
+        let has_prefix = prefix.is_some();
+        let has_loading = loading.is_some();
         let leading = when(
             move || loading_for_content.as_ref().as_ref().is_some_and(|f| f()),
             move || {
@@ -370,8 +372,8 @@ impl IntoElement for Button {
             None => leading.into_element(),
         };
         let mut children: Vec<AnyElement> = Vec::new();
-        if has_leading {
-            children.push(if loading.is_some() {
+        if has_prefix {
+            children.push(if has_loading {
                 view()
                     .size(px(18.0))
                     .flex_none()
@@ -382,6 +384,25 @@ impl IntoElement for Button {
             } else {
                 leading
             });
+        } else if has_loading {
+            children.push(
+                when(
+                    move || loading_for_slot.as_ref().as_ref().is_some_and(|f| f()),
+                    move || {
+                        view()
+                            .size(px(18.0))
+                            .flex_none()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                view()
+                                    .test_id("button-loading-indicator")
+                                    .child(super::feedback::button_spinner(variant)),
+                            )
+                    },
+                )
+                .into_element(),
+            );
         }
         if let Some(label) = self.label {
             children.push(
