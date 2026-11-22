@@ -6,7 +6,7 @@ fn fresh_preferences_use_product_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let storage = AppStorage::open(dir.path()).unwrap();
     let entries = storage.load().unwrap();
-    assert_eq!(entries.get("theme").map(String::as_str), Some("ocean"));
+    assert_eq!(entries.get("theme").map(String::as_str), Some("lanpath"));
     assert_eq!(entries.get("language").map(String::as_str), Some("system"));
     assert_eq!(
         entries.get("appearance").map(String::as_str),

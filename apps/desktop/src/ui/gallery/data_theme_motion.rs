@@ -118,15 +118,7 @@ pub(super) fn theme_section() -> AnyElement {
                     .grid()
                     .w_full()
                     .app_class("justify-items-stretch")
-                    .grid_cols(move || {
-                        if window().width.0 < 980.0 {
-                            2_u16
-                        } else if window().width.0 < 1220.0 {
-                            4
-                        } else {
-                            5
-                        }
-                    })
+                    .grid_cols(move || if window().width.0 < 980.0 { 2_u16 } else { 4 })
                     .gap_3()
                     .children(ThemeId::ALL.iter().map(|id| {
                         let prefs_for_press = prefs;
@@ -233,20 +225,10 @@ pub(super) fn theme_section() -> AnyElement {
 
 fn gallery_theme_test_id(id: ThemeId) -> &'static str {
     match id {
-        ThemeId::Amethyst => "gallery-theme-amethyst",
-        ThemeId::Indigo => "gallery-theme-indigo",
         ThemeId::Ocean => "gallery-theme-ocean",
-        ThemeId::Mint => "gallery-theme-mint",
-        ThemeId::Forest => "gallery-theme-forest",
-        ThemeId::Sand => "gallery-theme-sand",
-        ThemeId::Rose => "gallery-theme-rose",
-        ThemeId::Graphite => "gallery-theme-graphite",
-        ThemeId::Cyan => "gallery-theme-cyan",
-        ThemeId::Orange => "gallery-theme-orange",
         ThemeId::Teal => "gallery-theme-teal",
-        ThemeId::Crimson => "gallery-theme-crimson",
-        ThemeId::Gold => "gallery-theme-gold",
-        ThemeId::Slate => "gallery-theme-slate",
+        ThemeId::Lanpath => "gallery-theme-lanpath",
+        ThemeId::Custom => "gallery-theme-custom",
     }
 }
 

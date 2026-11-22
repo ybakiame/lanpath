@@ -91,7 +91,7 @@ pub fn root() -> Root {
     Root::of::<App>()
         .app_id("com.ybakiame.lanpath.desktop.nsh")
         .main_window_json(&launch_window_json())
-        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Ocean))
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Lanpath))
         .translations(translations)
 }
 
@@ -101,7 +101,7 @@ pub fn gallery_root() -> Root {
     Root::of::<ui::gallery::Gallery>()
         .app_id("com.ybakiame.lanpath.desktop.nsh")
         .main_window_json(&launch_window_json())
-        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Ocean))
+        .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Lanpath))
         .translations(translations)
 }
 

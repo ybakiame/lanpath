@@ -3,7 +3,8 @@
 //! `theme()` 读取语义 token；颜色字面量只允许出现在 `theme.rs` 的
 //! 调色板构建中。
 //!
-//! - `theme`：14 组命名主题注册与运行时切换（`set_tokens`），包含高饱和清新主题 `mint`。
+//! - `theme`：3 组精选 OKLCH 命名主题（`ocean`/`teal`/`lanpath`）与 1 组用户自定义 4 色板（`custom`）运行时切换（`set_tokens`）。
+//! - `custom_theme_card`：基于原生 `ColorPicker`（OKLCH）的 4 色板自定义卡片。
 //! - `motion`：动效 token（时长/距离/press 缩放）与减少动效折算。
 //! - `prefs`：主题/模式/语言/动效偏好的持久化与运行时应用。
 //! - `button`/`input`/`select`/`layout`/`feedback`/`overlay`/`data`：
@@ -17,6 +18,7 @@ pub mod appearance_page;
 pub mod button;
 pub mod cards;
 pub mod code_editor;
+pub mod custom_theme_card;
 pub mod data;
 pub mod dialog;
 pub mod feedback;
@@ -49,5 +51,5 @@ pub use overlay::{ConfirmDialog, confirm_dialog, popover, tooltip};
 pub use prefs::{LanguagePref, Mode, MotionPref, UiPrefs, WindowMaterial, prefs};
 pub use select::{checkbox, radio_row, segmented_group, select, switch, tab_bar};
 pub use slider::slider;
-pub use theme::{ThemeId, apply as apply_theme, theme_tokens};
+pub use theme::{CustomPalette, ThemeId, apply as apply_theme, theme_tokens};
 pub use theme_preview::theme_preview;

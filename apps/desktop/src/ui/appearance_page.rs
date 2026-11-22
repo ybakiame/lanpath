@@ -19,12 +19,12 @@ pub fn appearance_page() -> impl IntoElement {
     let prefs = prefs::prefs();
     let preview = signal(None::<ThemeId>);
     let theme_error = signal(None::<String>);
-    cleanup(move || super::theme::apply(prefs.theme.get_untracked()));
+    cleanup(move || prefs.restore_applied_theme());
     let preview_for_focus = preview;
     main_window().on_focus_change(move |focused| {
         if !focused && preview_for_focus.get_untracked().is_some() {
             preview_for_focus.set(None);
-            super::theme::apply(prefs.theme.get_untracked());
+            prefs.restore_applied_theme();
         }
     });
     scroll().flex_1().child(
@@ -53,7 +53,7 @@ pub fn appearance_page() -> impl IntoElement {
                                         .min(920.0);
                                 (width / (if font_scale() > 1.3 { 200.0 } else { 152.0 }))
                                     .floor()
-                                    .clamp(2.0, 5.0) as u16
+                                    .clamp(2.0, 4.0) as u16
                             })
                             .gap_3()
                             .children(ThemeId::ALL.iter().map(|id| {
@@ -77,7 +77,7 @@ pub fn appearance_page() -> impl IntoElement {
                                         preview_press.set(None);
                                         let result = prefs.apply_theme(theme_id);
                                         if result.is_err() {
-                                            super::theme::apply(prefs.theme.get_untracked());
+                                            prefs.restore_applied_theme();
                                         }
                                         finish_apply(result, error);
                                     })
@@ -95,7 +95,7 @@ pub fn appearance_page() -> impl IntoElement {
                                     .on_mouse_leave(move |_: &MouseEvent| {
                                         if preview_leave.get_untracked() == Some(theme_id) {
                                             preview_leave.set(None);
-                                            super::theme::apply(prefs.theme.get_untracked());
+                                            prefs.restore_applied_theme();
                                         }
                                     })
                                     .child(card)
@@ -120,6 +120,7 @@ pub fn appearance_page() -> impl IntoElement {
                         },
                     )),
             )
+            .child(super::custom_theme_card::custom_theme_card())
             .child(backdrop_card())
             .child(
                 layout::surface(layout::SurfaceLevel::Card)
@@ -239,20 +240,10 @@ fn backdrop_card() -> AnyElement {
 
 fn theme_test_id(id: ThemeId) -> &'static str {
     match id {
-        ThemeId::Amethyst => "theme-amethyst",
-        ThemeId::Indigo => "theme-indigo",
         ThemeId::Ocean => "theme-ocean",
-        ThemeId::Mint => "theme-mint",
-        ThemeId::Forest => "theme-forest",
-        ThemeId::Sand => "theme-sand",
-        ThemeId::Rose => "theme-rose",
-        ThemeId::Graphite => "theme-graphite",
-        ThemeId::Cyan => "theme-cyan",
-        ThemeId::Orange => "theme-orange",
         ThemeId::Teal => "theme-teal",
-        ThemeId::Crimson => "theme-crimson",
-        ThemeId::Gold => "theme-gold",
-        ThemeId::Slate => "theme-slate",
+        ThemeId::Lanpath => "theme-lanpath",
+        ThemeId::Custom => "theme-custom",
     }
 }
 

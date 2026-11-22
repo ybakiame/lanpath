@@ -112,7 +112,7 @@ fn appearance_is_compact_and_has_no_explanatory_footer() {
     for removed in [
         "窗口材质与不透明度",
         "当前使用不透明窗口，可在上方切换主题与明暗模式",
-        "已选择：ocean",
+        "已选择：lanpath",
     ] {
         assert!(!app.screen().shows(removed));
     }
@@ -123,7 +123,7 @@ fn appearance_is_compact_and_has_no_explanatory_footer() {
         .unwrap()
         .bounds;
     assert!(a.size.height.0 <= 40.0);
-    let parent = "role:button[主题：ocean]";
+    let parent = "role:button[主题：lanpath]";
     assert_eq!(
         app.screen()
             .view_style(parent)

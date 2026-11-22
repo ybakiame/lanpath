@@ -454,8 +454,21 @@ gallery.nav.all: All components
 gallery.nav.group.foundations: Foundations
 gallery.nav.group.controls: Controls
 gallery.nav.group.display: Display & Overlays
-gallery.controls.theme_mint: Try fresh Mint
-gallery.controls.theme_ocean: Reset to Ocean
+gallery.controls.theme_lanpath: Reset to Lanpath
+gallery.controls.theme_teal: Try fresh Teal
+appearance.custom.title: Custom Palette (OKLCH)
+appearance.custom.subtitle: Tune 4 seed colors; all light & dark semantic tokens are derived in OKLCH with WCAG contrast protection
+appearance.custom.slot.primary: Primary
+appearance.custom.slot.accent: Accent
+appearance.custom.slot.background: Background
+appearance.custom.slot.foreground: Text
+appearance.custom.channel.l: Light L
+appearance.custom.channel.c: Chroma C
+appearance.custom.channel.h: Hue H
+appearance.custom.load_preset: "Start from preset:"
+appearance.custom.apply: Apply Custom Palette
+appearance.custom.applied: Custom OKLCH palette applied and saved.
+appearance.custom.reset: Reset to Lanpath
 gallery.tokens.title: Semantic Tokens
 gallery.action.open_sheet: Open Sheet panel
 gallery.action.swap_glyph: Swap status glyph

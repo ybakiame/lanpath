@@ -27,11 +27,8 @@ fn navigating_between_the_two_sidebar_pages() {
     for expected in ["浅色", "深色", "跟随系统"] {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
-    // 14 个主题预览网格（含高饱和清新主题 mint）。
-    for theme in [
-        "amethyst", "indigo", "ocean", "mint", "forest", "sand", "rose", "graphite", "cyan",
-        "orange", "teal", "crimson", "gold", "slate",
-    ] {
+    // 4 个主题预览网格（3 预设 lanpath/ocean/teal + 1 自定义 custom）。
+    for theme in ["lanpath", "ocean", "teal", "custom"] {
         assert!(
             app.screen().matches(&format!("id:theme-{theme}")).unwrap(),
             "missing theme {theme}"
@@ -39,9 +36,13 @@ fn navigating_between_the_two_sidebar_pages() {
     }
     assert!(!app.screen().shows("开始之前"));
     assert!(app.screen().matches("id:appearance-light").unwrap());
-    // 新数据根默认 Ocean；已有已保存主题继续保留。
-    assert!(app.screen().matches("id:theme-ocean >> text:✓").unwrap());
-    assert!(!app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
+    // 新数据根默认 Lanpath；已有已保存主题继续保留。
+    assert!(app.screen().matches("id:theme-lanpath >> text:✓").unwrap());
+    assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
+    // 自定义 OKLCH 4 色板卡片默认收起 Popover，仅展示 4 个色槽触发器。
+    assert!(app.screen().matches("id:custom-theme-card").unwrap());
+    assert!(app.screen().matches("id:custom-color-primary").unwrap());
+    assert!(!app.screen().matches("id:custom-picker-primary").unwrap());
 
     common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
@@ -104,7 +105,7 @@ fn switching_appearance_light_dark_and_system_for_real() {
     assert_eq!(storage.get("appearance"), Some("light".into()));
 }
 
-/// 主题网格点击即应用并持久化；默认主题为 amethyst。
+/// 主题网格点击即应用并持久化；默认主题为 ocean。
 #[test]
 fn switching_theme_applies_and_persists() {
     let (_dir, entries) = data_root();
@@ -113,16 +114,16 @@ fn switching_theme_applies_and_persists() {
     common::navigate(&mut app, "role:button[外观]");
     assert_eq!(storage.get("theme"), None, "未选择时无 theme 键");
 
+    app.press("id:theme-teal >> text:teal").unwrap();
+    assert_eq!(storage.get("theme"), Some("teal".to_owned()));
+    // 勾选随选择响应式移动，不只靠边框。
+    assert!(app.screen().matches("id:theme-teal >> text:✓").unwrap());
+    assert!(!app.screen().matches("id:theme-lanpath >> text:✓").unwrap());
+
     app.press("id:theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
-    // 勾选随选择响应式移动，不只靠边框。
     assert!(app.screen().matches("id:theme-ocean >> text:✓").unwrap());
-    assert!(!app.screen().matches("id:theme-amethyst >> text:✓").unwrap());
-
-    app.press("id:theme-graphite >> text:graphite").unwrap();
-    assert_eq!(storage.get("theme"), Some("graphite".to_owned()));
-    assert!(app.screen().matches("id:theme-graphite >> text:✓").unwrap());
-    assert!(!app.screen().matches("id:theme-ocean >> text:✓").unwrap());
+    assert!(!app.screen().matches("id:theme-teal >> text:✓").unwrap());
 }
 
 /// 主题卡暴露可访问名称与选中语义，读屏不只依赖 ✓ 图形。
@@ -132,13 +133,13 @@ fn theme_cards_expose_selected_state_and_names() {
     let mut app = start_app(entries).0;
     app.wait_for("开始之前").unwrap();
     common::navigate(&mut app, "role:button[外观]");
-    let amethyst = "role:button[主题：amethyst]";
-    let ocean = "role:button[主题：ocean]";
-    assert!(app.screen().selected(ocean).unwrap());
-    assert!(!app.screen().selected(amethyst).unwrap());
-    app.press("id:theme-amethyst >> text:amethyst").unwrap();
-    assert!(app.screen().selected(amethyst).unwrap());
-    assert!(!app.screen().selected(ocean).unwrap());
+    let teal = "role:button[主题：teal]";
+    let lanpath = "role:button[主题：lanpath]";
+    assert!(app.screen().selected(lanpath).unwrap());
+    assert!(!app.screen().selected(teal).unwrap());
+    app.press("id:theme-teal >> text:teal").unwrap();
+    assert!(app.screen().selected(teal).unwrap());
+    assert!(!app.screen().selected(lanpath).unwrap());
 }
 
 /// 指针悬停只预览不写盘；A→B→离开后回已保存主题，点击才提交；
@@ -149,32 +150,57 @@ fn theme_hover_preview_is_transient_and_cleans_up_on_leave() {
     let (mut app, storage) = start_app_desktop(entries);
     app.wait_for("开始之前").unwrap();
     common::navigate(&mut app, "role:button[外观]");
-    app.hover("id:theme-indigo").unwrap();
-    app.wait_for("正在预览：indigo；点击应用并保存").unwrap();
+    app.hover("id:theme-teal").unwrap();
+    app.wait_for("正在预览：teal；点击应用并保存").unwrap();
     assert_eq!(storage.get("theme"), None, "hover 不得写 storage");
-    app.hover("id:theme-amethyst").unwrap();
-    app.wait_for("正在预览：amethyst；点击应用并保存").unwrap();
+    app.hover("id:theme-ocean").unwrap();
+    app.wait_for("正在预览：ocean；点击应用并保存").unwrap();
     assert_eq!(storage.get("theme"), None);
     app.hover("id:appearance-light").unwrap();
     app.wait_for("指向主题可预览，点击应用并保存").unwrap();
     assert_eq!(storage.get("theme"), None);
 
-    app.hover("id:theme-indigo").unwrap();
-    app.wait_for("正在预览：indigo；点击应用并保存").unwrap();
+    app.hover("id:theme-teal").unwrap();
+    app.wait_for("正在预览：teal；点击应用并保存").unwrap();
     app.press("id:theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
     assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
 
     // 悬停后离页：页面 owner 清理，不把临时预览写盘或留在选中态。
-    app.hover("id:theme-forest").unwrap();
-    app.wait_for("正在预览：forest；点击应用并保存").unwrap();
+    app.hover("id:theme-lanpath").unwrap();
+    app.wait_for("正在预览：lanpath；点击应用并保存").unwrap();
     common::open_subscriptions(&mut app);
     app.wait_for("id:subscription-name").unwrap();
     assert_eq!(storage.get("theme"), Some("ocean".to_owned()));
     common::navigate(&mut app, "role:button[外观]");
     assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
-    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
-    assert!(!app.screen().selected("role:button[主题：forest]").unwrap());
+    assert!(!app.screen().selected("role:button[主题：lanpath]").unwrap());
+}
+
+/// 自定义 OKLCH 4 色板：支持从预设导入、弹出原生 ColorPicker Popover 并持久化保存。
+#[test]
+fn custom_oklch_palette_imports_opens_popover_and_persists() {
+    let (_dir, entries) = data_root();
+    let (mut app, storage) = start_app(entries);
+    app.wait_for("开始之前").unwrap();
+    common::navigate(&mut app, "role:button[外观]");
+
+    app.press("id:custom-import-ocean").unwrap();
+    assert_eq!(storage.get("theme"), None, "导入预设到草稿不应立即写盘");
+
+    app.press("id:custom-color-primary").unwrap();
+    app.wait_for("id:custom-picker-primary").unwrap();
+    app.press_key("escape").unwrap();
+    app.wait_for_gone(
+        "id:custom-picker-primary",
+        std::time::Duration::from_secs(3),
+    )
+    .unwrap();
+
+    app.press("id:custom-theme-apply").unwrap();
+    assert_eq!(storage.get("theme"), Some("custom".to_owned()));
+    assert!(storage.get("custom_theme").is_some());
+    assert!(app.screen().selected("role:button[主题：custom]").unwrap());
 }
 
 /// storage 配额拒绝写入时，四类外观偏好都不改变信号/运行时且显示可恢复
@@ -191,9 +217,9 @@ fn appearance_save_failure_keeps_previous_values_and_reports() {
     common::navigate(&mut app, "role:button[外观]");
     let failure = "外观设置未能保存，仍使用上一有效值；请释放应用存储空间后重试。";
 
-    app.press("id:theme-indigo >> text:indigo").unwrap();
+    app.press("id:theme-ocean >> text:ocean").unwrap();
     assert_eq!(storage.get("theme"), None);
-    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
+    assert!(app.screen().selected("role:button[主题：lanpath]").unwrap());
     assert!(texts(&app).contains(&failure));
 
     app.press("id:appearance-dark >> text:深色").unwrap();

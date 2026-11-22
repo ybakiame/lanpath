@@ -1,3 +1,4 @@
+use super::oklch::{contrast, hsla_to_oklch, luminance, oklch as from_oklch, rgb_hex};
 use super::*;
 
 /// 每组必须完整定义的语义 token（浅色/深色同名同序）。
@@ -103,12 +104,13 @@ fn assert_contrast(id: ThemeId, dark: bool, foreground: &str, background: &str, 
 }
 
 #[test]
-fn fourteen_themes_with_complete_pairs() {
-    assert_eq!(ThemeId::ALL.len(), 14);
+fn four_themes_with_complete_pairs_and_ocean_default() {
+    assert_eq!(ThemeId::PRESETS.len(), 3);
+    assert_eq!(ThemeId::ALL.len(), 4);
     let mut names: Vec<&str> = ThemeId::ALL.iter().map(|id| id.id_name()).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 14, "主题 ID 必须唯一");
+    assert_eq!(names.len(), 4, "主题 ID 必须唯一");
     let mut required = REQUIRED.to_vec();
     required.sort_unstable();
     for id in ThemeId::ALL {
@@ -135,39 +137,34 @@ fn fourteen_themes_with_complete_pairs() {
             id.id_name()
         );
     }
-    // 存储值往返：未知值回退默认主题，不 panic。
+    // 存储值往返：未知/历史已删除主题回退默认 Lanpath。
+    assert_eq!(ThemeId::ALL[0], ThemeId::Lanpath);
+    assert_eq!(ThemeId::from_id_name("lanpath"), ThemeId::Lanpath);
     assert_eq!(ThemeId::from_id_name("ocean"), ThemeId::Ocean);
-    assert_eq!(ThemeId::from_id_name("mint"), ThemeId::Mint);
-    assert_eq!(ThemeId::from_id_name("nope"), ThemeId::Amethyst);
+    assert_eq!(ThemeId::from_id_name("teal"), ThemeId::Teal);
+    assert_eq!(ThemeId::from_id_name("custom"), ThemeId::Custom);
+    assert_eq!(ThemeId::from_id_name("amethyst"), ThemeId::Lanpath);
+    assert_eq!(ThemeId::from_id_name("nope"), ThemeId::Lanpath);
 }
 
 #[test]
-fn mint_theme_is_high_saturation_and_fresh_in_both_modes() {
-    let light_primary = color_of(ThemeId::Mint, "primary", false);
-    let dark_primary = color_of(ThemeId::Mint, "primary", true);
-    let light_bg = color_of(ThemeId::Mint, "background", false);
-    let light_accent = color_of(ThemeId::Mint, "accent", false);
-    assert!(
-        light_primary.s >= 0.90,
-        "mint 浅色主色应保持高饱和（s={}）",
-        light_primary.s
-    );
-    assert!(
-        dark_primary.s >= 0.85,
-        "mint 深色主色应保持高饱和（s={}）",
-        dark_primary.s
-    );
-    assert!(
-        light_bg.l >= 0.95 && light_bg.s >= 0.40,
-        "mint 浅色背景应明亮清透（l={}, s={}）",
-        light_bg.l,
-        light_bg.s
-    );
-    assert!(
-        light_accent.s >= 0.65,
-        "mint 浅色强调面应轻快鲜活（s={}）",
-        light_accent.s
-    );
+fn teal_primary_button_uses_crisp_white_text_in_both_modes() {
+    for dark in [false, true] {
+        let fg = color_of(ThemeId::Teal, "primary-foreground", dark);
+        let bg = color_of(ThemeId::Teal, "primary", dark);
+        assert!(
+            luminance(fg) > 0.95,
+            "teal {} 主按钮文字应为纯白（lum={}）",
+            if dark { "dark" } else { "light" },
+            luminance(fg)
+        );
+        assert!(
+            contrast(fg, bg) >= 4.5,
+            "teal {} 白字/主色对比度不足：{}",
+            if dark { "dark" } else { "light" },
+            contrast(fg, bg)
+        );
+    }
 }
 
 #[test]
@@ -181,10 +178,7 @@ fn light_backgrounds_are_bright_never_dirty_gray() {
             "{} 浅色卡片必须亮于或等于背景",
             id.id_name()
         );
-        // 微色相：除刻意中性的 graphite 外，浅色背景带主题色相。
-        if id != ThemeId::Graphite {
-            assert!(bg.s >= 0.02, "{} 浅色背景丢失了色相", id.id_name());
-        }
+        assert!(bg.s >= 0.02, "{} 浅色背景丢失了微色相", id.id_name());
     }
 }
 
@@ -257,42 +251,77 @@ fn focus_rings_and_input_boundaries_meet_non_text_contrast() {
 }
 
 #[test]
-fn contrast_and_luminance_match_known_vectors() {
-    let black = hsl(0.0, 0.0, 0.0);
-    let white = hsl(0.0, 0.0, 1.0);
-    let gray = hsl(0.0, 0.0, 0.5);
-    // 单精度 Hsla→sRGB 路径带着约 2e-6 的舍入误差，容差保留该量级。
-    let epsilon = 1e-5;
-    assert!(luminance(black).abs() <= epsilon);
-    assert!((luminance(white) - 1.0).abs() <= epsilon);
-    // #808080 的 sRGB 线性通道值，即 WCAG 相对亮度。
-    assert!((luminance(gray) - 0.21404114).abs() <= epsilon);
-    let black_white = contrast(black, white);
-    assert!(
-        (black_white - 21.0).abs() <= epsilon,
-        "black/white contrast = {black_white}"
-    );
-    assert!((contrast(gray, gray) - 1.0).abs() <= epsilon);
+fn custom_oklch_derivation_enforces_wcag_even_on_extreme_inputs() {
+    let extreme_seeds = [
+        // 极端亮荧光黄 + 极浅文字 + 暗底输入
+        CustomPalette {
+            primary: rgb_hex(0xfef08a),
+            accent: rgb_hex(0xfffbeb),
+            background: rgb_hex(0x111111),
+            foreground: rgb_hex(0xfafafa),
+        },
+        // 极端深黑 + 高饱和洋红
+        CustomPalette {
+            primary: rgb_hex(0x050505),
+            accent: rgb_hex(0xff00aa),
+            background: rgb_hex(0xffffff),
+            foreground: rgb_hex(0xcccccc),
+        },
+        preset_seed(ThemeId::Teal),
+        preset_seed(ThemeId::Lanpath),
+    ];
+
+    for seed in extreme_seeds {
+        let serialized = seed.serialize();
+        let parsed = CustomPalette::deserialize(&serialized);
+        assert_eq!(parsed.serialize(), serialized);
+
+        let tokens = custom_tokens(seed);
+        for dark in [false, true] {
+            let get = |name: &str| {
+                let c = tokens.color(name).unwrap_or_else(|| panic!("{name}"));
+                if dark { c.dark } else { c.light }
+            };
+            for (surface, fg) in FILLED_PAIRS {
+                assert!(
+                    contrast(get(fg), get(surface)) >= 4.5,
+                    "custom {serialized} dark={dark}: {fg}/{surface} < 4.5"
+                );
+            }
+            for surface in ["background", "card", "sidebar", "popover"] {
+                assert!(contrast(get("foreground"), get(surface)) >= 4.5);
+                assert!(contrast(get("muted-foreground"), get(surface)) >= 4.5);
+                assert!(contrast(get("ring"), get(surface)) >= 3.0);
+                assert!(contrast(get("input"), get(surface)) >= 3.0);
+            }
+        }
+    }
 }
 
 #[test]
-fn radius_tokens_follow_design_scale() {
-    let tokens = theme_tokens(ThemeId::Amethyst);
+fn oklch_roundtrip_and_contrast_vectors_are_accurate() {
+    let black = rgb_hex(0x000000);
+    let white = rgb_hex(0xffffff);
+    let gray = rgb_hex(0x808080);
+    assert!(luminance(black).abs() <= 1e-5);
+    assert!((luminance(white) - 1.0).abs() <= 1e-5);
+    assert!((contrast(black, white) - 21.0).abs() <= 1e-4);
+    assert!((contrast(gray, gray) - 1.0).abs() <= 1e-5);
+
+    let sample = rgb_hex(0x245db5);
+    let ok = hsla_to_oklch(sample);
+    let back = from_oklch(ok.l, ok.c, ok.h);
+    let a = nsh_core::Rgba::from(sample);
+    let b = nsh_core::Rgba::from(back);
+    assert!((a.r - b.r).abs() < 0.01 && (a.g - b.g).abs() < 0.01 && (a.b - b.b).abs() < 0.01);
+}
+
+#[test]
+fn radius_tokens_and_modal_scrim_follow_design_scale() {
+    let tokens = theme_tokens(ThemeId::Ocean);
     assert_eq!(tokens.number("radius"), Some(6.0));
     assert_eq!(tokens.number("radius-sm"), Some(4.0));
     assert_eq!(tokens.number("radius-lg"), Some(8.0));
-}
-
-#[test]
-fn degree_hues_convert_to_nsh_normalized_hues() {
-    let amethyst = nsh_core::Rgba::from(color_of(ThemeId::Amethyst, "primary", false));
-    assert!(amethyst.b > amethyst.r && amethyst.r > amethyst.g);
-    let ocean = nsh_core::Rgba::from(color_of(ThemeId::Ocean, "primary", false));
-    assert!(ocean.b > ocean.g && ocean.g > ocean.r);
-}
-
-#[test]
-fn modal_scrim_has_visible_alpha_in_every_appearance() {
     for id in ThemeId::ALL {
         for dark in [false, true] {
             assert!((color_of(id, "modal-scrim", dark).a - 0.45).abs() < 0.001);

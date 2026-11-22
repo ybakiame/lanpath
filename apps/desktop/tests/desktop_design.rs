@@ -93,13 +93,13 @@ fn backup_password_is_not_silently_lost_on_navigation() {
 }
 
 #[test]
-fn fresh_data_uses_ocean() {
+fn fresh_data_uses_lanpath() {
     let (_dir, entries) = data_root();
     let mut app = start_app(entries).0;
     common::wait_ready(&mut app);
     common::navigate(&mut app, "外观");
-    app.wait_for("id:theme-ocean").unwrap();
-    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
+    app.wait_for("id:theme-lanpath").unwrap();
+    assert!(app.screen().selected("role:button[主题：lanpath]").unwrap());
 }
 
 #[test]

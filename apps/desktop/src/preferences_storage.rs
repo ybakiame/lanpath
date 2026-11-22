@@ -15,6 +15,7 @@ use std::{
 #[serde(default)]
 struct UiDocument {
     theme: String,
+    custom_theme: String,
     appearance: String,
     language: String,
     reduce_motion: String,
@@ -26,7 +27,8 @@ struct UiDocument {
 impl Default for UiDocument {
     fn default() -> Self {
         Self {
-            theme: "ocean".into(),
+            theme: "lanpath".into(),
+            custom_theme: String::new(),
             appearance: "system".into(),
             language: "system".into(),
             reduce_motion: "system".into(),
@@ -47,12 +49,18 @@ impl UiDocument {
             ("window_material".into(), self.window_material),
             ("window_opacity".into(), self.window_opacity),
         ]);
+        if !self.custom_theme.is_empty() {
+            entries.insert("custom_theme".into(), self.custom_theme);
+        }
         entries
     }
     fn from_entries(mut entries: BTreeMap<String, String>) -> Self {
         let default = Self::default();
         Self {
             theme: entries.remove("theme").unwrap_or(default.theme),
+            custom_theme: entries
+                .remove("custom_theme")
+                .unwrap_or(default.custom_theme),
             appearance: entries.remove("appearance").unwrap_or(default.appearance),
             language: entries.remove("language").unwrap_or(default.language),
             reduce_motion: entries

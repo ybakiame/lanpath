@@ -235,20 +235,20 @@ fn gallery_header() -> AnyElement {
                         .child(
                             button::button(button::ButtonVariant::Primary)
                                 .size(button::ButtonSize::Sm)
-                                .test_id("gallery-quick-mint")
+                                .test_id("gallery-quick-theme")
                                 .prefix(|| icon_sized(Icon::Sparkles, Tone::OnPrimary, 14.0))
                                 .label(move || {
-                                    if current_theme.get() == ThemeId::Mint {
-                                        t!("gallery.controls.theme_ocean")
+                                    if current_theme.get() == ThemeId::Teal {
+                                        t!("gallery.controls.theme_lanpath")
                                     } else {
-                                        t!("gallery.controls.theme_mint")
+                                        t!("gallery.controls.theme_teal")
                                     }
                                 })
                                 .on_press(move || {
-                                    let next = if current_theme.get_untracked() == ThemeId::Mint {
-                                        ThemeId::Ocean
+                                    let next = if current_theme.get_untracked() == ThemeId::Teal {
+                                        ThemeId::Lanpath
                                     } else {
-                                        ThemeId::Mint
+                                        ThemeId::Teal
                                     };
                                     if prefs.apply_theme(next).is_err() {
                                         feedback::show_toast(t!("appearance.save_failed"));

@@ -454,8 +454,21 @@ gallery.nav.all: 全部组件
 gallery.nav.group.foundations: 基础系统
 gallery.nav.group.controls: 交互控件
 gallery.nav.group.display: 展示与浮层
-gallery.controls.theme_mint: 体验清新 Mint
-gallery.controls.theme_ocean: 切换默认 Ocean
+gallery.controls.theme_lanpath: 切换默认 Lanpath
+gallery.controls.theme_teal: 体验青绿 Teal
+appearance.custom.title: 自定义配色（OKLCH）
+appearance.custom.subtitle: 调节 4 个核心种子色，系统在 OKLCH 空间自动派生全套浅/深色语义 token 并保障对比度
+appearance.custom.slot.primary: 主色
+appearance.custom.slot.accent: 强调色
+appearance.custom.slot.background: 背景色
+appearance.custom.slot.foreground: 文字色
+appearance.custom.channel.l: 亮度 L
+appearance.custom.channel.c: 彩度 C
+appearance.custom.channel.h: 色相 H
+appearance.custom.load_preset: "从预设导入微调："
+appearance.custom.apply: 应用自定义配色
+appearance.custom.applied: 已应用并保存自定义 OKLCH 配色。
+appearance.custom.reset: 重置为 Lanpath
 gallery.tokens.title: 语义色板 Semantic Tokens
 gallery.action.open_sheet: 打开 Sheet 面板
 gallery.action.swap_glyph: 切换状态图标

@@ -10,12 +10,14 @@ use nsh_core::platform::Locale;
 use nsh_core::prelude::*;
 use nsh_core::storage::{Storage, StorageFull};
 
-use super::theme::{self, ThemeId};
+use super::theme::{self, CustomPalette, ThemeId};
 
 /// 外观模式的存储键，由原生偏好后端映射到 app.toml 的 [ui]。
 const MODE_KEY: &str = "appearance";
 /// 主题 ID 的存储键。
 const THEME_KEY: &str = "theme";
+/// 自定义 4 色板种子存储键（`#primary,#accent,#bg,#fg`）。
+const CUSTOM_THEME_KEY: &str = "custom_theme";
 /// 界面语言的存储键。
 const LANGUAGE_KEY: &str = "language";
 /// 动效偏好的存储键。
@@ -200,6 +202,7 @@ fn load_opacity() -> u8 {
 #[derive(Clone, Copy)]
 pub struct UiPrefs {
     pub theme: Signal<ThemeId>,
+    pub custom_palette: Signal<CustomPalette>,
     pub mode: Signal<Mode>,
     pub language: Signal<LanguagePref>,
     pub motion: Signal<MotionPref>,
@@ -211,9 +214,14 @@ pub struct UiPrefs {
 
 impl Default for UiPrefs {
     fn default() -> Self {
+        let saved_custom = Storage::get_item(CUSTOM_THEME_KEY)
+            .map(|raw| CustomPalette::deserialize(&raw))
+            .unwrap_or_default();
+        theme::set_custom_palette(saved_custom);
         let theme = signal(ThemeId::from_id_name(
-            &Storage::get_item(THEME_KEY).unwrap_or_else(|| "ocean".into()),
+            &Storage::get_item(THEME_KEY).unwrap_or_else(|| "lanpath".into()),
         ));
+        let custom_palette = signal(saved_custom);
         let mode = signal(Mode::load());
         let language = signal(LanguagePref::from_storage(Storage::get_item(LANGUAGE_KEY)));
         let motion = signal(MotionPref::load());
@@ -223,6 +231,7 @@ impl Default for UiPrefs {
             computed(move || reduce_motion() || matches!(motion.get(), MotionPref::Reduce));
         Self {
             theme,
+            custom_palette,
             mode,
             language,
             motion,
@@ -298,8 +307,39 @@ impl UiPrefs {
     pub fn apply_theme(&self, id: ThemeId) -> Result<(), StorageFull> {
         Storage::set_item(THEME_KEY, id.id_name())?;
         self.theme.set(id);
-        theme::apply(id);
+        if id == ThemeId::Custom {
+            theme::apply_custom(self.custom_palette.get_untracked());
+        } else {
+            theme::apply(id);
+        }
         Ok(())
+    }
+
+    /// 拖动自定义色板时的实时预览（不写盘，离开页面后由 `restore_applied_theme` 还原）。
+    pub fn preview_custom_palette(&self, seed: CustomPalette) {
+        theme::apply_custom(seed);
+    }
+
+    /// 持久化自定义 4 色板并切换到 `ThemeId::Custom`。
+    pub fn apply_custom_palette(&self, seed: CustomPalette) -> Result<(), StorageFull> {
+        Storage::set_item(CUSTOM_THEME_KEY, seed.serialize())?;
+        Storage::set_item(THEME_KEY, ThemeId::Custom.id_name())?;
+        self.custom_palette.set(seed);
+        self.theme.set(ThemeId::Custom);
+        theme::apply_custom(seed);
+        Ok(())
+    }
+
+    /// 恢复已持久化的生效主题（用于取消悬停预览或放弃未保存自定义草稿）。
+    pub fn restore_applied_theme(&self) {
+        let saved_seed = self.custom_palette.get_untracked();
+        theme::set_custom_palette(saved_seed);
+        let active = self.theme.get_untracked();
+        if active == ThemeId::Custom {
+            theme::apply_custom(saved_seed);
+        } else {
+            theme::apply(active);
+        }
     }
 
     /// 应用外观模式并持久化（失败不改信号/运行时）。
@@ -357,7 +397,7 @@ impl UiPrefs {
 
     /// 启动安装：把持久化的主题/模式/语言/窗口材质一次性应用到运行时。
     pub fn install(&self) {
-        theme::apply(self.theme.get_untracked());
+        self.restore_applied_theme();
         if self.mode.get_untracked() != Mode::System {
             set_color_scheme(self.mode.get_untracked().appearance());
         }

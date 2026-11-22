@@ -28,11 +28,8 @@ fn gallery_shows_every_section() {
             "missing {expected}: {seen:?}"
         );
     }
-    // 14 个主题预览块（含高饱和清新主题 mint）。
-    for theme in [
-        "amethyst", "indigo", "ocean", "mint", "forest", "sand", "rose", "graphite", "cyan",
-        "orange", "teal", "crimson", "gold", "slate",
-    ] {
+    // 4 个精选 OKLCH 主题预览块（3 预设 ocean/teal/lanpath + 1 自定义 custom）。
+    for theme in ["ocean", "teal", "lanpath", "custom"] {
         assert!(seen.contains(&theme), "missing preview {theme}");
     }
     assert!(
@@ -41,15 +38,15 @@ fn gallery_shows_every_section() {
     );
 }
 
-/// 画廊侧栏分类筛选、Sheet 演示与快捷 Mint 主题按钮可真实交互。
+/// 画廊侧栏分类筛选、Sheet 演示与快捷 Teal 主题按钮可真实交互。
 #[test]
-fn gallery_sidebar_filters_sections_and_quick_mint_applies() {
+fn gallery_sidebar_filters_sections_and_quick_theme_applies() {
     let (_dir, entries) = common::data_root();
     let (mut app, storage) = start_gallery(entries);
     app.wait_for("组件画廊").unwrap();
-    app.press("id:gallery-quick-mint").unwrap();
-    assert_eq!(storage.get("theme"), Some("mint".to_owned()));
-    assert!(app.screen().selected("role:button[主题：mint]").unwrap());
+    app.press("id:gallery-quick-theme").unwrap();
+    assert_eq!(storage.get("theme"), Some("teal".to_owned()));
+    assert!(app.screen().selected("role:button[主题：teal]").unwrap());
     app.press("id:gallery-nav-buttons >> role:button").unwrap();
     assert!(app.screen().matches("id:loading-button").unwrap());
     assert!(!app.screen().shows("instant 120ms"));
@@ -190,21 +187,21 @@ fn gallery_theme_card_applies_and_persists() {
     app.wait_for("组件画廊").unwrap();
     assert!(
         app.screen()
-            .matches("id:gallery-theme-ocean >> text:✓")
+            .matches("id:gallery-theme-lanpath >> text:✓")
             .unwrap()
     );
-    assert!(app.screen().selected("role:button[主题：ocean]").unwrap());
-    app.press("id:gallery-theme-indigo >> text:indigo").unwrap();
-    assert_eq!(storage.get("theme"), Some("indigo".to_owned()));
-    assert!(app.screen().selected("role:button[主题：indigo]").unwrap());
+    assert!(app.screen().selected("role:button[主题：lanpath]").unwrap());
+    app.press("id:gallery-theme-teal >> text:teal").unwrap();
+    assert_eq!(storage.get("theme"), Some("teal".to_owned()));
+    assert!(app.screen().selected("role:button[主题：teal]").unwrap());
     assert!(
         app.screen()
-            .matches("id:gallery-theme-indigo >> text:✓")
+            .matches("id:gallery-theme-teal >> text:✓")
             .unwrap()
     );
     assert!(
         !app.screen()
-            .matches("id:gallery-theme-ocean >> text:✓")
+            .matches("id:gallery-theme-lanpath >> text:✓")
             .unwrap()
     );
 }

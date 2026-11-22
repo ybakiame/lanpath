@@ -13,26 +13,23 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
     let applied = std::rc::Rc::new(applied);
     let applied_for_border = applied.clone();
     let applied_for_check = applied;
-    let tokens = super::theme::theme_tokens(id);
-    let tok = |name: &str| tokens.color(name).unwrap_or(AdaptiveColor::TRANSPARENT);
+    let custom_sig = super::prefs::prefs().custom_palette;
+    let tok = move |name: &'static str| {
+        let tokens = if id == ThemeId::Custom {
+            super::theme::custom_tokens(custom_sig.get())
+        } else {
+            super::theme::theme_tokens(id)
+        };
+        tokens.color(name).unwrap_or(AdaptiveColor::TRANSPARENT)
+    };
 
-    let bg = tok("background");
-    let sidebar = tok("sidebar");
-    let card = tok("card");
-    let fg = tok("foreground");
-    let muted_fg = tok("muted-foreground");
-    let primary = tok("primary");
-    let accent = tok("accent");
-    let border = tok("border");
-    let success = tok("success");
-
-    let dot = |color: AdaptiveColor| -> AnyElement {
+    let dot = |name: &'static str| -> AnyElement {
         view()
             .size(px(7.0))
             .rounded_full()
             .border(px(1.0))
             .border_color(move || theme().border)
-            .bg(color)
+            .bg(move || tok(name))
             .into_element()
     };
 
@@ -43,8 +40,8 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
         .overflow_hidden()
         .rounded(move || theme().number("radius-sm").map(px).unwrap_or(px(4.0)))
         .border(px(1.0))
-        .border_color(border)
-        .bg(bg)
+        .border_color(move || tok("border"))
+        .bg(move || tok("background"))
         .child(
             view()
                 .w(px(24.0))
@@ -53,12 +50,30 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
                 .flex_col()
                 .gap(px(3.0))
                 .p(px(4.0))
-                .bg(sidebar)
+                .bg(move || tok("sidebar"))
                 .border_r(px(1.0))
-                .border_color(border)
-                .child(view().w_full().h(px(5.0)).rounded_full().bg(primary))
-                .child(view().w_full().h(px(4.0)).rounded(px(2.0)).bg(accent))
-                .child(view().w(px(12.0)).h(px(3.0)).rounded(px(2.0)).bg(border)),
+                .border_color(move || tok("border"))
+                .child(
+                    view()
+                        .w_full()
+                        .h(px(5.0))
+                        .rounded_full()
+                        .bg(move || tok("primary")),
+                )
+                .child(
+                    view()
+                        .w_full()
+                        .h(px(4.0))
+                        .rounded(px(2.0))
+                        .bg(move || tok("accent")),
+                )
+                .child(
+                    view()
+                        .w(px(12.0))
+                        .h(px(3.0))
+                        .rounded(px(2.0))
+                        .bg(move || tok("border")),
+                ),
         )
         .child(
             view()
@@ -77,26 +92,55 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
                         .p(px(4.0))
                         .rounded(px(3.0))
                         .border(px(1.0))
-                        .border_color(border)
-                        .bg(card)
+                        .border_color(move || tok("border"))
+                        .bg(move || tok("card"))
                         .child(
                             view()
                                 .flex_row()
                                 .items_center()
                                 .justify_between()
                                 .gap(px(3.0))
-                                .child(view().w(px(32.0)).h(px(3.0)).rounded_full().bg(fg))
-                                .child(view().size(px(5.0)).rounded_full().bg(success)),
+                                .child(
+                                    view()
+                                        .w(px(32.0))
+                                        .h(px(3.0))
+                                        .rounded_full()
+                                        .bg(move || tok("foreground")),
+                                )
+                                .child(
+                                    view()
+                                        .size(px(5.0))
+                                        .rounded_full()
+                                        .bg(move || tok("success")),
+                                ),
                         )
-                        .child(view().w(px(22.0)).h(px(2.5)).rounded_full().bg(muted_fg)),
+                        .child(
+                            view()
+                                .w(px(22.0))
+                                .h(px(2.5))
+                                .rounded_full()
+                                .bg(move || tok("muted-foreground")),
+                        ),
                 )
                 .child(
                     view()
                         .flex_row()
                         .items_center()
                         .gap(px(4.0))
-                        .child(view().w(px(20.0)).h(px(6.0)).rounded_full().bg(primary))
-                        .child(view().w(px(14.0)).h(px(6.0)).rounded_full().bg(accent)),
+                        .child(
+                            view()
+                                .w(px(20.0))
+                                .h(px(6.0))
+                                .rounded_full()
+                                .bg(move || tok("primary")),
+                        )
+                        .child(
+                            view()
+                                .w(px(14.0))
+                                .h(px(6.0))
+                                .rounded_full()
+                                .bg(move || tok("accent")),
+                        ),
                 ),
         );
 
@@ -140,8 +184,8 @@ pub fn theme_preview(id: ThemeId, applied: impl Fn() -> bool + 'static) -> AnyEl
                         .flex_row()
                         .gap(px(3.0))
                         .items_center()
-                        .child(dot(primary))
-                        .child(dot(accent)),
+                        .child(dot("primary"))
+                        .child(dot("accent")),
                 )
                 .child(when(
                     move || applied_for_check(),
