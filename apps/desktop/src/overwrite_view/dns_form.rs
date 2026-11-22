@@ -15,7 +15,11 @@ use super::dns_servers::{
 use super::forms::{mutate_section, parse_active_json, read_bool, read_str, toggle_row};
 use super::state::OverwriteState;
 use crate::rulesets::{RuleSetsService, RuleSetsSnapshot};
+use crate::rulesets_view::picker::{
+    PickerIds, contains_token, extract_used_rule_sets, ruleset_picker_popover,
+};
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
+use crate::ui::feedback::show_toast;
 use crate::ui::icon::{Icon, Tone, icon_sized};
 use crate::ui::input::{field, input};
 use crate::ui::select::select;
@@ -229,28 +233,11 @@ fn dns_ruleset_rules_section(
             .and_then(|v| v.pointer("/dns/rules").and_then(Value::as_array).cloned())
             .unwrap_or_default()
     });
+    let used_rs_memo = computed(move || extract_used_rule_sets(&rules_memo.get()));
 
-    let mut rule_options: Vec<SelectItem> = snapshot
-        .groups
-        .iter()
-        .map(|g| {
-            let tok = g.ref_token();
-            SelectItem::new(tok.clone(), format!("{tok} · {}", g.display_name()))
-        })
-        .collect();
-    for row in &snapshot.items {
-        rule_options.push(SelectItem::new(
-            row.entry.tag.clone(),
-            format!("{} · {}", row.entry.tag, row.entry.display_name()),
-        ));
-    }
-
-    let selected_rs = signal(
-        rule_options
-            .first()
-            .map(|o| o.value.to_string())
-            .unwrap_or_default(),
-    );
+    let rs_groups = signal(snapshot.groups);
+    let rs_items = signal(snapshot.items);
+    let selected_rs = signal(String::new());
     let selected_srv = signal("local".to_owned());
 
     view()
@@ -332,25 +319,24 @@ fn dns_ruleset_rules_section(
                 .child(
                     view()
                         .flex_1()
-                        .min_w(px(200.0))
-                        .child(if rule_options.is_empty() {
-                            input(selected_rs)
-                                .test_id("overwrite-dns-rule-rs")
-                                .placeholder(|| "@group / geosite-cn".into())
-                                .on_change(move |v| selected_rs.set(v))
-                                .into_element()
-                        } else {
-                            select(
-                                rule_options,
-                                move || Some(selected_rs.get().into()),
-                                move |v| {
-                                    if let Some(v) = v {
-                                        selected_rs.set(v.to_string());
-                                    }
-                                },
-                            )
-                            .into_element()
-                        }),
+                        .min_w(px(220.0))
+                        .child(ruleset_picker_popover(
+                            PickerIds {
+                                trigger: "overwrite-dns-picker-trigger",
+                                root: "overwrite-dns-picker",
+                                tabs: "overwrite-dns-picker-tabs",
+                                tab_single: "overwrite-dns-picker-tab-single",
+                                tab_group: "overwrite-dns-picker-tab-group",
+                                search: "overwrite-dns-picker-search",
+                                pick_prefix: "overwrite-dns",
+                            },
+                            rs_groups,
+                            rs_items,
+                            used_rs_memo,
+                            selected_rs,
+                            true,
+                            move |tok| selected_rs.set(tok),
+                        )),
                 )
                 .child(
                     view().w(px(160.0)).child(
@@ -372,6 +358,13 @@ fn dns_ruleset_rules_section(
                             if target.is_empty() || srv.is_empty() {
                                 return;
                             }
+                            if contains_token(&used_rs_memo.get_untracked(), &target) {
+                                show_toast(t!(
+                                    "rulesets.picker.already_configured",
+                                    target = target
+                                ));
+                                return;
+                            }
                             mutate_section(&add_state, SingboxSliceKind::Dns, |s| {
                                 if let Some(obj) = s.as_object_mut() {
                                     let arr = obj
@@ -385,6 +378,7 @@ fn dns_ruleset_rules_section(
                                     }
                                 }
                             });
+                            selected_rs.set(String::new());
                         }),
                 ),
         )

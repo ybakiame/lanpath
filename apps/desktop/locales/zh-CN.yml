@@ -746,3 +746,15 @@ connections.closed_all: 已断开全部活跃连接。
 connections.cleared: 已清空本地流量统计与历史连接记录。
 connections.rule_added: "已添加规则：%{rule}"
 connections.rule_exists: "规则已存在：%{rule}"
+
+rulesets.picker.tab_single: "单个规则集 (%{count})"
+rulesets.picker.tab_group: "规则集分组 (%{count})"
+rulesets.picker.trigger_placeholder: 选择规则集或分组…
+rulesets.picker.search_placeholder: 搜索规则集或分组名称、标签…
+rulesets.picker.group_members: "%{count} 项"
+rulesets.picker.use_custom: "直接使用「%{value}」"
+rulesets.picker.empty_single: 暂无受管规则集，请先在「规则集」页添加。
+rulesets.picker.empty_group: 暂无规则集分组，请先在「分组管理」中新建。
+rulesets.picker.all_configured: 当前分类的项均已配置，无需重复添加。
+rulesets.picker.no_match: 没有匹配当前搜索词的规则集或分组。
+rulesets.picker.already_configured: "已配置过 %{target}，无需重复添加。"

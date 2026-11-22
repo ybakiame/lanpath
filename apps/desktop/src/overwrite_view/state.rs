@@ -6,6 +6,7 @@ use lanpath_common::CoreType;
 use nsh_core::prelude::*;
 
 use crate::singbox_overwrite::{ManagedBindings, SingboxOverwriteService};
+use crate::ui::feedback::show_toast;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditMode {
@@ -27,7 +28,6 @@ pub(super) struct OverwriteState {
     pub(super) clash_api_secret: Signal<String>,
     pub(super) saved_bindings: Signal<Option<ManagedBindings>>,
     pub(super) error: Signal<Option<String>>,
-    pub(super) notice: Signal<Option<String>>,
     pub(super) confirm_reset: Signal<bool>,
 }
 
@@ -88,7 +88,6 @@ impl OverwriteState {
                     clash_api_secret: signal(clash_api_secret),
                     saved_bindings: signal(bindings),
                     error: signal(error),
-                    notice: signal(None),
                     confirm_reset: signal(false),
                 }
             }
@@ -110,7 +109,6 @@ impl OverwriteState {
                     clash_api_secret: signal(String::new()),
                     saved_bindings: signal(None),
                     error: signal(Some(format!("打开数据根失败：{err}"))),
-                    notice: signal(None),
                     confirm_reset: signal(false),
                 }
             }
@@ -141,7 +139,6 @@ impl OverwriteState {
             }
         });
         self.error.set(None);
-        self.notice.set(None);
     }
 
     pub(super) fn is_active_slice_dirty(&self) -> bool {
@@ -191,11 +188,9 @@ impl OverwriteState {
                     }
                 });
                 self.error.set(None);
-                self.notice
-                    .set(Some(t!("overwrite.saved", file = kind.file_name())));
+                show_toast(t!("overwrite.saved", file = kind.file_name()));
             }
             Err(err) => {
-                self.notice.set(None);
                 self.error.set(Some(err.to_string()));
             }
         }
@@ -206,10 +201,9 @@ impl OverwriteState {
         match SingboxOverwriteService::format_slice(&raw) {
             Ok(formatted) => {
                 self.set_active_draft(formatted);
-                self.notice.set(Some(t!("overwrite.formatted")));
+                show_toast(t!("overwrite.formatted"));
             }
             Err(err) => {
-                self.notice.set(None);
                 self.error.set(Some(err.to_string()));
             }
         }
@@ -241,11 +235,9 @@ impl OverwriteState {
                     }
                 });
                 self.error.set(None);
-                self.notice
-                    .set(Some(t!("overwrite.reset_done", file = kind.file_name())));
+                show_toast(t!("overwrite.reset_done", file = kind.file_name()));
             }
             Err(err) => {
-                self.notice.set(None);
                 self.error.set(Some(err.to_string()));
             }
         }
@@ -257,13 +249,11 @@ impl OverwriteState {
             return;
         };
         let Ok(mixed_port) = self.mixed_port.get().trim().parse::<u16>() else {
-            self.notice.set(None);
             self.error
                 .set(Some("本地 Mixed 端口必须为 1–65535 的整数".into()));
             return;
         };
         let Ok(clash_api_port) = self.clash_api_port.get().trim().parse::<u16>() else {
-            self.notice.set(None);
             self.error
                 .set(Some("Clash API 端口必须为 1–65535 的整数".into()));
             return;
@@ -288,10 +278,9 @@ impl OverwriteState {
                 self.clash_api_secret.set(saved.clash_api_secret.clone());
                 self.saved_bindings.set(Some(saved));
                 self.error.set(None);
-                self.notice.set(Some(t!("overwrite.bindings_saved")));
+                show_toast(t!("overwrite.bindings_saved"));
             }
             Err(err) => {
-                self.notice.set(None);
                 self.error.set(Some(err.to_string()));
             }
         }

@@ -50,7 +50,6 @@ pub(crate) fn overwrite_page() -> impl IntoElement {
     let active_slice = state.active_slice;
     let edit_mode = state.edit_mode;
     let error = state.error;
-    let notice = state.notice;
     let confirm_reset = state.confirm_reset;
     let reset_confirm_state = state.clone();
     let save_state = state.clone();
@@ -222,7 +221,7 @@ pub(crate) fn overwrite_page() -> impl IntoElement {
                                         move || {
                                             let fmt = format_state.clone();
                                             button(ButtonVariant::Outline)
-                                                .size(ButtonSize::Sm)
+                                                .size(ButtonSize::Md)
                                                 .test_id("overwrite-format")
                                                 .label(|| t!("overwrite.format_json"))
                                                 .on_press(move || fmt.format_active_slice())
@@ -230,9 +229,9 @@ pub(crate) fn overwrite_page() -> impl IntoElement {
                                     ))
                                     .child(
                                         button(ButtonVariant::Outline)
-                                            .size(ButtonSize::Sm)
+                                            .size(ButtonSize::Md)
                                             .test_id("overwrite-reset")
-                                            .prefix(|| icon_sized(Icon::Refresh, Tone::Muted, 13.0))
+                                            .prefix(|| icon_sized(Icon::Refresh, Tone::Muted, 14.0))
                                             .label(|| t!("overwrite.reset_slice"))
                                             .on_press(move || confirm_reset.set(true)),
                                     )
@@ -256,18 +255,6 @@ pub(crate) fn overwrite_page() -> impl IntoElement {
                                             .text_size(px(12.5))
                                             .text_color(move || theme().destructive)
                                             .selectable(true),
-                                    )
-                                },
-                            ))
-                            .child(when(
-                                move || notice.get().is_some(),
-                                move || {
-                                    alert_banner(
-                                        AlertTone::Success,
-                                        text(move || notice.get().unwrap_or_default())
-                                            .test_id("overwrite-notice")
-                                            .text_size(px(12.5))
-                                            .text_color(move || theme().foreground),
                                     )
                                 },
                             )),

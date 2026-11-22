@@ -1,5 +1,6 @@
 use super::*;
 use crate::rulesets::RuleSetRow;
+use crate::rulesets_view::picker::{PickerIds, contains_token, ruleset_picker_popover};
 use crate::ui::{
     button::ButtonSize,
     icon::{Icon, Tone, icon_sized},
@@ -7,6 +8,7 @@ use crate::ui::{
     layout::{SurfaceLevel, surface},
     select::{checkbox, select, tab_bar},
 };
+use lanpath_client::rules::RuleMatchType;
 use lanpath_client::rulesets::RuleSetGroup;
 use nsh_base::{SelectItem, theme};
 use nsh_core::prelude::*;
@@ -21,6 +23,8 @@ pub(super) fn editor(state: State) -> impl IntoElement {
     let action = state.action;
     let rs_items = state.ruleset_items;
     let rs_groups = state.ruleset_groups;
+    let all_rules = state.rules;
+    let editing_id = state.editing;
     let open_groups = state.group_sheet.clone();
     let submit = state.clone();
     let cancel = state.clone();
@@ -132,7 +136,7 @@ pub(super) fn editor(state: State) -> impl IntoElement {
                     )
                     .child(when(
                         move || kind.get() == "ruleset",
-                        move || ruleset_picker(target, rs_groups, rs_items),
+                        move || ruleset_picker(target, all_rules, editing_id, rs_groups, rs_items),
                     ))
             },
         ))
@@ -224,59 +228,58 @@ pub(super) fn editor(state: State) -> impl IntoElement {
 
 fn ruleset_picker(
     target: Signal<String>,
+    all_rules: Signal<Vec<LocalRule>>,
+    editing_id: Signal<Option<String>>,
     groups: Signal<Vec<RuleSetGroup>>,
     items: Signal<Vec<RuleSetRow>>,
 ) -> AnyElement {
-    let empty = move || groups.with(Vec::is_empty) && items.with(Vec::is_empty);
+    let excluded = computed(move || {
+        let mut used = lanpath_client::rules::parse_rule_set_tags(&target.get());
+        let skip_id = editing_id.get();
+        all_rules.with(|list| {
+            for rule in list {
+                if rule.match_type != RuleMatchType::RuleSet {
+                    continue;
+                }
+                if skip_id.as_deref() == Some(rule.id.as_str()) {
+                    continue;
+                }
+                for tok in lanpath_client::rules::parse_rule_set_tags(&rule.target) {
+                    if !contains_token(&used, &tok) {
+                        used.push(tok);
+                    }
+                }
+            }
+        });
+        used
+    });
+    let current_tags = computed(move || lanpath_client::rules::parse_rule_set_tags(&target.get()));
+    let empty_sel = signal(String::new());
+
     view()
-        .p_3()
-        .rounded(move || theme().radius)
-        .bg(move || theme().muted.opacity(0.35))
-        .border(px(1.0))
-        .border_color(move || theme().border)
-        .flex_col()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
         .gap_2()
-        .child(
-            text(|| t!("rules.ruleset_picker_hint"))
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(when(empty, || {
-            text(|| t!("rules.ruleset_picker_empty"))
-                .text_size(px(12.0))
-                .text_color(move || theme().muted_foreground)
-        }))
-        .child(when(
-            move || !groups.with(Vec::is_empty),
-            move || {
-                view()
-                    .flex_row()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(each(
-                        move || groups.get(),
-                        |g: &RuleSetGroup| g.id.clone(),
-                        move |group, _| {
-                            let g = group.get_untracked();
-                            let token = g.ref_token();
-                            let token_check = token.clone();
-                            let token_id = g.tag.clone();
-                            let label = format!("{} ({})", token, g.member_tags.len());
-                            button(ButtonVariant::Secondary)
-                                .test_id(format!("rules-pick-group-{token_id}"))
-                                .size(ButtonSize::Sm)
-                                .selected(move || {
-                                    target_contains_token(&target.get(), &token_check)
-                                })
-                                .label(move || label.clone())
-                                .on_press(move || toggle_target_token(target, &token))
-                        },
-                    ))
+        .child(view().w(px(236.0)).child(ruleset_picker_popover(
+            PickerIds {
+                trigger: "rules-picker-trigger",
+                root: "rules-picker",
+                tabs: "rules-picker-tabs",
+                tab_single: "rules-picker-tab-single",
+                tab_group: "rules-picker-tab-group",
+                search: "rules-picker-search",
+                pick_prefix: "rules",
             },
-        ))
+            groups,
+            items,
+            excluded,
+            empty_sel,
+            false,
+            move |tok| append_target_token(target, &tok),
+        )))
         .child(when(
-            move || !items.with(Vec::is_empty),
+            move || !current_tags.with(Vec::is_empty),
             move || {
                 view()
                     .flex_row()
@@ -284,19 +287,16 @@ fn ruleset_picker(
                     .items_center()
                     .gap_2()
                     .child(each(
-                        move || items.get(),
-                        |row: &RuleSetRow| row.entry.id.clone(),
-                        move |row, _| {
-                            let tag = row.get_untracked().entry.tag;
-                            let tag_check = tag.clone();
-                            let tag_label = tag.clone();
-                            let tag_id = tag.clone();
-                            button(ButtonVariant::Outline)
-                                .test_id(format!("rules-pick-set-{tag_id}"))
+                        current_tags,
+                        |t: &String| t.clone(),
+                        move |tok, _| {
+                            let val = tok.get_untracked();
+                            let label = format!("{val} ×");
+                            let remove_val = val.clone();
+                            button(ButtonVariant::Secondary)
                                 .size(ButtonSize::Sm)
-                                .selected(move || target_contains_token(&target.get(), &tag_check))
-                                .label(move || tag_label.clone())
-                                .on_press(move || toggle_target_token(target, &tag))
+                                .label(move || label.clone())
+                                .on_press(move || remove_target_token(target, &remove_val))
                         },
                     ))
             },
@@ -304,18 +304,16 @@ fn ruleset_picker(
         .into_element()
 }
 
-fn target_contains_token(raw: &str, token: &str) -> bool {
-    lanpath_client::rules::parse_rule_set_tags(raw)
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(token))
-}
-
-fn toggle_target_token(target: Signal<String>, token: &str) {
+fn append_target_token(target: Signal<String>, token: &str) {
     let mut tags = lanpath_client::rules::parse_rule_set_tags(&target.get());
-    if let Some(pos) = tags.iter().position(|t| t.eq_ignore_ascii_case(token)) {
-        tags.remove(pos);
-    } else {
+    if !contains_token(&tags, token) {
         tags.push(token.to_owned());
     }
+    target.set(tags.join(", "));
+}
+
+fn remove_target_token(target: Signal<String>, token: &str) {
+    let mut tags = lanpath_client::rules::parse_rule_set_tags(&target.get());
+    tags.retain(|t| !t.eq_ignore_ascii_case(token));
     target.set(tags.join(", "));
 }

@@ -746,3 +746,15 @@ connections.closed_all: All active connections closed.
 connections.cleared: Cleared local traffic statistics and connection history.
 connections.rule_added: "Rule added: %{rule}"
 connections.rule_exists: "Rule already exists: %{rule}"
+
+rulesets.picker.tab_single: "Rule Sets (%{count})"
+rulesets.picker.tab_group: "Groups (%{count})"
+rulesets.picker.trigger_placeholder: Select rule set or group…
+rulesets.picker.search_placeholder: Search rule sets or groups by tag or name…
+rulesets.picker.group_members: "%{count} items"
+rulesets.picker.use_custom: "Use \"%{value}\""
+rulesets.picker.empty_single: No managed rule sets yet. Add one on the Rule Sets page first.
+rulesets.picker.empty_group: No rule set groups yet. Create one in Manage Groups first.
+rulesets.picker.all_configured: All items in this tab are already configured.
+rulesets.picker.no_match: No rule sets or groups match your search.
+rulesets.picker.already_configured: "%{target} is already configured."

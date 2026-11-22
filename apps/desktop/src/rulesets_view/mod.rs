@@ -5,6 +5,7 @@ mod group_cards;
 mod groups;
 mod managed;
 mod market;
+pub(crate) mod picker;
 mod state;
 
 pub(crate) use groups::{GroupSheetController, groups_sheet};

@@ -8,8 +8,12 @@ use serde_json::{Value, json};
 use super::forms::{mutate_section, parse_active_json, read_bool, read_str, toggle_row};
 use super::state::OverwriteState;
 use crate::rulesets::RuleSetsService;
+use crate::rulesets_view::picker::{
+    PickerIds, contains_token, extract_used_rule_sets, ruleset_picker_popover,
+};
 use crate::singbox_overwrite::SingboxOverwriteService;
 use crate::ui::button::{ButtonSize, ButtonVariant, button};
+use crate::ui::feedback::show_toast;
 use crate::ui::icon::{Icon, Tone, icon_sized};
 use crate::ui::input::{field, input};
 use crate::ui::layout::{AlertTone, alert_banner};
@@ -48,26 +52,9 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
         .ok()
         .and_then(|s| s.list_snapshot().ok())
         .unwrap_or_default();
-    let mut rs_options: Vec<SelectItem> = rs_snapshot
-        .groups
-        .iter()
-        .map(|g| {
-            let tok = g.ref_token();
-            SelectItem::new(tok.clone(), format!("{tok} · {}", g.display_name()))
-        })
-        .collect();
-    for row in &rs_snapshot.items {
-        rs_options.push(SelectItem::new(
-            row.entry.tag.clone(),
-            format!("{} · {}", row.entry.tag, row.entry.display_name()),
-        ));
-    }
-    let selected_rs = signal(
-        rs_options
-            .first()
-            .map(|o| o.value.to_string())
-            .unwrap_or_default(),
-    );
+    let rs_groups = signal(rs_snapshot.groups);
+    let rs_items = signal(rs_snapshot.items);
+    let selected_rs = signal(String::new());
     let selected_out = signal("direct".to_owned());
     let mut outbound_options: Vec<SelectItem> = vec![
         SelectItem::new("direct", t!("rules.direct")),
@@ -86,6 +73,7 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
             .and_then(|v| v.pointer("/route/rules").and_then(Value::as_array).cloned())
             .unwrap_or_default()
     });
+    let used_rs_memo = computed(move || extract_used_rule_sets(&route_rules_memo.get()));
 
     view()
         .flex_col()
@@ -209,25 +197,24 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
                         .child(
                             view()
                                 .flex_1()
-                                .min_w(px(200.0))
-                                .child(if rs_options.is_empty() {
-                                    input(selected_rs)
-                                        .test_id("overwrite-route-rule-rs")
-                                        .placeholder(|| "@group / geosite-cn".into())
-                                        .on_change(move |v| selected_rs.set(v))
-                                        .into_element()
-                                } else {
-                                    select(
-                                        rs_options,
-                                        move || Some(selected_rs.get().into()),
-                                        move |v| {
-                                            if let Some(v) = v {
-                                                selected_rs.set(v.to_string());
-                                            }
-                                        },
-                                    )
-                                    .into_element()
-                                }),
+                                .min_w(px(220.0))
+                                .child(ruleset_picker_popover(
+                                    PickerIds {
+                                        trigger: "overwrite-route-picker-trigger",
+                                        root: "overwrite-route-picker",
+                                        tabs: "overwrite-route-picker-tabs",
+                                        tab_single: "overwrite-route-picker-tab-single",
+                                        tab_group: "overwrite-route-picker-tab-group",
+                                        search: "overwrite-route-picker-search",
+                                        pick_prefix: "overwrite-route",
+                                    },
+                                    rs_groups,
+                                    rs_items,
+                                    used_rs_memo,
+                                    selected_rs,
+                                    true,
+                                    move |tok| selected_rs.set(tok),
+                                )),
                         )
                         .child(select(
                             outbound_options,
@@ -247,6 +234,13 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
                                 .on_press(move || {
                                     let target = selected_rs.get().trim().to_owned();
                                     if target.is_empty() {
+                                        return;
+                                    }
+                                    if contains_token(&used_rs_memo.get_untracked(), &target) {
+                                        show_toast(t!(
+                                            "rulesets.picker.already_configured",
+                                            target = target
+                                        ));
                                         return;
                                     }
                                     let out = selected_out.get();
@@ -269,6 +263,7 @@ pub(super) fn route_form(state: OverwriteState) -> impl IntoElement {
                                             }
                                         },
                                     );
+                                    selected_rs.set(String::new());
                                 }),
                         ),
                 ),
