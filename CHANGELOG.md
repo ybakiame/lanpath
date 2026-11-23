@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.1-rc.3] - 2026-11-23
+
 - 正式将桌面端包名、可执行文件与应用身份统一为 `lanpath`（`lanpath.exe` / `com.ybakiame.lanpath`，环境变量 `LANPATH_DATA_DIR`，数据根元数据 `.lanpath-root` / `.lanpath.lock` / `.lanpath-root-id`），彻底移除旧版客户端的祖先目录与旧 JSON 布局兼容拦截。
 - 简化便携模式与标准数据目录解析：取消 `lanpath.portable` 标记文件，改为检测程序同级是否存在且可写的 `data/` 文件夹；非便携模式改用 `etcetera` 平台原生标准目录（Windows `%APPDATA%\Lanpath`、macOS `~/Library/Application Support/Lanpath`、Linux `$XDG_DATA_HOME/lanpath`）。
 - 将运行时 SQLite 数据库（`stats.db` 与 sing-box `cache.db`）统一收敛至 `<data_root>/runtime/db/`，不放在数据根目录且不纳入加密备份；同步更新目录说明文档。

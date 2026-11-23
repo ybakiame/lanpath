@@ -2,7 +2,7 @@
 
 跨平台代理客户端，提供订阅管理、核心启停、配置切片、DNS 测速、规则集与分流规则、网络诊断、日志排查与加密备份。
 
-当前桌面版采用纯 Rust 原生框架 **NSH 0.6.0**（位于 `apps/desktop`，当前候选版本 `0.2.1-rc.2`），不依赖 WebView；共享 Rust 核心业务位于 `crates/lanpath-*`，公共图标与资源位于 `assets/`。
+当前桌面版采用纯 Rust 原生框架 **NSH 0.6.0**（位于 `apps/desktop`，当前候选版本 `0.2.1-rc.3`），不依赖 WebView；共享 Rust 核心业务位于 `crates/lanpath-*`，公共图标与资源位于 `assets/`。
 
 ## 桌面端主要能力
 

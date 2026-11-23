@@ -1,6 +1,6 @@
 # Lanpath Desktop
 
-`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，当前候选版本 `0.2.1-rc.2`），程序名为 `lanpath.exe`（Linux/macOS 为 `lanpath`），应用标识为 `com.ybakiame.lanpath`。
+`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，当前候选版本 `0.2.1-rc.3`），程序名为 `lanpath.exe`（Linux/macOS 为 `lanpath`），应用标识为 `com.ybakiame.lanpath`。
 
 Lanpath 帮助你将可信订阅转化为可用的本地代理：准备订阅与核心，经校验后启动，并独立查看核心运行状态与系统代理接管状态；排查问题时可结合策略、连接监控、规则、配置切片、诊断与日志快速定位。
 
@@ -69,5 +69,5 @@ $env:LANPATH_DATA_DIR = 'D:\LanpathData'
 
 ## 版本与开发调试
 
-- 产品版本统一由仓库根 `VERSION` 控制，详见 [版本约定](../../VERSIONING.md)；当前处于 `0.2.x-rc.N` 候选阶段（`0.2.1-rc.2`），不提供旧数据兼容或迁移。
+- 产品版本统一由仓库根 `VERSION` 控制，详见 [版本约定](../../VERSIONING.md)；当前处于 `0.2.x-rc.N` 候选阶段（`0.2.1-rc.3`），不提供旧数据兼容或迁移。
 - 开发者可通过 `--ui-gallery` 参数启动组件画廊：`cargo run --locked --manifest-path apps/desktop/Cargo.toml -- --ui-gallery`（普通导航不暴露该入口）。

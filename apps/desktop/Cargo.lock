@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "chrono",
  "env_logger",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-client"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "age",
  "async-trait",
@@ -3289,7 +3289,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-common"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "libc",
  "serde",
@@ -3302,7 +3302,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-engine"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3318,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-mitm"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "async-trait",
  "brotli 8.0.4",
@@ -3357,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "lanpath-script"
-version = "0.2.1-rc.2"
+version = "0.2.1-rc.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
