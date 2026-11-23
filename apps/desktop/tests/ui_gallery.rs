@@ -239,7 +239,7 @@ fn gallery_with_reduced_motion_stays_readable() {
     let mut config = nsh_engine::EngineConfig {
         viewport: nsh_core::Size::new(nsh_core::Points(1100.0), nsh_core::Points(800.0)),
         storage: Some(storage.clone()),
-        ..nsh_engine::EngineConfig::new(lanpath_desktop_nsh::gallery_root())
+        ..nsh_engine::EngineConfig::new(lanpath::gallery_root())
     };
     config.environment.reduce_motion = true;
     let mut app = nsh_testing::Headless::start(config).expect("start the headless gallery");

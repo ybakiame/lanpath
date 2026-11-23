@@ -182,7 +182,7 @@ impl Subscriptions {
         let subscription = self
             .store()
             .add(&name, &url, true, normalized_text(user_agent))?;
-        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "新增订阅：{}", subscription.name.escape_debug());
+        tracing::info!(target: "lanpath::subscriptions", "新增订阅：{}", subscription.name.escape_debug());
         Ok(subscription)
     }
 
@@ -209,7 +209,7 @@ impl Subscriptions {
         }
         store.update(id, &name, &url, normalized_text(user_agent))?;
         store.set_profile_id(id, profile_id)?;
-        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "编辑订阅：{}", name.escape_debug());
+        tracing::info!(target: "lanpath::subscriptions", "编辑订阅：{}", name.escape_debug());
         store
             .load()?
             .into_iter()
@@ -225,7 +225,7 @@ impl Subscriptions {
         if !enabled {
             self.clear_active_if_matches_locked(id)?;
         }
-        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "{}订阅：{id}", if enabled { "启用" } else { "停用" });
+        tracing::info!(target: "lanpath::subscriptions", "{}订阅：{id}", if enabled { "启用" } else { "停用" });
         Ok(())
     }
 
@@ -236,7 +236,7 @@ impl Subscriptions {
         self.root.ensure_writable()?;
         self.store().remove(id)?;
         self.clear_active_if_matches_locked(id)?;
-        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "删除订阅：{id}");
+        tracing::info!(target: "lanpath::subscriptions", "删除订阅：{id}");
         Ok(())
     }
 
@@ -347,14 +347,14 @@ impl Subscriptions {
                 };
                 store.write_cached_content(id, &cache)?;
                 store.save(&subscriptions)?;
-                tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "刷新订阅完成：{node_count} 个节点");
+                tracing::info!(target: "lanpath::subscriptions", "刷新订阅完成：{node_count} 个节点");
                 Ok(RefreshStatus::Updated { node_count, format })
             }
             Err(error) => {
                 let message = format!("拉取失败: {error}");
                 target.error = Some(message.clone());
                 store.save(&subscriptions)?;
-                tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "刷新订阅失败：{message}");
+                tracing::info!(target: "lanpath::subscriptions", "刷新订阅失败：{message}");
                 Ok(RefreshStatus::Failed { error: message })
             }
         }
@@ -384,7 +384,7 @@ impl Subscriptions {
         let mut config = load_request_config(self.root.path())?;
         config.active_subscription_id = Some(id);
         config.save()?;
-        tracing::info!(target: "lanpath_desktop_nsh::subscriptions", "设置当前生效订阅：{id}");
+        tracing::info!(target: "lanpath::subscriptions", "设置当前生效订阅：{id}");
         Ok(())
     }
 

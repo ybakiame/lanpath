@@ -5,7 +5,7 @@ use nsh_core::{Points, Size};
 
 #[test]
 fn launch_manifest_is_used_for_the_native_window_minimum() {
-    let root = lanpath_desktop_nsh::root();
+    let root = lanpath::root();
     let window = root.main_window_ref().expect("manifest window options");
     assert_eq!(
         window.attributes.min_size,

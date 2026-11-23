@@ -93,7 +93,7 @@ impl Profiles {
             None => profiles.push(profile.clone()),
         }
         self.store().save(&profiles)?;
-        tracing::info!(target: "lanpath_desktop_nsh::profiles", "保存覆写模板：{}", profile.name.escape_debug());
+        tracing::info!(target: "lanpath::profiles", "保存覆写模板：{}", profile.name.escape_debug());
         Ok(profile)
     }
 
@@ -112,7 +112,7 @@ impl Profiles {
             ));
         }
         self.store().remove(id)?;
-        tracing::info!(target: "lanpath_desktop_nsh::profiles", "删除覆写模板：{id}");
+        tracing::info!(target: "lanpath::profiles", "删除覆写模板：{id}");
         Ok(())
     }
 }

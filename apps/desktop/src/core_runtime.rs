@@ -228,7 +228,7 @@ impl CoreRuntime {
     /// 实现整体在独立任务中跑到完成：UI 离页取消只是看不到结果，不会留下
     /// 半启动子进程或未完成的守护接管。
     pub(crate) async fn start(self: &Arc<Self>) -> LanpathResult<StartOutcome> {
-        tracing::info!(target: "lanpath_desktop_nsh::core_runtime", "开始核心启动任务");
+        tracing::info!(target: "lanpath::core_runtime", "开始核心启动任务");
         let this = self.clone();
         tokio::spawn(async move { this.start_impl().await })
             .await
@@ -360,11 +360,11 @@ impl CoreRuntime {
         // acquire 127.0.0.1:mixed_port。接管失败保留核心与守护证据——
         // 绝不能先 rollback 清掉恢复资源；用户经“停止/显式恢复”完成恢复。
         if let Err(error) = self.acquire_proxy(config.system_proxy_enabled, config.mixed_port) {
-            tracing::error!(target: "lanpath_desktop_nsh::core_runtime",
+            tracing::error!(target: "lanpath::core_runtime",
                 "系统代理接管失败；核心与恢复资源保留：{error}");
             return Err(error);
         }
-        tracing::info!(target: "lanpath_desktop_nsh::core_runtime",
+        tracing::info!(target: "lanpath::core_runtime",
             "核心已启动：{core_type} {version} mixed {} api {:?}（已完成二进制校验）",
             config.mixed_port, clash_api_port);
         Ok(StartOutcome {

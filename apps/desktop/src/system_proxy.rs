@@ -1,6 +1,6 @@
 //! 系统代理接管的产品 glue：owner 身份、守护装配抽象与偏好持久化。
 //!
-//! - `APP_ID` 是本应用身份 `com.ybakiame.lanpath.desktop.nsh`；守护日志的
+//! - `APP_ID` 是本应用身份 `com.ybakiame.lanpath`；守护日志的
 //!   owner 为本数据根 UUID（`DataRoot::id`），跨进程复用同一份精确身份。
 //! - `GuardianSpawner`/`ArmedGuardian` 把“启动同映像独立守护进程 + RPC”
 //!   抽象成可注入接口：Windows 走真实 `proxy_guardian::Guardian`，测试用
@@ -20,7 +20,7 @@ use crate::data_root::DataRoot;
 
 /// 本应用发行身份（与窗口壳 app_id 一致）；守护日志的 owner_label。
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const APP_ID: &str = "com.ybakiame.lanpath.desktop.nsh";
+pub(crate) const APP_ID: &str = "com.ybakiame.lanpath";
 
 #[cfg(not(windows))]
 fn unsupported() -> LanpathError {
@@ -156,7 +156,7 @@ pub(crate) fn save_preference(root: &DataRoot, enabled: bool) -> LanpathResult<(
     let mut config = crate::request_settings::load_request_config(root.path())?;
     config.system_proxy_enabled = enabled;
     config.save()?;
-    tracing::info!(target: "lanpath_desktop_nsh::system_proxy",
+    tracing::info!(target: "lanpath::system_proxy",
         "系统代理偏好已保存：{enabled}");
     Ok(())
 }

@@ -106,7 +106,7 @@ impl RequestSettings {
             .clone_from(&settings.github_prefix);
         config.validate_request_proxy()?;
         config.save()?;
-        tracing::info!(target: "lanpath_desktop_nsh::request_settings", "保存请求设置：模式 {:?}", settings.mode);
+        tracing::info!(target: "lanpath::request_settings", "保存请求设置：模式 {:?}", settings.mode);
         Ok(RequestSettingsDocument::from_config(&config))
     }
 }

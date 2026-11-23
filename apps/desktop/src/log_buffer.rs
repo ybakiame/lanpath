@@ -169,7 +169,7 @@ mod tests {
             "应用",
             "INFO",
             2,
-            "lanpath_desktop_nsh",
+            "lanpath",
             &"中".repeat(MESSAGE_BYTES),
             false,
         );

@@ -12,11 +12,11 @@
 - **规则、脚本与诊断**：支持域名/后缀/关键词/CIDR/进程/端口/`ruleset` 规则编辑与排序、本地 TypeScript 覆写编辑器、系统与上游 DNS/端口诊断及本地规则预估。
 - **外观、日志与备份**：OKLCH 配色体系（`lanpath` 默认品牌主题、`ocean`、`teal` 及 4 色板自定义 `ColorPicker`）、深浅色/跟随系统、Windows 11 Acrylic / Mica 窗口材质与透明度调节、内存与磁盘只读日志查看，以及 age 加密备份导出与事务恢复。
 
-桌面版使用与便携模式说明见 [NSH 桌面说明](apps/desktop/README.md)。
+桌面版使用与便携模式说明见 [桌面说明](apps/desktop/README.md)。
 
 ## 便携模式
 
-在程序同级放置空文件 `lanpath.portable`，所有配置、订阅、规则、规则集、核心运行文件、日志与界面偏好均保存在同级 `data/` 目录中，退出后可整体移动目录，不依赖终端或快捷方式工作目录。
+在程序同级存在且可写入的 `data/` 文件夹时自动启用便携模式：所有配置、订阅、规则、规则集、核心运行文件、日志与界面偏好均保存在同级 `data/` 目录中，退出后可整体移动目录，不依赖终端或快捷方式工作目录。
 
 ## 本地构建
 
@@ -28,7 +28,7 @@ devenv shell -- cargo run --locked --manifest-path apps/desktop/Cargo.toml
 
 # Windows (PowerShell)
 cargo build --locked --manifest-path apps/desktop/Cargo.toml
-.\apps\desktop\target\debug\lanpath-desktop-nsh.exe
+.\apps\desktop\target\debug\lanpath.exe
 ```
 
 提交检查脚本工具依赖位于仓库根目录，使用 `devenv shell -- bun install --frozen-lockfile` 安装。
@@ -44,7 +44,7 @@ devenv shell -- lanpath-build-android-debug
 
 ## 文档与版本
 
-- [NSH 桌面说明](apps/desktop/README.md) · [文档索引](docs/README.md) · [更新日志](CHANGELOG.md)
+- [桌面说明](apps/desktop/README.md) · [文档索引](docs/README.md) · [更新日志](CHANGELOG.md)
 - 版本规范见 [版本约定](VERSIONING.md)，使用根 `VERSION` 与 `scripts/version.py` 统一同步桌面应用与共享 Rust crates。
 
 ## 许可与来源

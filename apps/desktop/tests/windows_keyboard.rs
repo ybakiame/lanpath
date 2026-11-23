@@ -14,7 +14,7 @@ fn windows_tab_space_and_enter_activate_the_shared_button() {
     let mut config = EngineConfig {
         storage: Some(common::MemoryStorage::new(entries)),
         viewport: Size::new(Points(1180.0), Points(800.0)),
-        ..EngineConfig::new(lanpath_desktop_nsh::root())
+        ..EngineConfig::new(lanpath::root())
     };
     config.environment.os = Os::Windows;
     config.environment.idiom = Idiom::Desktop;

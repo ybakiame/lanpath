@@ -73,7 +73,7 @@ use backup_view::backup_page;
 use core_view::core_page;
 
 // NSH CLI 的 describe/test 需要 UI set 元数据；原生启动仍使用下方 Rust root。
-#[native_module("lanpath-desktop/native")]
+#[native_module("lanpath/native")]
 fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
@@ -89,7 +89,7 @@ pub fn prepare_native_data_dir() -> lanpath_common::LanpathResult<std::path::Pat
 pub fn root() -> Root {
     let translations = i18n::translations().expect("embedded locales must parse");
     Root::of::<App>()
-        .app_id("com.ybakiame.lanpath.desktop.nsh")
+        .app_id("com.ybakiame.lanpath")
         .main_window_json(&launch_window_json())
         .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Lanpath))
         .translations(translations)
@@ -99,7 +99,7 @@ pub fn root() -> Root {
 pub fn gallery_root() -> Root {
     let translations = i18n::translations().expect("embedded locales must parse");
     Root::of::<ui::gallery::Gallery>()
-        .app_id("com.ybakiame.lanpath.desktop.nsh")
+        .app_id("com.ybakiame.lanpath")
         .main_window_json(&launch_window_json())
         .tokens(ui::theme::theme_tokens(ui::theme::ThemeId::Lanpath))
         .translations(translations)

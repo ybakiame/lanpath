@@ -73,7 +73,7 @@ impl CoreRuntime {
         let spawner = self.proxy_spawner();
         if !spawner.supported() {
             if enabled {
-                tracing::info!(target: "lanpath_desktop_nsh::core_runtime",
+                tracing::info!(target: "lanpath::core_runtime",
                     "当前平台不支持系统代理守护；已保存偏好本次不生效（不接管）");
             }
             return Ok(());
@@ -111,7 +111,7 @@ impl CoreRuntime {
     /// UI 确认框确认：授予进程内一次性接管授权（不持久化，重启即失效）。
     pub(crate) fn grant_takeover_consent(&self) {
         self.proxy_takeover_consent.store(true, Ordering::Release);
-        tracing::info!(target: "lanpath_desktop_nsh::core_runtime",
+        tracing::info!(target: "lanpath::core_runtime",
             "已收到一次性显式接管授权（仅本进程，不持久化）");
     }
 

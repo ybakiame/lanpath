@@ -25,9 +25,9 @@ mod wire;
 #[cfg(windows)]
 pub(crate) use launch::Guardian;
 
-/// 管道名前缀：NSH 桌面独立身份（区别于 GPUI 的 `LanpathGPUI-Proxy-`）。
+/// 管道名前缀：Lanpath 系统代理守护独立命名空间。
 #[cfg(any(windows, test))]
-pub(super) const PIPE_PREFIX: &str = r"\\.\pipe\LanpathNSH-Proxy-";
+pub(super) const PIPE_PREFIX: &str = r"\\.\pipe\Lanpath-Proxy-";
 
 /// Called by the binary before entering any NSH/GUI/storage/logger startup path.
 /// A failed/refused recovery leaves the protected journal for explicit recovery.

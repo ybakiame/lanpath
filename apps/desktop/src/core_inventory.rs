@@ -43,7 +43,7 @@ use crate::request_settings::load_request_config;
 pub(crate) const API_BASE_ENV: &str = "LANPATH_DESKTOP_CORE_API_BASE";
 /// 宿主/测试可预置的 release metadata API storage 键（headless 场景经
 /// 内存 storage 预置，每场景独立）。
-pub(crate) const API_BASE_STORAGE_KEY: &str = "lanpath_desktop_nsh.core_api_base";
+pub(crate) const API_BASE_STORAGE_KEY: &str = "lanpath.core_api_base";
 /// mutation 在途时的共享拒绝文案（业务测试与页面断言同一子串）。
 pub(crate) const MUTATION_BUSY: &str = "另一项核心库存操作正在进行，请稍后重试";
 
@@ -274,7 +274,7 @@ impl CoreInventory {
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
         let _activity = self.begin_activity(InventoryActivityKind::Select);
-        tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "选择核心：{core_type}");
+        tracing::info!(target: "lanpath::core_inventory", "选择核心：{core_type}");
         self.service.for_core(core_type).select(path)
     }
 
@@ -297,7 +297,7 @@ impl CoreInventory {
         self.root.ensure_writable()?;
         let _mutation = self.try_mutation()?;
         self.ensure_not_running()?;
-        tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心：{core_type} {version}");
+        tracing::info!(target: "lanpath::core_inventory", "下载核心：{core_type} {version}");
         let service = self.service.for_core(core_type);
         let activity = self.begin_activity(InventoryActivityKind::Download);
         let report = |stage: CoreDownloadStage| {
@@ -305,7 +305,7 @@ impl CoreInventory {
             progress(stage);
         };
         let installed = service.download_with_progress(version, &report).await?;
-        tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "下载核心完成：{} {}", installed.core_type(), installed.version());
+        tracing::info!(target: "lanpath::core_inventory", "下载核心完成：{} {}", installed.core_type(), installed.version());
         Ok(installed)
     }
 
@@ -317,7 +317,7 @@ impl CoreInventory {
         let _guard = self.root.business_guard();
         self.root.ensure_writable()?;
         let _activity = self.begin_activity(InventoryActivityKind::Delete);
-        tracing::info!(target: "lanpath_desktop_nsh::core_inventory", "删除核心：{core_type}");
+        tracing::info!(target: "lanpath::core_inventory", "删除核心：{core_type}");
         self.service.for_core(core_type).delete(path)
     }
 }

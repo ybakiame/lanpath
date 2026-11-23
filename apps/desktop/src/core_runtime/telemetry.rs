@@ -44,7 +44,7 @@ impl CoreRuntime {
             Ok(store) => Some(store),
             Err(error) => {
                 tracing::warn!(
-                    target: "lanpath_desktop_nsh::core_runtime",
+                    target: "lanpath::core_runtime",
                     %error,
                     "打开流量统计库失败，连接追踪仅保留内存快照"
                 );

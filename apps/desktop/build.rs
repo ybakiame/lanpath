@@ -12,8 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut resource = winres::WindowsResource::new();
         resource.set_icon("../../assets/icons/icon.ico");
         resource.set("ProductName", "Lanpath");
-        resource.set("FileDescription", "Lanpath NSH Desktop");
-        resource.set("OriginalFilename", "lanpath-desktop-nsh.exe");
+        resource.set("FileDescription", "Lanpath");
+        resource.set("OriginalFilename", "lanpath.exe");
         resource.set("CompanyName", "Lanpath Contributors");
         resource.set("ProductVersion", &version);
         resource.set("FileVersion", &version);

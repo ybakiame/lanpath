@@ -96,8 +96,8 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let (writer, guard) = DiskLogWriter::new(temporary.path()).unwrap();
 
-        writer.record("INFO", "lanpath_desktop_nsh::test", "磁盘写入验证消息");
-        writer.record("ERROR", "lanpath_desktop_nsh::test", "磁盘错误验证消息");
+        writer.record("INFO", "lanpath::test", "磁盘写入验证消息");
+        writer.record("ERROR", "lanpath::test", "磁盘错误验证消息");
         assert!(writer.error().is_none());
         // WorkerGuard 落盘并停止后台线程；生产路径由 LogService 持有并在退出时丢弃。
         drop(guard);
@@ -117,8 +117,8 @@ mod tests {
                 .path(),
         )
         .unwrap();
-        assert!(content.contains("INFO lanpath_desktop_nsh::test: 磁盘写入验证消息"));
-        assert!(content.contains("ERROR lanpath_desktop_nsh::test: 磁盘错误验证消息"));
+        assert!(content.contains("INFO lanpath::test: 磁盘写入验证消息"));
+        assert!(content.contains("ERROR lanpath::test: 磁盘错误验证消息"));
         assert!(content.lines().count() == 2);
     }
 

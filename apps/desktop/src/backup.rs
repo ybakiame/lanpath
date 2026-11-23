@@ -78,7 +78,7 @@ impl Backup {
             ));
         }
         let bytes = self.service.export(password, None)?;
-        tracing::info!(target: "lanpath_desktop_nsh::backup",
+        tracing::info!(target: "lanpath::backup",
             "导出加密备份完成：{} 字节", bytes.len());
         Ok(bytes)
     }
@@ -98,7 +98,7 @@ impl Backup {
             let _ = std::fs::remove_file(&target);
             return Err(export_error(&target, &error));
         }
-        tracing::info!(target: "lanpath_desktop_nsh::backup",
+        tracing::info!(target: "lanpath::backup",
             "加密备份已写出：{}", target.display());
         Ok(target)
     }
@@ -133,7 +133,7 @@ impl Backup {
         password: String,
     ) -> LanpathResult<BackupPreview> {
         let preview = self.service.inspect(encrypted, password)?;
-        tracing::info!(target: "lanpath_desktop_nsh::backup",
+        tracing::info!(target: "lanpath::backup",
             "备份解密预览完成：订阅 {} · 覆写 {} · 文件 {} · {} 字节",
             preview.summary.subscriptions, preview.summary.profiles, preview.summary.files, preview.summary.bytes);
         Ok(preview)
@@ -164,7 +164,7 @@ impl Backup {
     /// 用户已看到恢复提示：清除 `.backup-applied.json` / `.backup-failed`。
     pub(crate) fn acknowledge(&self) -> LanpathResult<()> {
         self.service.acknowledge()?;
-        tracing::info!(target: "lanpath_desktop_nsh::backup", "恢复提示已确认");
+        tracing::info!(target: "lanpath::backup", "恢复提示已确认");
         Ok(())
     }
 
@@ -209,7 +209,7 @@ impl Backup {
             let _business = self.root.business_guard();
             PathBuf::from(input.prepare(self.root.path(), None)?)
         };
-        tracing::info!(target: "lanpath_desktop_nsh::backup",
+        tracing::info!(target: "lanpath::backup",
             "恢复准备完成，重启后生效；回滚备份：{}", rollback.display());
         Ok(rollback)
     }

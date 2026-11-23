@@ -13,7 +13,7 @@ use nsh_platform_windows as platform;
 fn main() -> std::process::ExitCode {
     // 独立系统代理守护分派：必须在任何 NSH/GUI/存储/env_logger 初始化前
     // 完成；失败非 0 退出且不留新 GUI（非 Windows 明确不支持）。
-    if let Some(code) = lanpath_desktop_nsh::proxy_guardian::dispatch_from_env() {
+    if let Some(code) = lanpath::proxy_guardian::dispatch_from_env() {
         return std::process::ExitCode::from(code as u8);
     }
     if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
@@ -26,7 +26,7 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
     env_logger::init();
-    let data_dir = match lanpath_desktop_nsh::prepare_native_data_dir() {
+    let data_dir = match lanpath::prepare_native_data_dir() {
         Ok(path) => path,
         Err(error) => {
             eprintln!("Lanpath 数据目录初始化失败：{error}");
@@ -36,11 +36,11 @@ fn main() -> std::process::ExitCode {
     // `--ui-gallery`：仅开发验收的组件画廊（普通用户导航没有入口）。
     let gallery = std::env::args().any(|arg| arg == "--ui-gallery");
     let root = if gallery {
-        lanpath_desktop_nsh::gallery_root()
+        lanpath::gallery_root()
     } else {
-        lanpath_desktop_nsh::root()
+        lanpath::root()
     };
-    let storage = match lanpath_desktop_nsh::AppStorage::open(&data_dir) {
+    let storage = match lanpath::AppStorage::open(&data_dir) {
         Ok(storage) => storage,
         Err(error) => {
             eprintln!("Lanpath 界面配置初始化失败：{error}");
@@ -50,9 +50,9 @@ fn main() -> std::process::ExitCode {
     platform::run_app(
         platform::AppSource::Rust(root),
         platform::AppOptions {
-            title: "Lanpath NSH Desktop".to_owned(),
+            title: "Lanpath".to_owned(),
             #[cfg(any(target_os = "linux", target_os = "windows"))]
-            app_id: "com.ybakiame.lanpath.desktop.nsh".to_owned(),
+            app_id: "com.ybakiame.lanpath".to_owned(),
             size: (1180, 800),
             cache: platform::CacheOptions::at(platform::CacheLocation::Dir(
                 data_dir.join(".cache/nsh"),

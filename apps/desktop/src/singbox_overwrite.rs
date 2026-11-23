@@ -117,7 +117,7 @@ impl SingboxOverwriteService {
         let formatted = self.store().load_raw(kind)?;
         let customized = value != default_slice_value(kind);
         tracing::info!(
-            target: "lanpath_desktop_nsh::singbox_overwrite",
+            target: "lanpath::singbox_overwrite",
             "已保存配置切片：{}",
             kind.file_name()
         );
@@ -134,7 +134,7 @@ impl SingboxOverwriteService {
         self.root.ensure_writable()?;
         let raw = self.store().reset_slice(kind)?;
         tracing::info!(
-            target: "lanpath_desktop_nsh::singbox_overwrite",
+            target: "lanpath::singbox_overwrite",
             "已重置配置切片为默认：{}",
             kind.file_name()
         );
@@ -215,7 +215,7 @@ impl SingboxOverwriteService {
             .clone_from(&bindings.clash_api_secret);
         config.save()?;
         tracing::info!(
-            target: "lanpath_desktop_nsh::singbox_overwrite",
+            target: "lanpath::singbox_overwrite",
             "已保存受管端口与控制 API：mixed={} clash_api_enabled={} api_port={}",
             config.mixed_port,
             config.clash_api_enabled,

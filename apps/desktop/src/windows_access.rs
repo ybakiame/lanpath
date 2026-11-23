@@ -180,13 +180,13 @@ pub(crate) fn ensure_unelevated() -> lanpath_common::LanpathResult<()> {
     }
     if returned != size_of::<TOKEN_ELEVATION>() as u32 || elevation.TokenIsElevated != 0 {
         return Err(lanpath_common::LanpathError::Config(
-            "Lanpath NSH Desktop 与系统代理守护必须以普通用户权限运行。请关闭此窗口，从资源管理器正常启动 Lanpath NSH Desktop，不要使用“以管理员身份运行”。".into(),
+            "Lanpath 与系统代理守护必须以普通用户权限运行。请关闭此窗口，从资源管理器正常启动 Lanpath，不要使用“以管理员身份运行”。".into(),
         ));
     }
     Ok(())
 }
 
-pub(crate) fn private_root(path: &Path) -> io::Result<DirectoryLocks> {
+pub(crate) fn private_root(path: &Path, initialize: bool) -> io::Result<DirectoryLocks> {
     let user = UserSid::current()?;
     let sid = user.text()?;
     let descriptor = Descriptor::new(&format!(
@@ -210,9 +210,10 @@ pub(crate) fn private_root(path: &Path) -> io::Result<DirectoryLocks> {
     if !directories.supports_private_acls(existing)? {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "NSH 桌面数据需要具备持久私有 ACL 的文件系统；请使用当前用户私有目录",
+            "Lanpath 数据目录需要具备持久私有 ACL 的文件系统；请使用 NTFS 目录",
         ));
     }
+    let created_root = !missing.is_empty();
     for directory in missing.into_iter().rev() {
         let wide: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
         if unsafe { CreateDirectoryW(wide.as_ptr(), &descriptor.attributes()) } == 0
@@ -227,8 +228,42 @@ pub(crate) fn private_root(path: &Path) -> io::Result<DirectoryLocks> {
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?;
+    // 预先创建的空目录（如便携模式解压出的 `data/`）可能继承了磁盘根目录的
+    // 宽泛权限；初始化空目录前主动收紧为当前用户私有 DACL。
+    if initialize && !created_root {
+        apply_private_dacl(&root, &descriptor)?;
+    }
     validate_user_root(&root, &user, true)?;
     Ok(directories)
+}
+
+fn apply_private_dacl(file: &File, descriptor: &Descriptor) -> io::Result<()> {
+    let mut present = 0;
+    let mut defaulted = 0;
+    let mut dacl = ptr::null_mut();
+    if unsafe {
+        GetSecurityDescriptorDacl(descriptor.as_raw(), &mut present, &mut dacl, &mut defaulted)
+    } == 0
+        || present == 0
+        || dacl.is_null()
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let status = unsafe {
+        SetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            dacl,
+            ptr::null_mut(),
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    Ok(())
 }
 
 fn validate_user_root(file: &File, user: &UserSid, freeze_inheritance: bool) -> io::Result<()> {
@@ -288,7 +323,7 @@ fn validate_user_root(file: &File, user: &UserSid, freeze_inheritance: bool) -> 
         if !trusted && !creator_owner {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "Windows 数据根授予了其他账户访问权限；请使用私有 NSH 桌面目录",
+                "Windows 数据根授予了其他账户访问权限；请使用当前用户私有目录",
             ));
         }
     }

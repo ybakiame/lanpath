@@ -46,7 +46,7 @@ fn compiled_hero_aura() -> Option<Shader> {
             Ok(compiled) => Some(compiled),
             Err(error) => {
                 tracing::warn!(
-                    target: "lanpath_desktop_nsh::overview_visuals",
+                    target: "lanpath::overview_visuals",
                     %error,
                     "概览氛围着色器编译失败，已降级为静态卡片表面"
                 );

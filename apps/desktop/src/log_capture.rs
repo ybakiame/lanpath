@@ -55,7 +55,10 @@ pub(crate) fn install() {
         let _ = tracing_subscriber::registry()
             .with(
                 CaptureLayer.with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-                    metadata.target().starts_with("lanpath_")
+                    let target = metadata.target();
+                    target == "lanpath"
+                        || target.starts_with("lanpath::")
+                        || target.starts_with("lanpath_")
                 })),
             )
             .try_init();
@@ -172,7 +175,7 @@ mod tests {
 
         let unique = format!("capture-unique-{}", std::process::id());
         tracing::info!(target: "other_crate::noise", "应被过滤 {unique}");
-        tracing::warn!(target: "lanpath_desktop_nsh::capture_test", "{unique}");
+        tracing::warn!(target: "lanpath::capture_test", "{unique}");
         tracing::error!(target: "lanpath_capture_test", "second {unique}");
 
         let snapshot = sink.buffer.snapshot(None, 0, LOG_CAPACITY).unwrap();

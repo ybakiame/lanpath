@@ -6,7 +6,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const FILE: &str = ".lanpath-desktop-nsh-root-id";
+const FILE: &str = ".lanpath-root-id";
 
 pub(super) fn load_or_create(root: &Path) -> LanpathResult<Uuid> {
     let path = root.join(FILE);

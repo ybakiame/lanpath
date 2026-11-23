@@ -1,5 +1,5 @@
 [package]
-name = "lanpath-desktop-nsh"
+name = "lanpath"
 version = "0.2.1-rc.2"
 edition = "2024"
 publish = false
@@ -11,6 +11,7 @@ nsh-core = "0.6.0"
 nsh-base = "0.6.0"
 chrono = "0.4"
 env_logger = "0.11"
+etcetera = "0.11"
 lanpath-client = { path = "../../crates/lanpath-client" }
 lanpath-common = { path = "../../crates/lanpath-common" }
 lanpath-engine = { path = "../../crates/lanpath-engine" }

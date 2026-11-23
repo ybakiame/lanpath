@@ -3,7 +3,7 @@
 //! JSON 回指本服务器资产 + 真实 tar.gz 归档），不依赖互联网；Unix 用脚本
 //! 核心做真实 version probe，Windows 原生验收由主代理执行。每个场景独立
 //! 临时数据根；release metadata API 经 storage 键
-//! `lanpath_desktop_nsh.core_api_base` 注入（生产默认 GitHub）。
+//! `lanpath.core_api_base` 注入（生产默认 GitHub）。
 
 mod common;
 
@@ -18,7 +18,7 @@ use lanpath_client::ClientConfig;
 use lanpath_client::RequestProxyMode;
 use lanpath_common::CoreType;
 
-const API_BASE_KEY: &str = "lanpath_desktop_nsh.core_api_base";
+const API_BASE_KEY: &str = "lanpath.core_api_base";
 
 fn open_core_page(app: &mut nsh_testing::Headless) {
     common::navigate(app, "核心");
@@ -623,7 +623,7 @@ fn cancelling_proxy_enable_confirmation_writes_nothing() {
     let mut app = start_app(entries.clone()).0;
     common::wait_ready(&mut app);
     open_core_page(&mut app);
-    let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
+    let config = std::path::Path::new(&entries["lanpath.data_dir"]).join("app.toml");
     let before = std::fs::read(&config).expect("read app.toml");
 
     app.press("id:proxy-toggle >> role:switch").unwrap();
@@ -652,7 +652,7 @@ fn confirming_proxy_enable_saves_preference_only() {
     let mut app = start_app(entries.clone()).0;
     common::wait_ready(&mut app);
     open_core_page(&mut app);
-    let config = std::path::Path::new(&entries["lanpath_desktop_nsh.data_dir"]).join("app.toml");
+    let config = std::path::Path::new(&entries["lanpath.data_dir"]).join("app.toml");
 
     app.press("id:proxy-toggle >> role:switch").unwrap();
     app.wait_for("启用系统代理接管？").unwrap();

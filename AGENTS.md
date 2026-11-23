@@ -30,9 +30,8 @@ Android 原生库改动构建 `mobile/android`；Go 绑定改动先重新构建 
 
 Android 后续仍复用 Kotlin VpnService 与 Go/libbox。
 
-`apps/desktop` 为 `nsh` 分支上的正式 NSH 桌面目标：纯 Rust NSH 0.6.0、独立 Cargo
-项目与独立应用身份 `com.ybakiame.lanpath.desktop.nsh`，不读取/迁移旧版客户端数据；
-核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback）。Windows 系统代理经本任务授权的
+`apps/desktop` 为正式桌面目标（包名/可执行文件 `lanpath`）：纯 Rust NSH 0.6.0、独立 Cargo
+项目与应用身份 `com.ybakiame.lanpath`；核心仅做用户态二进制校验与启停（mixed/Clash API 限 loopback）。Windows 系统代理经本任务授权的
 独立普通权限同映像守护精确接管/恢复（owner 为本数据根 UUID，GUI 侧绝不直写注册表；接管失败
 保留核心与恢复证据，停止先守护恢复再停核心）；不接管 TUN/VPN，不安装服务/启动项，不经 TUN
 helper。

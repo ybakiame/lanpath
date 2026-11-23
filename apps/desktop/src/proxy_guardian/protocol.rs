@@ -103,7 +103,7 @@ mod tests {
             "123",
             "456",
             "4",
-            r"\\.\pipe\LanpathNSH-Proxy-51f4c1e1-40ad-4d1f-b4fc-d33f99819aa0",
+            r"\\.\pipe\Lanpath-Proxy-51f4c1e1-40ad-4d1f-b4fc-d33f99819aa0",
         ]
         .into_iter()
         .map(OsString::from)
@@ -118,7 +118,7 @@ mod tests {
         let mut parent = ProcessIdentity {
             pid: 123,
             created: 456,
-            exe: "lanpath-desktop-nsh.exe".into(),
+            exe: "lanpath.exe".into(),
         };
         args.validate_parent(&parent).unwrap();
         parent.created += 1;

@@ -98,7 +98,7 @@ pub(crate) fn startup_failure(error: Signal<Option<String>>) -> impl IntoElement
         .bg(ui::prefs::window_bg)
         .text_color(move || theme().foreground)
         .child(
-            text("Lanpath NSH Desktop")
+            text("Lanpath")
                 .text_size(px(24.0))
                 .font_weight(FontWeight::SEMIBOLD),
         )

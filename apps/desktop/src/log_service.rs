@@ -166,7 +166,7 @@ mod tests {
         let service = LogService::for_root(temporary.path()).unwrap();
         assert!(service.disk_error().is_none());
         assert!(service.disk_reader().is_some());
-        service.record("INFO", "lanpath_desktop_nsh::test", "服务记录验证消息");
+        service.record("INFO", "lanpath::test", "服务记录验证消息");
 
         let snapshot = service.buffer().snapshot(None, 0, 1000).unwrap();
         assert!(
@@ -189,14 +189,14 @@ mod tests {
             .unwrap()
             .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
             .collect::<String>();
-        assert!(content.contains("INFO lanpath_desktop_nsh::test: 服务记录验证消息"));
+        assert!(content.contains("INFO lanpath::test: 服务记录验证消息"));
     }
 
     #[test]
     fn reopening_the_same_root_reuses_the_service_and_its_buffer() {
         let temporary = tempfile::tempdir().unwrap();
         let first = LogService::for_root(temporary.path()).unwrap();
-        first.record("WARN", "lanpath_desktop_nsh::test", "跨句保留消息");
+        first.record("WARN", "lanpath::test", "跨句保留消息");
         let reopened = LogService::for_root(temporary.path()).unwrap();
         assert!(Arc::ptr_eq(&first, &reopened));
         let snapshot = reopened.buffer().snapshot(None, 0, 1000).unwrap();
@@ -218,8 +218,8 @@ mod tests {
     fn export_concatenates_real_bytes_and_never_overwrites() {
         let temporary = tempfile::tempdir().unwrap();
         let service = LogService::for_root(temporary.path()).unwrap();
-        service.record("INFO", "lanpath_desktop_nsh::test", "导出验证消息甲");
-        service.record("ERROR", "lanpath_desktop_nsh::test", "导出验证消息乙");
+        service.record("INFO", "lanpath::test", "导出验证消息甲");
+        service.record("ERROR", "lanpath::test", "导出验证消息乙");
         drop(service);
 
         let service = LogService::for_root(temporary.path()).unwrap();
@@ -254,7 +254,7 @@ mod tests {
     fn disk_reader_lists_and_tails_only_own_log_files() {
         let temporary = tempfile::tempdir().unwrap();
         let service = LogService::for_root(temporary.path()).unwrap();
-        service.record("INFO", "lanpath_desktop_nsh::test", "尾部读取验证");
+        service.record("INFO", "lanpath::test", "尾部读取验证");
         drop(service);
 
         let service = LogService::for_root(temporary.path()).unwrap();

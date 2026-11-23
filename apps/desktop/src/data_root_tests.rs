@@ -1,4 +1,4 @@
-use super::location::{DataLocation, absolute_environment_directory};
+use super::location::DataLocation;
 use super::*;
 use std::process::Command;
 
@@ -63,7 +63,7 @@ fn incorrect_marker_and_marker_directories_do_not_authorize_writes() {
     for content in [
         b"".as_slice(),
         b"another application",
-        b"lanpath-desktop-nsh-data-root-v2\n",
+        b"lanpath-data-root-v2\n",
     ] {
         let temporary = tempfile::tempdir().unwrap();
         fs::write(temporary.path().join(OWNER_FILE), content).unwrap();
@@ -82,60 +82,6 @@ fn incorrect_marker_and_marker_directories_do_not_authorize_writes() {
         entries(temporary.path()),
         vec![std::ffi::OsString::from(OWNER_FILE)]
     );
-}
-
-#[test]
-fn production_and_sibling_app_ancestors_are_rejected_before_creating_descendants() {
-    for production in [
-        ".lanpath",
-        ".LANPATH",
-        ".proxy-panel-client",
-        "com.ybakiame.lanpath",
-        "LanpathGPUI",
-        "lanpathgpui",
-        "com.ybakiame.lanpath.nsh",
-    ] {
-        let temporary = tempfile::tempdir().unwrap();
-        let production = temporary.path().join(production);
-        let target = production.join("desktop-nsh/child");
-        assert!(DataRoot::open(&target).is_err());
-        assert!(!production.exists());
-    }
-    for marker in ["client.json", "lanpath.portable"] {
-        let temporary = tempfile::tempdir().unwrap();
-        // 故意损坏的业务数据：准入只使用元数据，绝不解析或迁移生产配置。
-        fs::write(temporary.path().join(marker), b"do not read or rewrite").unwrap();
-        let before = entries(temporary.path());
-        assert!(DataRoot::open(&temporary.path().join("new/child")).is_err());
-        assert_eq!(entries(temporary.path()), before);
-        assert_eq!(
-            fs::read(temporary.path().join(marker)).unwrap(),
-            b"do not read or rewrite"
-        );
-    }
-}
-
-#[test]
-fn portable_layout_without_marker_is_still_production() {
-    let temporary = tempfile::tempdir().unwrap();
-    fs::write(temporary.path().join("Lanpath.exe"), b"binary").unwrap();
-    fs::create_dir(temporary.path().join("data")).unwrap();
-    fs::create_dir(temporary.path().join("seed")).unwrap();
-    let before = entries(temporary.path());
-    assert!(DataRoot::open(&temporary.path().join("data/desktop-nsh")).is_err());
-    assert_eq!(entries(temporary.path()), before);
-    assert!(entries(&temporary.path().join("data")).is_empty());
-}
-
-#[test]
-fn correct_desktop_marker_does_not_override_production_ancestry() {
-    let temporary = tempfile::tempdir().unwrap();
-    let target = temporary.path().join(".lanpath/desktop-nsh");
-    fs::create_dir_all(&target).unwrap();
-    fs::write(target.join(OWNER_FILE), OWNER_CONTENT).unwrap();
-    let before = entries(&target);
-    assert!(DataRoot::open(&target).is_err());
-    assert_eq!(entries(&target), before);
 }
 
 #[test]
@@ -324,17 +270,6 @@ fn nested_links_and_hardlinked_regular_files_cannot_escape_isolation() {
         assert!(DataRoot::open(temporary.path()).is_err());
         assert_eq!(fs::read(&external_file).unwrap(), b"untouched");
     }
-}
-
-#[test]
-fn persistent_environment_paths_must_be_absolute() {
-    assert!(absolute_environment_directory("TEST", "".into()).is_err());
-    assert!(absolute_environment_directory("TEST", "relative/path".into()).is_err());
-    let temporary = tempfile::tempdir().unwrap();
-    assert_eq!(
-        absolute_environment_directory("TEST", temporary.path().as_os_str().into()).unwrap(),
-        temporary.path()
-    );
 }
 
 #[test]

@@ -1,15 +1,27 @@
-//! 启动时选择数据目录；原生业务、NSH 偏好和缓存使用同一隔离根。
-use super::{check_regular_file, invalid, metadata_if_present, open_root};
+//! 启动时选择数据目录；业务配置、界面偏好和缓存使用同一隔离根。
+//!
+//! 优先级：`LANPATH_DATA_DIR` 显式覆盖，其次为程序同级存在且可写的 `data/`
+//! （便携模式），否则回退到 `etcetera` 平台原生标准数据目录（Windows
+//! `%APPDATA%\Lanpath`、macOS `~/Library/Application Support/Lanpath`、Linux
+//! `$XDG_DATA_HOME/lanpath`）。
+use super::{invalid, is_link, metadata_if_present, open_root};
+use etcetera::base_strategy::{BaseStrategy, choose_native_strategy};
 use lanpath_common::LanpathResult;
 use std::{
+    fs::{self, OpenOptions},
+    io::ErrorKind,
     path::{Component, Path, PathBuf},
     sync::OnceLock,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(super) const PORTABLE_MARKER: &str = "lanpath.portable";
-const DATA_DIR_ENV: &str = "LANPATH_DESKTOP_DATA_DIR";
-const DATA_DIR_STORAGE_KEY: &str = "lanpath_desktop_nsh.data_dir";
-const DATA_DIR_NAME: &str = "lanpath-desktop-nsh";
+pub(super) const PORTABLE_DIR_NAME: &str = "data";
+const DATA_DIR_ENV: &str = "LANPATH_DATA_DIR";
+const DATA_DIR_STORAGE_KEY: &str = "lanpath.data_dir";
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+const APP_DIR_NAME: &str = "Lanpath";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const APP_DIR_NAME: &str = "lanpath";
 static NATIVE_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone)]
@@ -25,7 +37,7 @@ impl DataLocation {
                     || path.components().any(|part| part == Component::ParentDir)
                 {
                     return Err(invalid(
-                        "显式 NSH 桌面数据路径必须非空且不含 '..'（LANPATH_DESKTOP_DATA_DIR）",
+                        "显式 Lanpath 数据路径必须非空且不含 '..'（LANPATH_DATA_DIR）",
                     ));
                 }
                 std::path::absolute(path)?
@@ -35,8 +47,8 @@ impl DataLocation {
                 let directory = executable
                     .parent()
                     .ok_or_else(|| invalid("无法确定程序所在目录"))?;
-                if portable_marker(directory)? {
-                    directory.join("data")
+                if let Some(portable) = portable_data_dir(directory)? {
+                    portable
                 } else {
                     default_data_dir()?
                 }
@@ -46,27 +58,47 @@ impl DataLocation {
     }
 }
 
-fn portable_marker(directory: &Path) -> LanpathResult<bool> {
-    let marker = directory.join(PORTABLE_MARKER);
-    if metadata_if_present(&marker)?.is_none() {
-        return Ok(false);
+/// 当程序同级存在普通的 `data/` 目录且当前进程具备写入权限时，启用便携模式；
+/// 不存在、不是普通目录或不可写时回退到平台标准数据目录。
+fn portable_data_dir(directory: &Path) -> LanpathResult<Option<PathBuf>> {
+    let candidate = directory.join(PORTABLE_DIR_NAME);
+    let Some(metadata) = metadata_if_present(&candidate)? else {
+        return Ok(None);
+    };
+    if is_link(&metadata) || !metadata.is_dir() {
+        return Ok(None);
     }
-    if check_regular_file(&marker)?.len() != 0 {
-        return Err(invalid("lanpath.portable 必须是空的普通文件"));
+    if !is_writable_directory(&candidate) {
+        return Ok(None);
     }
-    Ok(true)
+    Ok(Some(candidate))
 }
 
-/// 只为当前进程所在目录的标记放行，外来便携目录仍属于受保护祖先。
-pub(super) fn is_own_portable_directory(directory: &Path) -> LanpathResult<bool> {
-    let executable = std::env::current_exe()?;
-    let Some(parent) = executable.parent() else {
-        return Ok(false);
-    };
-    if parent.canonicalize()? != directory.canonicalize()? {
-        return Ok(false);
+fn is_writable_directory(directory: &Path) -> bool {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let probe = directory.join(format!(
+        ".lanpath-write-probe-{}-{nonce}",
+        std::process::id()
+    ));
+    match OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(file) => {
+            drop(file);
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem
+            ) =>
+        {
+            false
+        }
+        Err(_) => false,
     }
-    portable_marker(directory)
 }
 
 /// 原生启动在 NSH storage 初始化前准入；本次进程固定该根，不再读取旧 storage 路径。
@@ -103,35 +135,13 @@ pub(crate) fn resolve_data_location() -> LanpathResult<DataLocation> {
 }
 
 pub(super) fn default_data_dir() -> LanpathResult<PathBuf> {
-    #[cfg(windows)]
-    {
-        Ok(environment_directory("LOCALAPPDATA")?.join(DATA_DIR_NAME))
+    let strategy = choose_native_strategy()
+        .map_err(|error| invalid(format!("无法定位平台标准数据目录: {error}")))?;
+    let dir = strategy.data_dir().join(APP_DIR_NAME);
+    if !dir.is_absolute() {
+        return Err(invalid("平台标准数据目录必须是绝对路径"));
     }
-    #[cfg(not(windows))]
-    {
-        let base = match std::env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
-            Some(value) => absolute_environment_directory("XDG_DATA_HOME", value)?,
-            None => environment_directory("HOME")?.join(".local/share"),
-        };
-        Ok(base.join(DATA_DIR_NAME))
-    }
-}
-
-fn environment_directory(name: &str) -> LanpathResult<PathBuf> {
-    let value = std::env::var_os(name)
-        .ok_or_else(|| invalid(format!("{name} 是持久化 NSH 桌面数据目录的必需环境变量")))?;
-    absolute_environment_directory(name, value)
-}
-
-pub(super) fn absolute_environment_directory(
-    name: &str,
-    value: std::ffi::OsString,
-) -> LanpathResult<PathBuf> {
-    let path = PathBuf::from(value);
-    if !path.is_absolute() {
-        return Err(invalid(format!("{name} 必须是绝对路径目录")));
-    }
-    Ok(path)
+    Ok(dir)
 }
 
 #[cfg(test)]

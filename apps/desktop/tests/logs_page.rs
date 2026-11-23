@@ -11,7 +11,7 @@ use std::time::Duration;
 use common::{data_root, start_app, texts};
 use nsh_testing::Headless;
 
-const TARGET: &str = "lanpath_desktop_nsh::headless_test";
+const TARGET: &str = "lanpath::headless_test";
 
 fn emit_debug(message: &str) {
     tracing::debug!(target: TARGET, "{message}");

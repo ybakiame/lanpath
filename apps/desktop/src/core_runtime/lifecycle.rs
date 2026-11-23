@@ -35,7 +35,7 @@ impl CoreRuntime {
                 .await
                 {
                     tracing::debug!(
-                        target: "lanpath_desktop_nsh::core_runtime",
+                        target: "lanpath::core_runtime",
                         group,
                         member,
                         %error,
@@ -58,7 +58,7 @@ impl CoreRuntime {
         match manager.stop_process().await {
             Ok(_) => original,
             Err(recovery) => {
-                tracing::error!(target: "lanpath_desktop_nsh::core_runtime",
+                tracing::error!(target: "lanpath::core_runtime",
                     "启动失败且回收未完成：{original}；回收错误：{recovery}");
                 **slot = Some(manager);
                 LanpathError::Core(format!(
@@ -87,7 +87,7 @@ impl CoreRuntime {
         self.phase.store(PHASE_IDLE, Ordering::Release);
         self.clear_stage();
         if let Ok(kind) = result {
-            tracing::info!(target: "lanpath_desktop_nsh::core_runtime", "核心已停止：{kind:?}");
+            tracing::info!(target: "lanpath::core_runtime", "核心已停止：{kind:?}");
         }
         result
     }
@@ -133,7 +133,7 @@ impl Drop for CoreRuntime {
             if let Some(armed) = guardian.as_mut()
                 && let Err(error) = armed.shutdown()
             {
-                tracing::warn!(target: "lanpath_desktop_nsh::core_runtime",
+                tracing::warn!(target: "lanpath::core_runtime",
                     "退出时系统代理守护恢复未完成（守护自行恢复/下次启动重试）：{error}");
             }
             *guardian = None;
@@ -150,10 +150,10 @@ impl Drop for CoreRuntime {
         if let Some(identity) = identity {
             match identity.terminate_verified() {
                 Ok(kind) => {
-                    tracing::info!(target: "lanpath_desktop_nsh::core_runtime", "核心随运行时释放回收：{kind:?}")
+                    tracing::info!(target: "lanpath::core_runtime", "核心随运行时释放回收：{kind:?}")
                 }
                 Err(error) => {
-                    tracing::warn!(target: "lanpath_desktop_nsh::core_runtime",
+                    tracing::warn!(target: "lanpath::core_runtime",
                         "核心回收未完成（依赖 OS 父子绑定兜底）：{error}")
                 }
             }

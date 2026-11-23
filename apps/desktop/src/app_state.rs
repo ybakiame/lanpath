@@ -48,7 +48,7 @@ pub(crate) fn install(startup_ready: bool) {
                 state
                     .command
                     .update(|command| command.error = Some(CommandError::RuntimeUnavailable));
-                tracing::error!(target: "lanpath_desktop_nsh::app_state",
+                tracing::error!(target: "lanpath::app_state",
                     "打开核心运行时失败：{error}");
             }
         }
@@ -56,7 +56,7 @@ pub(crate) fn install(startup_ready: bool) {
             Ok(inventory) => state.inventory = Some(inventory),
             Err(error) => {
                 state.core_error.set(Some(error.to_string()));
-                tracing::error!(target: "lanpath_desktop_nsh::app_state",
+                tracing::error!(target: "lanpath::app_state",
                     "打开核心库存失败：{error}");
             }
         }
@@ -65,7 +65,7 @@ pub(crate) fn install(startup_ready: bool) {
         Ok(subscriptions) => state.subscriptions = Some(subscriptions),
         Err(error) => {
             state.subscription_error.set(Some(error.to_string()));
-            tracing::error!(target: "lanpath_desktop_nsh::app_state",
+            tracing::error!(target: "lanpath::app_state",
                 "打开订阅业务失败：{error}");
         }
     }

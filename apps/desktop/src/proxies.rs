@@ -111,7 +111,7 @@ impl ProxiesService {
             .insert(group.to_owned(), member.to_owned());
         cfg.save()?;
         tracing::info!(
-            target: "lanpath_desktop_nsh::proxies",
+            target: "lanpath::proxies",
             group,
             member,
             "已切换策略组节点并持久化"
@@ -145,7 +145,7 @@ impl ProxiesService {
             push_clash_mode(endpoint.port, &endpoint.secret, &normalized).await?;
         }
         tracing::info!(
-            target: "lanpath_desktop_nsh::proxies",
+            target: "lanpath::proxies",
             mode = %normalized,
             "已更新代理运行模式"
         );

@@ -280,7 +280,7 @@ pub fn start_app(entries: BTreeMap<String, String>) -> (Headless, Arc<MemoryStor
     let config = EngineConfig {
         viewport: Size::new(Points(1100.0), Points(800.0)),
         storage: Some(storage.clone()),
-        ..EngineConfig::new(lanpath_desktop_nsh::root())
+        ..EngineConfig::new(lanpath::root())
     };
     let app = Headless::start(config).expect("start the headless app");
     (app, storage)
@@ -294,7 +294,7 @@ pub fn start_app_desktop(entries: BTreeMap<String, String>) -> (Headless, Arc<Me
     let mut config = EngineConfig {
         viewport: Size::new(Points(1100.0), Points(800.0)),
         storage: Some(storage.clone()),
-        ..EngineConfig::new(lanpath_desktop_nsh::root())
+        ..EngineConfig::new(lanpath::root())
     };
     config.environment.os = nsh_core::platform::Os::Linux;
     config.environment.idiom = nsh_core::platform::Idiom::Desktop;
@@ -308,7 +308,7 @@ pub fn start_gallery(entries: BTreeMap<String, String>) -> (Headless, Arc<Memory
     let config = EngineConfig {
         viewport: Size::new(Points(1100.0), Points(800.0)),
         storage: Some(storage.clone()),
-        ..EngineConfig::new(lanpath_desktop_nsh::gallery_root())
+        ..EngineConfig::new(lanpath::gallery_root())
     };
     let app = Headless::start(config).expect("start the headless gallery");
     (app, storage)
@@ -321,7 +321,7 @@ pub fn data_root() -> (tempfile::TempDir, BTreeMap<String, String>) {
     let dir = tempfile::tempdir().expect("create a temporary data root");
     let mut entries = BTreeMap::new();
     entries.insert(
-        "lanpath_desktop_nsh.data_dir".to_owned(),
+        "lanpath.data_dir".to_owned(),
         dir.path().to_string_lossy().into_owned(),
     );
     entries.insert("language".to_owned(), "zh-CN".to_owned());

@@ -1,6 +1,6 @@
-# Lanpath NSH Desktop
+# Lanpath Desktop
 
-`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，当前候选版本 `0.2.1-rc.2`），程序名为 `lanpath-desktop-nsh.exe`，应用标识为 `com.ybakiame.lanpath.desktop.nsh`。使用全新独立数据目录，不读取或迁移旧版客户端数据。
+`apps/desktop` 是 Lanpath 的纯 Rust 原生桌面应用（NSH 0.6.0，当前候选版本 `0.2.1-rc.2`），程序名为 `lanpath.exe`（Linux/macOS 为 `lanpath`），应用标识为 `com.ybakiame.lanpath`。
 
 Lanpath 帮助你将可信订阅转化为可用的本地代理：准备订阅与核心，经校验后启动，并独立查看核心运行状态与系统代理接管状态；排查问题时可结合策略、连接监控、规则、配置切片、诊断与日志快速定位。
 
@@ -18,17 +18,16 @@ Windows 使用原生 Rust / MSVC / CMake：
 
 ```powershell
 cargo build --locked --manifest-path apps/desktop/Cargo.toml
-.\apps\desktop\target\debug\lanpath-desktop-nsh.exe
+.\apps\desktop\target\debug\lanpath.exe
 ```
 
 ## 便携模式与数据目录
 
-在程序同级创建空文件 `lanpath.portable`，下次启动即使用同级 `data/`：
+在程序同级存在且当前进程可写入的 `data/` 文件夹时，启动即自动进入便携模式（无需额外标记文件）：
 
 ```text
 Lanpath/
-├── lanpath-desktop-nsh.exe
-├── lanpath.portable
+├── lanpath.exe
 └── data/
     ├── app.toml                  # 应用设置、本地入口/Clash API 与 [ui] 外观偏好
     ├── rules.toml                # 自定义分流规则
@@ -40,16 +39,16 @@ Lanpath/
     └── .cache/                   # 可重建缓存（订阅缓存、NSH 界面缓存等）
 ```
 
-路径解析始终以程序实际所在目录为准，不受终端或快捷方式工作目录影响；退出应用后可整体移动便携目录。
+路径解析始终以程序实际所在目录为准，不受终端或快捷方式工作目录影响；退出应用后可整体移动便携目录。若 `data/` 不存在、不是普通目录或当前进程无写入权限，则自动回退到平台标准数据目录。
 
-如需指定独立目录，可通过 `LANPATH_DESKTOP_DATA_DIR` 环境变量覆盖（优先级高于便携标记）：
+如需指定独立目录，可通过 `LANPATH_DATA_DIR` 环境变量覆盖（优先级最高）：
 
 ```powershell
-$env:LANPATH_DESKTOP_DATA_DIR = 'D:\LanpathData'
-.\lanpath-desktop-nsh.exe
+$env:LANPATH_DATA_DIR = 'D:\LanpathData'
+.\lanpath.exe
 ```
 
-未设置标记与覆盖时，Windows 默认使用 `%LOCALAPPDATA%\lanpath-desktop-nsh`，Linux 默认使用 `$XDG_DATA_HOME/lanpath-desktop-nsh`（或 `~/.local/share/lanpath-desktop-nsh`）。每个数据根持有独立进程锁，同一目录不支持多开；不同目录可并行隔离使用。
+未启用便携模式与环境变量覆盖时，基于 `etcetera` 使用平台原生标准数据目录：Windows 为 `%APPDATA%\Lanpath`，macOS 为 `~/Library/Application Support/Lanpath`，Linux 为 `$XDG_DATA_HOME/lanpath`（默认 `~/.local/share/lanpath`）。每个数据根持有独立进程锁，同一目录不支持多开；不同目录可并行隔离使用。
 
 ## 功能概览
 

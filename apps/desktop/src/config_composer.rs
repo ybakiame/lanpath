@@ -240,7 +240,7 @@ impl ConfigComposer {
             let content = serde_yaml::to_string(&value)?;
             let warning_count = warnings.len();
             tracing::info!(
-                target: "lanpath_desktop_nsh::config_composer",
+                target: "lanpath::config_composer",
                 "配置合成预览完成：Mihomo YAML，{node_count} 个节点，{warning_count} 条警告"
             );
             return Ok(ConfigPreview {
@@ -305,7 +305,7 @@ impl ConfigComposer {
         let content = serde_json::to_string_pretty(&value)?;
         let warning_count = warnings.len();
         tracing::info!(
-            target: "lanpath_desktop_nsh::config_composer",
+            target: "lanpath::config_composer",
             "配置合成预览完成：sing-box JSON，{node_count} 个节点，{warning_count} 条警告，缺失规则集 {} 个",
             missing_tags.len()
         );
