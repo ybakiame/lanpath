@@ -125,6 +125,7 @@ impl DataRoot {
         crate::storage_init::initialize(&path)?;
         fs::create_dir_all(path.join("logs"))?;
         fs::create_dir_all(path.join(".cache"))?;
+        fs::create_dir_all(path.join("runtime/db"))?;
         fs::create_dir_all(path.join("runtime/sing-box"))?;
         fs::create_dir_all(path.join("runtime/mihomo"))?;
         let id = identity::load_or_create(&path)?;
@@ -244,15 +245,17 @@ fn check_ancestors(path: &Path) -> LanpathResult<()> {
                 ancestor.display()
             )));
         }
+        let own_portable = location::is_own_portable_directory(ancestor)?;
         // 只探测元数据；绝不打开生产配置或种子数据。
         let production_marker = (depth != 0 || !owned_self)
             && (metadata_if_present(&ancestor.join("client.json"))?.is_some()
                 || (metadata_if_present(&ancestor.join(location::PORTABLE_MARKER))?.is_some()
-                    && !location::is_own_portable_directory(ancestor)?));
+                    && !own_portable));
+        let legacy_seed = metadata_if_present(&ancestor.join("seed"))?.is_some();
         let portable_layout = (metadata_if_present(&ancestor.join("Lanpath.exe"))?.is_some()
             || metadata_if_present(&ancestor.join("lanpath-app.exe"))?.is_some())
-            && (metadata_if_present(&ancestor.join("data"))?.is_some()
-                || metadata_if_present(&ancestor.join("seed"))?.is_some());
+            && ((metadata_if_present(&ancestor.join("data"))?.is_some() && !own_portable)
+                || legacy_seed);
         if production_marker || portable_layout {
             return Err(invalid(format!(
                 "拒绝生产/便携 Lanpath 祖先目录: {}",

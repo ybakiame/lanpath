@@ -294,7 +294,7 @@ fn experimental_form(state: OverwriteState) -> impl IntoElement {
                                 input(path_sig)
                                     .test_id("overwrite-exp-cache-path")
                                     .accessible_name(|| t!("overwrite.experimental.cache_path"))
-                                    .placeholder(|| "runtime/sing-box/cache.db".into())
+                                    .placeholder(|| "runtime/db/cache.db".into())
                                     .on_change(move |val| {
                                         path_sig.set(val.clone());
                                         mutate_cache_file(&path_write, |cf| {

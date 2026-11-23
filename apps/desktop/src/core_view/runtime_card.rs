@@ -75,18 +75,6 @@ pub(super) fn runtime_card() -> impl IntoElement {
             },
         ))
         .child(when(
-            move || command.get().result.is_some(),
-            move || {
-                alert_banner(
-                    AlertTone::Success,
-                    text(move || app_state::command_result_line(&command.get().result))
-                        .text_size(px(12.5))
-                        .text_color(move || theme().primary)
-                        .selectable(true),
-                )
-            },
-        ))
-        .child(when(
             move || command.get().error.is_some(),
             move || {
                 alert_banner(

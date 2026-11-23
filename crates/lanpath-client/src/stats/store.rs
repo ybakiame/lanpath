@@ -34,9 +34,10 @@ pub struct StatsStore {
 }
 
 impl StatsStore {
-    /// 打开（不存在则创建）`<data_dir>/stats.db`，执行 schema 初始化与过期清理。
-    pub async fn open(data_dir: &Path) -> LanpathResult<Self> {
-        let path = data_dir.join(STATS_DB_FILE);
+    /// 打开（不存在则创建）`<db_dir>/stats.db`，自动创建父目录并执行 schema 初始化与过期清理。
+    pub async fn open(db_dir: &Path) -> LanpathResult<Self> {
+        std::fs::create_dir_all(db_dir)?;
+        let path = db_dir.join(STATS_DB_FILE);
         let options = SqliteConnectOptions::new()
             .filename(&path)
             .create_if_missing(true)

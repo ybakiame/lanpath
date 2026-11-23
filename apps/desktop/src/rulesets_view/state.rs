@@ -59,7 +59,6 @@ pub(super) struct RulesetsState {
     pub(super) busy_id: Signal<Option<String>>,
     pub(super) busy_all: Signal<bool>,
     pub(super) error: Signal<Option<String>>,
-    pub(super) notice: Signal<Option<String>>,
     pub(super) confirm_delete: Signal<Option<(String, String)>>,
     pub(super) editor_open: Signal<bool>,
     pub(super) editing_id: Signal<Option<String>>,
@@ -95,7 +94,6 @@ impl RulesetsState {
             busy_id: signal(None),
             busy_all: signal(false),
             error: signal(error),
-            notice: signal(None),
             confirm_delete: signal(None),
             editor_open: signal(false),
             editing_id: signal(None),
@@ -191,7 +189,7 @@ impl RulesetsState {
             Ok(snapshot) => {
                 self.apply_snapshot(snapshot);
                 self.error.set(None);
-                self.notice.set(Some(t!("rulesets.saved")));
+                crate::ui::feedback::show_toast(t!("rulesets.saved"));
                 self.close_editor();
             }
             Err(err) => self.error.set(Some(err.to_string())),
@@ -208,7 +206,7 @@ impl RulesetsState {
                 self.apply_snapshot(snapshot);
                 self.confirm_delete.set(None);
                 self.error.set(None);
-                self.notice.set(Some(t!("rulesets.deleted")));
+                crate::ui::feedback::show_toast(t!("rulesets.deleted"));
             }
             Err(err) => {
                 self.confirm_delete.set(None);
@@ -227,7 +225,6 @@ impl RulesetsState {
         };
         self.busy_id.set(Some(id.clone()));
         self.error.set(None);
-        self.notice.set(None);
         self.spawn_work(async move {
             service
                 .update_one_remote(&id)
@@ -251,7 +248,6 @@ impl RulesetsState {
         };
         self.busy_all.set(true);
         self.error.set(None);
-        self.notice.set(None);
         self.spawn_work(async move {
             service
                 .update_all_remote()
@@ -275,8 +271,7 @@ impl RulesetsState {
             Ok((entry, snapshot)) => {
                 self.apply_snapshot(snapshot);
                 self.error.set(None);
-                self.notice
-                    .set(Some(t!("rulesets.market_added", tag = entry.tag)));
+                crate::ui::feedback::show_toast(t!("rulesets.market_added", tag = entry.tag));
                 self.update_one(entry.id, entry.tag);
             }
             Err(err) => self.error.set(Some(err.to_string())),
@@ -328,17 +323,17 @@ impl RulesetsState {
                                             t!("rulesets.update_failed", tag = tag)
                                         }
                                     };
-                                    done_inner.notice.set(Some(msg));
+                                    crate::ui::feedback::show_toast(msg);
                                 }
                                 Some(Ok(WorkResult::All { outcome, snapshot })) => {
                                     done_inner.apply_snapshot(snapshot);
                                     done_inner.error.set(None);
-                                    done_inner.notice.set(Some(t!(
+                                    crate::ui::feedback::show_toast(t!(
                                         "rulesets.update_all_done",
                                         updated = outcome.updated,
                                         skipped = outcome.skipped,
                                         failed = outcome.failed
-                                    )));
+                                    ));
                                 }
                                 Some(Err(err)) => done_inner.error.set(Some(err)),
                                 None => {}

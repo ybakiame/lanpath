@@ -114,6 +114,59 @@ fn copied_native_process_uses_own_portable_root_and_preserves_it_after_move() {
 }
 
 #[test]
+fn renamed_lanpath_exe_in_own_portable_directory_initializes_cleanly() {
+    let directory = tempfile::tempdir().unwrap();
+    let app_dir = directory.path().join("Lanpath");
+    fs::create_dir(&app_dir).unwrap();
+    let renamed = app_dir.join("Lanpath.exe");
+    fs::copy(std::env::current_exe().unwrap(), &renamed).unwrap();
+    fs::write(app_dir.join(PORTABLE_MARKER), b"").unwrap();
+
+    let run = || {
+        let output = Command::new(&renamed)
+            .args([
+                "--exact",
+                "data_root::location::tests::portable_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .current_dir(directory.path())
+            .env_remove(DATA_DIR_ENV)
+            .env("LANPATH_PORTABLE_EXPECT", app_dir.join("data"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    // 首次创建 data/ 及二次打开都应顺利通过祖先目录检查。
+    run();
+    run();
+    assert!(app_dir.join("data/runtime/db").is_dir());
+
+    // 若同目录存在旧版 Tauri 遗留 seed/ 目录，仍必须拒绝初始化。
+    fs::create_dir(app_dir.join("seed")).unwrap();
+    let rejected = Command::new(&renamed)
+        .args([
+            "--exact",
+            "data_root::location::tests::portable_child",
+            "--ignored",
+        ])
+        .current_dir(directory.path())
+        .env_remove(DATA_DIR_ENV)
+        .env("LANPATH_PORTABLE_EXPECT", app_dir.join("data"))
+        .output()
+        .unwrap();
+    assert!(
+        !rejected.status.success(),
+        "presence of legacy seed/ must still be rejected"
+    );
+}
+
+#[test]
 #[ignore = "invoked by copied_native_process with isolated executable and data directories"]
 fn portable_child() {
     let expected = PathBuf::from(std::env::var_os("LANPATH_PORTABLE_EXPECT").unwrap());

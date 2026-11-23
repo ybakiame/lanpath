@@ -11,10 +11,10 @@ mod display;
 mod model;
 
 pub(crate) use display::{
-    command_error_line, command_pending_line, command_result_line, core_error_line,
-    core_selection_line, core_tag, exit_error_line, proxy_ownership_line, proxy_preference_line,
-    proxy_recovery_visible, runtime_status_line, subscription_error_line,
-    subscription_summary_line, summary_error_short_line,
+    command_error_line, command_pending_line, core_error_line, core_selection_line, core_tag,
+    exit_error_line, proxy_ownership_line, proxy_preference_line, proxy_recovery_visible,
+    runtime_status_line, subscription_error_line, subscription_summary_line,
+    summary_error_short_line,
 };
 pub(crate) use model::*;
 
@@ -328,7 +328,13 @@ fn run_command(
                 command.busy = false;
                 command.kind = None;
                 match outcome {
-                    Ok(result) => command.result = Some(result),
+                    Ok(result) => {
+                        let toast_text = display::command_result_line(&Some(result.clone()));
+                        if !toast_text.is_empty() {
+                            crate::ui::feedback::show_toast(toast_text);
+                        }
+                        command.result = Some(result);
+                    }
                     Err(error) => command.error = Some(error),
                 }
             });

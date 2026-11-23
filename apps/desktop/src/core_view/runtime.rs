@@ -77,11 +77,11 @@ fn apply_proxy_enabled(state: CorePageState, enabled: bool) {
     app_state::refresh_proxy_preference(&app_state::current());
     state.error.set(None);
     if !app_state::current().status.get().running {
-        state.notice.set(Some(if enabled {
-            t!("core.proxy.saved_next_start").to_string()
+        crate::ui::feedback::show_toast(if enabled {
+            t!("core.proxy.saved_next_start")
         } else {
-            t!("core.proxy.saved_off").to_string()
-        }));
+            t!("core.proxy.saved_off")
+        });
         return;
     }
     // 运行中切换走共享命令的安全启停周期（App 级单飞，切页不取消）。

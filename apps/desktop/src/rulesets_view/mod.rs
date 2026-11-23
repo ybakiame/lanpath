@@ -40,7 +40,6 @@ pub(crate) fn rulesets_page() -> impl IntoElement {
     let items = state.items;
     let group_list = state.groups;
     let error = state.error;
-    let notice = state.notice;
     let editor_open = state.editor_open;
     let confirm_delete = state.confirm_delete;
 
@@ -202,17 +201,6 @@ pub(crate) fn rulesets_page() -> impl IntoElement {
                                 text(move || error.get().unwrap_or_default())
                                     .text_size(px(12.5))
                                     .text_color(move || theme().destructive),
-                            )
-                        },
-                    ))
-                    .child(when(
-                        move || notice.get().is_some(),
-                        move || {
-                            alert_banner(
-                                AlertTone::Success,
-                                text(move || notice.get().unwrap_or_default())
-                                    .text_size(px(12.5))
-                                    .text_color(move || theme().foreground),
                             )
                         },
                     ))

@@ -110,7 +110,7 @@ fn run_add(state: &SubscriptionPageState, name: String, url: String, user_agent:
             // （清消息、发序号），再挂中间提示，刷新完成的反馈仍可上屏；
             // 单飞被拒（有别的刷新在途）时明确提示稍后手动刷新。
             if super::spawn_refresh(state.clone(), subscription.id) {
-                state.notice.set(Some(t!("subscription.adding_refreshing")));
+                state.post_notice(t!("subscription.adding_refreshing"));
             } else {
                 state.post_notice(t!("subscription.added_refresh_busy"));
             }

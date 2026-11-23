@@ -41,9 +41,8 @@ pub(super) fn export_card(state: BackupPageState) -> impl IntoElement {
                     .disabled(move || copy_password.get().is_empty())
                     .on_press(move || {
                         set_clipboard(copy_state.export_password.get());
-                        copy_state
-                            .export_status
-                            .set(Some(t!("backup.password_copied")));
+                        copy_state.export_status.set(None);
+                        crate::ui::feedback::show_toast(t!("backup.password_copied"));
                     }),
             )
             .child(when(
@@ -59,11 +58,11 @@ pub(super) fn export_card(state: BackupPageState) -> impl IntoElement {
         move || export_status.get().is_some(),
         move || {
             alert_banner(
-                AlertTone::Info,
+                AlertTone::Danger,
                 text(move || export_status.get().unwrap_or_default())
                     .test_id("backup-export-status")
                     .text_size(px(12.5))
-                    .text_color(move || theme().foreground),
+                    .text_color(move || theme().destructive),
             )
         },
     ))
@@ -106,9 +105,10 @@ fn generate_button(state: BackupPageState) -> impl IntoElement {
             state
                 .export_password
                 .set(lanpath_client::backup::generate_password());
-            state.export_status.set(Some(
-                "已生成随机强密码：请立即保存到密码管理器，导出成功后此处会清空".to_owned(),
-            ));
+            state.export_status.set(None);
+            crate::ui::feedback::show_toast(
+                "已生成随机强密码：请立即保存到密码管理器，导出成功后此处会清空",
+            );
         })
         .test_id("backup-generate-password")
         .label(|| t!("product.action.generate_password"))
@@ -177,9 +177,11 @@ fn request_export(state: BackupPageState) {
                     Ok(None) => {}
                     Ok(Some(path)) => {
                         state.export_password.set(String::new());
-                        state
-                            .export_status
-                            .set(Some(format!("已导出加密备份：{}", path.display())));
+                        state.export_status.set(None);
+                        crate::ui::feedback::show_toast(format!(
+                            "已导出加密备份：{}",
+                            path.display()
+                        ));
                     }
                     Err(error) => state.export_status.set(Some(format!("导出失败:{error}"))),
                 }

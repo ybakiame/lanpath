@@ -109,7 +109,7 @@ pub(crate) struct CoreRuntime {
     proxy_takeover_consent: AtomicBool,
     /// 连接实时追踪句柄（核心运行且启用 Clash API 时拉起，停止/退出时回收）。
     tracker: tokio::sync::Mutex<Option<lanpath_client::ConnectionTrackerHandle>>,
-    /// 本地 SQLite 流量统计库（惰性打开 `<data_root>/stats.db`）。
+    /// 本地 SQLite 流量统计库（惰性打开 `<data_root>/runtime/db/stats.db`，不纳入备份）。
     stats: tokio::sync::OnceCell<Arc<lanpath_client::StatsStore>>,
     /// 测试注入的校验超时（`None` 用校验器默认 20 秒）。
     #[cfg(test)]

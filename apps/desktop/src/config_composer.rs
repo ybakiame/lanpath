@@ -341,7 +341,7 @@ fn panel_features(
         rule_mode: config.normalized_rule_mode().to_owned(),
         ipv6_enabled: config.ipv6_enabled,
         dns_fakeip_enabled: config.dns_fakeip_enabled,
-        data_dir: root.join("runtime/sing-box").to_string_lossy().into_owned(),
+        data_dir: root.join("runtime/db").to_string_lossy().into_owned(),
         dns_mode,
         github_proxy_prefix: config.github_proxy_prefix.clone(),
     }

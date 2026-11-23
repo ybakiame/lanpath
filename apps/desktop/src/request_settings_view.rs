@@ -42,7 +42,6 @@ struct RequestSettingsState {
     saved: Signal<Option<RequestSettingsDocument>>,
     dirty: Signal<bool>,
     error: Signal<Option<String>>,
-    notice: Signal<Option<String>>,
     confirm_discard: Signal<bool>,
 }
 
@@ -60,7 +59,6 @@ impl RequestSettingsState {
                     saved: signal(None),
                     dirty: signal(false),
                     error: signal(None),
-                    notice: signal(None),
                     confirm_discard: signal(false),
                 };
                 state.apply_saved(loaded);
@@ -74,7 +72,6 @@ impl RequestSettingsState {
                 saved: signal(None),
                 dirty: signal(false),
                 error: signal(Some(format!("打开数据根失败:{error}"))),
-                notice: signal(None),
                 confirm_discard: signal(false),
             },
         }
@@ -120,13 +117,12 @@ impl RequestSettingsState {
         match service.save(&self.draft_document()) {
             Ok(saved) => {
                 self.apply_saved(Ok(saved));
-                self.notice.set(Some(
-                    "请求设置已保存；下一次订阅刷新与远程资源请求将使用新策略".to_owned(),
-                ));
+                crate::ui::feedback::show_toast(
+                    "请求设置已保存；下一次订阅刷新与远程资源请求将使用新策略",
+                );
             }
             Err(error) => {
                 // 校验失败：共享层错误不含凭据/完整 URL；草稿保留待修改。
-                self.notice.set(None);
                 self.error.set(Some(format!("保存请求设置失败:{error}")));
             }
         }
@@ -149,7 +145,7 @@ impl RequestSettingsState {
             return;
         };
         self.apply_saved(service.load());
-        self.notice.set(Some("已重新载入保存的请求设置".to_owned()));
+        crate::ui::feedback::show_toast("已重新载入保存的请求设置");
     }
 }
 
@@ -172,7 +168,6 @@ pub(crate) fn request_settings_page() -> impl IntoElement {
     let prefix_dirty = state.clone();
     let radio_state = state.clone();
     let error = state.error;
-    let notice = state.notice;
     let confirm = state.confirm_discard;
     let discard = state.clone();
     scroll().flex_1().min_h(px(0.0)).child(
@@ -273,17 +268,6 @@ pub(crate) fn request_settings_page() -> impl IntoElement {
                             .text_size(px(12.5))
                             .text_color(move || theme().destructive)
                             .selectable(true),
-                    )
-                },
-            ))
-            .child(when(
-                move || notice.get().is_some(),
-                move || {
-                    alert_banner(
-                        AlertTone::Success,
-                        text(move || notice.get().unwrap_or_default())
-                            .text_size(px(12.5))
-                            .text_color(move || theme().foreground),
                     )
                 },
             ))

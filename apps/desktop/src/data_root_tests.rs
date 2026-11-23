@@ -28,6 +28,7 @@ fn absent_and_empty_roots_become_canonical_persistent_owned_directories() {
         assert!(path.join(LOCK_FILE).is_file());
         assert!(path.join("logs").is_dir());
         assert!(path.join(".cache").is_dir());
+        assert!(path.join("runtime/db").is_dir());
         assert!(path.join("runtime/sing-box").is_dir());
         assert!(path.join("runtime/mihomo").is_dir());
         // 统一 TOML 布局随初始化创建。

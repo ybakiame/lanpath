@@ -8,6 +8,7 @@ use crate::rulesets_view::{GroupSheetController, groups_sheet};
 use crate::ui::{
     BadgeVariant, badge,
     button::{ButtonVariant, button},
+    feedback::show_toast,
     input::input,
     layout::{AlertTone, alert_banner, page_header, section_title},
 };
@@ -34,7 +35,6 @@ pub(super) struct State {
     editing: Signal<Option<String>>,
     search: Signal<String>,
     error: Signal<Option<String>>,
-    saved: Signal<bool>,
     pending_remove: Signal<Option<LocalRule>>,
 }
 
@@ -74,7 +74,6 @@ impl State {
             editing: signal(None),
             search: signal(String::new()),
             error: signal(error),
-            saved: signal(false),
             pending_remove: signal(None),
         }
     }
@@ -88,7 +87,7 @@ impl State {
             Ok(rules) => {
                 self.rules.set(rules);
                 self.error.set(None);
-                self.saved.set(true);
+                show_toast(t!("rules.saved"));
             }
             Err(error) => self.error.set(Some(error.to_string())),
         }
@@ -128,7 +127,6 @@ impl State {
         self.mode.set(1);
         self.batch.set(rule_line(rule));
         self.editing.set(Some(rule.id.clone()));
-        self.saved.set(false);
     }
 }
 
@@ -177,17 +175,6 @@ pub(crate) fn rules_page(seed: Signal<String>) -> impl IntoElement {
                     text(move || error.get().unwrap_or_default())
                         .text_size(px(12.5))
                         .text_color(move || theme().destructive),
-                )
-            },
-        ))
-        .child(when(
-            move || state.saved.get(),
-            || {
-                alert_banner(
-                    AlertTone::Success,
-                    text(|| t!("rules.saved"))
-                        .text_size(px(12.5))
-                        .text_color(move || theme().color("success").unwrap_or(theme().primary)),
                 )
             },
         ))

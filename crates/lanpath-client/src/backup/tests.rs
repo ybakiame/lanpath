@@ -435,12 +435,23 @@ fn singbox_overwrite_slices_and_rules_roundtrip_and_relocate_paths() {
         }])
         .unwrap();
 
+    // 运行时 SQLite 数据库（runtime/db/stats.db、cache.db）不纳入备份。
+    let runtime_db = source.path().join("runtime/db");
+    std::fs::create_dir_all(&runtime_db).unwrap();
+    std::fs::write(runtime_db.join("stats.db"), b"sqlite-stats-bytes").unwrap();
+    std::fs::write(runtime_db.join("cache.db"), b"sqlite-cache-bytes").unwrap();
+
     let snapshot = capture(source.path(), None).unwrap();
     assert!(snapshot.files.contains_key("overwrite/sing-box/log.json"));
     assert!(snapshot.files.contains_key("overwrite/sing-box/route.json"));
     assert!(snapshot.files.contains_key("rules.toml"));
     assert!(snapshot.files.contains_key("rulesets/manifest.json"));
     assert!(snapshot.files.contains_key("rulesets/files/rs-backup.json"));
+    assert!(
+        !snapshot.files.keys().any(|k| k.starts_with("runtime/")),
+        "runtime/db/*.db must never be backed up: {:?}",
+        snapshot.files.keys().collect::<Vec<_>>()
+    );
     prepare_restore(target.path(), snapshot, "overwrite-backup-pass", None).unwrap();
     apply_pending(target.path()).unwrap();
 

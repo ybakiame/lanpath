@@ -88,7 +88,6 @@ pub(super) struct ProfilesPageState {
     service: Option<Profiles>,
     list: Signal<Vec<Profile>>,
     list_error: Signal<Option<String>>,
-    notice: Signal<Option<String>>,
     pending_remove: Signal<Option<Profile>>,
     edit: ProfileEditState,
 }
@@ -101,7 +100,6 @@ impl ProfilesPageState {
                     service: Some(service),
                     list: signal(Vec::new()),
                     list_error: signal(None),
-                    notice: signal(None),
                     pending_remove: signal(None),
                     edit: ProfileEditState::new(),
                 };
@@ -112,7 +110,6 @@ impl ProfilesPageState {
                 service: None,
                 list: signal(Vec::new()),
                 list_error: signal(Some(format!("打开数据根失败:{error}"))),
-                notice: signal(None),
                 pending_remove: signal(None),
                 edit: ProfileEditState::new(),
             },
@@ -134,11 +131,10 @@ impl ProfilesPageState {
 
     fn post_notice(&self, text: String) {
         self.list_error.set(None);
-        self.notice.set(Some(text));
+        crate::ui::feedback::show_toast(text);
     }
 
     fn post_error(&self, text: String) {
-        self.notice.set(None);
         self.list_error.set(Some(text));
     }
 }

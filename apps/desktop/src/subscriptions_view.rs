@@ -116,7 +116,6 @@ pub(super) struct SubscriptionPageState {
     active: Signal<Option<Uuid>>,
     list_error: Signal<Option<String>>,
     form_error: Signal<Option<String>>,
-    notice: Signal<Option<String>>,
     /// 在途刷新的订阅 id（全局最多一个）：业务层互斥串行化写盘，这里
     /// 单飞防并发刷新写回与任务句柄竞争，兼作忙碌提示。
     refreshing: Signal<Vec<Uuid>>,
@@ -160,7 +159,6 @@ impl SubscriptionPageState {
                     active: signal(None),
                     list_error: signal(None),
                     form_error: signal(None),
-                    notice: signal(None),
                     refreshing: signal(initial_activity.into_iter().collect()),
                     refresh_activity_revision: activity_revision,
                     serial: signal(0),
@@ -184,7 +182,6 @@ impl SubscriptionPageState {
                 active: signal(None),
                 list_error: signal(Some(format!("打开数据根失败:{error}"))),
                 form_error: signal(None),
-                notice: signal(None),
                 refreshing: signal(Vec::new()),
                 refresh_activity_revision: 0,
                 serial: signal(0),
@@ -239,14 +236,13 @@ impl SubscriptionPageState {
         next
     }
 
-    /// 同步操作结果反馈：总是上屏（引擎线程内与异步完成严格有序）。
+    /// 同步操作结果反馈：经全局 Toast 上屏，不占用抽屉文档流。
     fn post_notice(&self, text: String) {
         self.list_error.set(None);
-        self.notice.set(Some(text));
+        crate::ui::feedback::show_toast(text);
     }
 
     fn post_error(&self, text: String) {
-        self.notice.set(None);
         self.list_error.set(Some(text));
     }
 
@@ -272,7 +268,6 @@ impl SubscriptionPageState {
         self.refreshing.update(|refreshing| refreshing.push(id));
         let token = self.bump_serial();
         self.list_error.set(None);
-        self.notice.set(None);
         Some(token)
     }
 

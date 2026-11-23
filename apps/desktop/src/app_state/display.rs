@@ -33,6 +33,35 @@ fn stage_label(stage: RuntimeStage) -> String {
     })
 }
 
+/// 将运行秒数拆分为 `(天, 时, 分, 秒)`。
+pub(crate) fn split_uptime(secs: u64) -> (u64, u64, u64, u64) {
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let mins = (secs % 3_600) / 60;
+    let rem_secs = secs % 60;
+    (days, hours, mins, rem_secs)
+}
+
+/// 将运行秒数格式化为可读的天/时/分/秒（按语言自动切换单位）。
+pub(crate) fn format_uptime(secs: u64) -> String {
+    let (days, hours, mins, rem_secs) = split_uptime(secs);
+    if days > 0 {
+        t!(
+            "runtime.uptime.dhms",
+            d = days,
+            h = hours,
+            m = mins,
+            s = rem_secs
+        )
+    } else if hours > 0 {
+        t!("runtime.uptime.hms", h = hours, m = mins, s = rem_secs)
+    } else if mins > 0 {
+        t!("runtime.uptime.ms", m = mins, s = rem_secs)
+    } else {
+        t!("runtime.uptime.s", s = rem_secs)
+    }
+}
+
 /// 一次运行会话的摘要（类型、端口、已运行时间）。
 fn session_summary(session: &SessionSummary) -> String {
     let api = session
@@ -45,7 +74,7 @@ fn session_summary(session: &SessionSummary) -> String {
         version = core_tag(&session.version),
         mixed = session.mixed_port,
         api = api,
-        uptime = session.uptime_secs
+        uptime = format_uptime(session.uptime_secs)
     )
 }
 
@@ -258,5 +287,18 @@ mod tests {
             false,
             Some(Ok(SystemProxyOwnership::RecoveryRequired))
         )));
+    }
+
+    #[test]
+    fn split_uptime_breaks_down_days_hours_minutes_and_seconds() {
+        assert_eq!(split_uptime(0), (0, 0, 0, 0));
+        assert_eq!(split_uptime(45), (0, 0, 0, 45));
+        assert_eq!(split_uptime(60), (0, 0, 1, 0));
+        assert_eq!(split_uptime(192), (0, 0, 3, 12));
+        assert_eq!(split_uptime(3_600), (0, 1, 0, 0));
+        assert_eq!(split_uptime(7_512), (0, 2, 5, 12));
+        assert_eq!(split_uptime(86_400), (1, 0, 0, 0));
+        // 1 天 2 时 5 分 12 秒 = 86400 + 7200 + 300 + 12 = 93912
+        assert_eq!(split_uptime(93_912), (1, 2, 5, 12));
     }
 }

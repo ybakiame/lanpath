@@ -34,7 +34,9 @@ Lanpath/
     ├── rules.toml                # 自定义分流规则
     ├── overwrite/sing-box/       # 分段配置切片 (log/dns/route/outbounds/experimental.json)
     ├── rulesets/                 # 受管规则集清单 manifest.json 与 files/ 缓存
-    ├── runtime/<core>/           # 运行时合成配置 config.{json,yaml} 与 <core>.pid
+    ├── runtime/
+    │   ├── db/                   # 运行时 SQLite 数据库（stats.db / cache.db，不纳入备份）
+    │   └── <core>/               # 运行时合成配置 config.{json,yaml} 与 <core>.pid
     └── .cache/                   # 可重建缓存（订阅缓存、NSH 界面缓存等）
 ```
 

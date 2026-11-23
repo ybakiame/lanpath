@@ -96,7 +96,6 @@ struct CorePageState {
     busy: Signal<bool>,
     stage: Signal<Option<String>>,
     error: Signal<Option<String>>,
-    notice: Signal<Option<String>>,
     pending_delete: Signal<Option<(String, PathBuf)>>,
     task: Stored<Option<Spawned<()>>>,
     /// 页面初始化时的活动版本基线。必须与初始 activity 在同一构造流程中
@@ -156,7 +155,6 @@ impl CorePageState {
             busy: signal(initial_activity.is_some()),
             stage: signal(initial_activity.as_ref().map(activity_stage)),
             error: signal(error),
-            notice: signal(None),
             pending_delete: signal(None),
             task: stored(None),
             shared_activity_revision: initial_activity_revision,
@@ -186,7 +184,6 @@ impl CorePageState {
         }
         self.busy.set(true);
         self.error.set(None);
-        self.notice.set(None);
         self.stage.set(Some(label.to_owned()));
         true
     }
@@ -415,7 +412,9 @@ fn spawn_work<F>(
                                 done.error.set(None);
                                 app_state::refresh_active_core(&app_state::current());
                                 done.reload_local();
-                                done.notice.set(notice);
+                                if let Some(msg) = notice {
+                                    crate::ui::feedback::show_toast(msg);
+                                }
                             }
                             Some(Err(message)) => {
                                 // 失败保留旧列表与旧选中，只显示真实错误。

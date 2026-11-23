@@ -112,7 +112,11 @@ subscription.source_load_failed: 读取订阅原文失败:%{error}
 
 runtime.api_port: API %{port}
 runtime.api_off: API 关闭
-runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · 已运行 %{uptime} 秒"
+runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · 已运行 %{uptime}"
+runtime.uptime.s: "%{s} 秒"
+runtime.uptime.ms: "%{m} 分 %{s} 秒"
+runtime.uptime.hms: "%{h} 时 %{m} 分 %{s} 秒"
+runtime.uptime.dhms: "%{d} 天 %{h} 时 %{m} 分 %{s} 秒"
 runtime.status.starting: 正在启动
 runtime.status.stopping: 正在停止
 runtime.status.operation: "%{operation}…"

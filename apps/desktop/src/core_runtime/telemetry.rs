@@ -1,7 +1,7 @@
 //! 运行时连接追踪与本地统计存储衔接。
 //!
 //! 核心启动并启用 Clash API 后自动拉起 `ConnectionTrackerHandle`（WS 推送优先，
-//! HTTP 轮询兜底），将增量字节与关闭连接持久化到 `<data_root>/stats.db`；
+//! HTTP 轮询兜底），将增量字节与关闭连接持久化到 `<data_root>/runtime/db/stats.db`；
 //! 核心停止、异常退出或运行时释放时及时终止追踪任务。
 
 use std::sync::Arc;
@@ -14,12 +14,12 @@ use lanpath_common::LanpathResult;
 use super::CoreRuntime;
 
 impl CoreRuntime {
-    /// 获取或惰性打开本数据根下的 SQLite 流量统计库。
+    /// 获取或惰性打开本数据根下的 SQLite 流量统计库（位于 `runtime/db/stats.db`，不纳入备份）。
     pub(crate) async fn stats_store(&self) -> LanpathResult<Arc<StatsStore>> {
-        let root = self.root.path().to_path_buf();
+        let db_dir = self.root.path().join("runtime/db");
         let store = self
             .stats
-            .get_or_try_init(|| async move { StatsStore::open(&root).await.map(Arc::new) })
+            .get_or_try_init(|| async move { StatsStore::open(&db_dir).await.map(Arc::new) })
             .await?;
         Ok(Arc::clone(store))
     }

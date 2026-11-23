@@ -26,7 +26,6 @@ pub(crate) struct GroupSheetController {
     pub(super) draft_members: Signal<Vec<String>>,
     pub(super) pending_delete: Signal<Option<String>>,
     error: Signal<Option<String>>,
-    notice: Signal<Option<String>>,
 }
 
 impl GroupSheetController {
@@ -44,13 +43,11 @@ impl GroupSheetController {
             draft_members: signal(Vec::new()),
             pending_delete: signal(None),
             error: signal(None),
-            notice: signal(None),
         }
     }
 
     pub(crate) fn open_panel(&self) {
         self.error.set(None);
-        self.notice.set(None);
         self.pending_delete.set(None);
         self.refresh_from_disk();
         self.retained.set(true);
@@ -132,7 +129,7 @@ impl GroupSheetController {
                 self.items.set(snapshot.items);
                 self.groups.set(snapshot.groups);
                 self.error.set(None);
-                self.notice.set(Some(t!("rulesets.group.saved")));
+                crate::ui::feedback::show_toast(t!("rulesets.group.saved"));
                 self.close_editor();
             }
             Err(err) => self.error.set(Some(err.to_string())),
@@ -150,7 +147,7 @@ impl GroupSheetController {
                 self.groups.set(snapshot.groups);
                 self.pending_delete.set(None);
                 self.error.set(None);
-                self.notice.set(Some(t!("rulesets.group.deleted")));
+                crate::ui::feedback::show_toast(t!("rulesets.group.deleted"));
             }
             Err(err) => {
                 self.pending_delete.set(None);
@@ -195,7 +192,6 @@ fn sheet_body(ctrl: GroupSheetController) -> AnyElement {
     let groups = ctrl.groups;
     let editor_open = ctrl.editor_open;
     let error = ctrl.error;
-    let notice = ctrl.notice;
     let add_ctrl = ctrl.clone();
     let empty_add = ctrl.clone();
     let editor_ctrl = ctrl.clone();
@@ -235,17 +231,6 @@ fn sheet_body(ctrl: GroupSheetController) -> AnyElement {
                     text(move || error.get().unwrap_or_default())
                         .text_size(px(12.5))
                         .text_color(move || theme().destructive),
-                )
-            },
-        ))
-        .child(when(
-            move || notice.get().is_some(),
-            move || {
-                alert_banner(
-                    AlertTone::Success,
-                    text(move || notice.get().unwrap_or_default())
-                        .text_size(px(12.5))
-                        .text_color(move || theme().foreground),
                 )
             },
         ))

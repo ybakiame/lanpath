@@ -14,9 +14,7 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
     let count_state = state.clone();
     let empty_state = state.clone();
     let message_state = state.clone();
-    let notice_state = message_state.clone();
     let list_error = message_state.list_error;
-    let notice = notice_state.notice;
     let busy_show = state.clone();
     let row_state = state.clone();
     let remove_dialog_state = state.clone();
@@ -58,13 +56,6 @@ pub(super) fn subscription_list(state: SubscriptionPageState) -> impl IntoElemen
                     move || {
                         text(move || message_state.list_error.get().unwrap_or_default())
                             .text_color(move || theme().destructive)
-                    },
-                ))
-                .child(when(
-                    move || notice.get().is_some(),
-                    move || {
-                        text(move || notice_state.notice.get().unwrap_or_default())
-                            .text_color(move || theme().muted_foreground)
                     },
                 ))
                 .child(when(

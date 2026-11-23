@@ -14,7 +14,6 @@ use super::ProfilesPageState;
 pub(super) fn profile_list(state: ProfilesPageState) -> impl IntoElement {
     let rows = state.list;
     let error = state.list_error;
-    let notice = state.notice;
     let build = state.clone();
     let remove = state;
     view()
@@ -35,17 +34,6 @@ pub(super) fn profile_list(state: ProfilesPageState) -> impl IntoElement {
                     text(move || error.get().unwrap_or_default())
                         .text_size(px(12.5))
                         .text_color(move || theme().destructive),
-                )
-            },
-        ))
-        .child(when(
-            move || notice.get().is_some(),
-            move || {
-                alert_banner(
-                    AlertTone::Info,
-                    text(move || notice.get().unwrap_or_default())
-                        .text_size(px(12.5))
-                        .text_color(move || theme().foreground),
                 )
             },
         ))

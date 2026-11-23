@@ -112,7 +112,11 @@ subscription.source_load_failed: "Failed to read subscription source: %{error}"
 
 runtime.api_port: API %{port}
 runtime.api_off: API off
-runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · up %{uptime}s"
+runtime.session_summary: "%{core_type} %{version} · mixed %{mixed} · %{api} · up %{uptime}"
+runtime.uptime.s: "%{s}s"
+runtime.uptime.ms: "%{m}m %{s}s"
+runtime.uptime.hms: "%{h}h %{m}m %{s}s"
+runtime.uptime.dhms: "%{d}d %{h}h %{m}m %{s}s"
 runtime.status.starting: Starting
 runtime.status.stopping: Stopping
 runtime.status.operation: "%{operation}…"

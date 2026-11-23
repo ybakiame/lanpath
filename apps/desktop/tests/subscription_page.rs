@@ -574,7 +574,11 @@ fn refresh_is_single_in_flight_globally_and_recovers_afterwards() {
     add_subscription(&mut app, "甲", &server.url("/a.yaml"));
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
+    app.wait_for_gone("正在刷新订阅…", Duration::from_secs(10))
+        .unwrap();
     add_subscription(&mut app, "乙", &server.url("/b.yaml"));
+    app.wait_for_gone("正在刷新订阅…", Duration::from_secs(10))
+        .unwrap();
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
     assert_eq!(server.count_path("/a.yaml"), 1);
@@ -584,6 +588,8 @@ fn refresh_is_single_in_flight_globally_and_recovers_afterwards() {
     app.press("id:subscription-row-甲 >> text:刷新").unwrap();
     app.wait_for("正在刷新订阅…").unwrap();
     app.press("id:subscription-row-乙 >> text:刷新").unwrap();
+    app.wait_for_gone("正在刷新订阅…", Duration::from_secs(10))
+        .unwrap();
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
     assert_eq!(server.count_path("/a.yaml"), 2);
@@ -591,10 +597,11 @@ fn refresh_is_single_in_flight_globally_and_recovers_afterwards() {
     let seen = texts(&app);
     assert!(!seen.contains(&"正在刷新订阅…"), "{seen:?}");
 
-    // 完成后第二个订阅可以刷新。按“刷新”会清掉旧完成提示，因此等到
-    // 提示重新出现即本轮完成（等待过程持续驱动引擎）。
+    // 完成后第二个订阅可以刷新；等待在途提示消失确认本轮真正完成。
     app.press("id:subscription-row-乙 >> text:刷新").unwrap();
     app.wait_for("正在刷新订阅…").unwrap();
+    app.wait_for_gone("正在刷新订阅…", Duration::from_secs(10))
+        .unwrap();
     app.wait_for_within("text:/刷新完成：2 个节点/", Duration::from_secs(10))
         .unwrap();
     assert_eq!(server.count_path("/b.yaml"), 2);

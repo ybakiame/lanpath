@@ -118,18 +118,6 @@ pub(super) fn header(state: AppState) -> AnyElement {
                 )
             },
         ))
-        .child(when(
-            move || command.get().result.is_some(),
-            move || {
-                alert_banner(
-                    AlertTone::Info,
-                    text(move || app_state::command_result_line(&command.get().result))
-                        .text_size(px(12.5))
-                        .text_color(move || theme().foreground)
-                        .selectable(true),
-                )
-            },
-        ))
         .into_element()
 }
 

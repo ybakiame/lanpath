@@ -457,7 +457,7 @@ fn core_summary_failure_keeps_last_value_and_surfaces_error() {
     );
 }
 
-/// 已有命令结果与运行状态在语言切换后重新翻译，不保留旧语言快照。
+/// 运行状态与后续命令 Toast 随语言切换实时更新，不保留旧语言快照。
 #[test]
 fn runtime_result_and_status_follow_language_changes() {
     let (dir, entries) = data_root();
@@ -480,11 +480,6 @@ fn runtime_result_and_status_follow_language_changes() {
     app.press("id:language-en >> text:English").unwrap();
     app.wait_for("Overview").unwrap();
     app.press("id:nav-overview >> role:button").unwrap();
-    app.wait_for_within(
-        "text:/Validated \\(binary check passed\\) and started: sing-box v1.2.3/",
-        Duration::from_secs(10),
-    )
-    .unwrap();
     app.wait_for_within("text:/Running: sing-box v1.2.3/", Duration::from_secs(10))
         .unwrap();
     assert!(

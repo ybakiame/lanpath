@@ -20,7 +20,6 @@ struct DiskState {
     selected: Signal<Option<String>>,
     tail: Signal<String>,
     error: Signal<Option<String>>,
-    exported: Signal<Option<String>>,
     exporting: Signal<bool>,
 }
 
@@ -79,7 +78,6 @@ pub(super) fn disk_logs(service: Arc<LogService>, io_busy: Signal<bool>) -> impl
         selected: signal(None),
         tail: signal(String::new()),
         error: signal(None),
-        exported: signal(None),
         exporting: io_busy,
     };
     state.refresh();
@@ -174,18 +172,6 @@ pub(super) fn disk_logs(service: Arc<LogService>, io_busy: Signal<bool>) -> impl
                 )
                 .child(crate::ui::data::log_viewer(tail.tail)),
         )
-        .child(when(
-            move || tail.exported.get().is_some(),
-            move || {
-                let exported = tail.exported;
-                alert_banner(
-                    AlertTone::Success,
-                    text(move || format!("已导出：{}", exported.get().unwrap_or_default()))
-                        .text_size(px(12.5))
-                        .text_color(move || theme().foreground),
-                )
-            },
-        ))
 }
 
 fn disk_file_row(state: DiskState, item: ReadSignal<String>) -> impl IntoElement {
@@ -250,11 +236,10 @@ fn request_export(state: DiskState, task: Stored<Option<Spawned<()>>>) {
             match result {
                 None => {}
                 Some(Ok(path)) => {
-                    state.exported.set(Some(path.display().to_string()));
+                    crate::ui::feedback::show_toast(format!("已导出：{}", path.display()));
                     state.error.set(None);
                 }
                 Some(Err(error)) => {
-                    state.exported.set(None);
                     state.error.set(Some(format!("导出失败:{error}")));
                 }
             }

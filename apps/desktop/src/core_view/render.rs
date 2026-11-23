@@ -21,7 +21,6 @@ pub(crate) fn core_page() -> impl IntoElement {
     let state = CorePageState::new();
     spawn_inventory_activity_monitor(state.clone());
     let inventory = state.clone();
-    let notice_state = state.clone();
     let error_state = state.clone();
     let proxy_state = state.clone();
     view()
@@ -37,18 +36,6 @@ pub(crate) fn core_page() -> impl IntoElement {
                     .child(crate::ui::page_header(
                         || t!("nav.core"),
                         || t!("core.subtitle"),
-                    ))
-                    .child(when(
-                        move || notice_state.notice.get().is_some(),
-                        move || {
-                            let notice = notice_state.notice;
-                            alert_banner(
-                                AlertTone::Info,
-                                text(move || notice.get().unwrap_or_default())
-                                    .text_size(px(13.0))
-                                    .text_color(move || theme().foreground),
-                            )
-                        },
                     ))
                     .child(when(
                         move || error_state.error.get().is_some(),
